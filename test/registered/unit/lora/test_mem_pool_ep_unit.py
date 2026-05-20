@@ -346,6 +346,7 @@ class TestPoolInitPicksUpEpContext(unittest.TestCase):
         ep_size: int,
         ep_rank: int,
         keeps_global: bool,
+        has_local_lora_module: bool = False,
         num_experts: int = 8,
         moe_tp_size: int = 1,
         moe_tp_rank: int = 0,
@@ -367,6 +368,10 @@ class TestPoolInitPicksUpEpContext(unittest.TestCase):
             mock.patch(
                 "sglang.srt.lora.mem_pool._moe_runner_keeps_global_expert_ids",
                 return_value=keeps_global,
+            ),
+            mock.patch(
+                "sglang.srt.lora.mem_pool._has_moe_lora_module_with_local_expert_ids",
+                return_value=has_local_lora_module,
             ),
             mock.patch.object(LoRAMemoryPool, "init_buffers", lambda self, _m: None),
         ):
@@ -403,14 +408,28 @@ class TestPoolInitPicksUpEpContext(unittest.TestCase):
         self.assertEqual(pool.moe_ep_rank, 2)
         self.assertTrue(pool.moe_use_local_expert_ids)
 
-    def test_ep4_flashinfer_cutlass_keeps_global(self):
-        """FlashInfer CUTLASS keeps global topk_ids, so LoRA buffers stay
-        globally-keyed even under EP.
+    def test_ep4_flashinfer_cutlass_keeps_global_without_lora_local_dispatch(self):
+        """FlashInfer CUTLASS usually keeps global topk_ids, so LoRA buffers
+        stay globally-keyed even under EP.
         """
         pool = self._new_pool_with_ep(ep_size=4, ep_rank=2, keeps_global=True)
         self.assertEqual(pool.moe_ep_size, 4)
         self.assertEqual(pool.moe_ep_rank, 2)
         self.assertFalse(pool.moe_use_local_expert_ids)
+
+    def test_ep4_flashinfer_cutlass_lora_wrapper_can_use_local_buffers(self):
+        """FlashInfer-CUTLASS LoRA can opt its wrapped dispatcher into local
+        topk_ids, so the memory pool can use EP-local buffers.
+        """
+        pool = self._new_pool_with_ep(
+            ep_size=4,
+            ep_rank=2,
+            keeps_global=True,
+            has_local_lora_module=True,
+        )
+        self.assertEqual(pool.moe_ep_size, 4)
+        self.assertEqual(pool.moe_ep_rank, 2)
+        self.assertTrue(pool.moe_use_local_expert_ids)
 
     def test_ep_with_uneven_split_falls_back_to_global_ids(self):
         """If `num_experts % ep_size != 0` (shouldn't happen in practice,

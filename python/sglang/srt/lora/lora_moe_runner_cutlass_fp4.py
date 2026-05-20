@@ -40,7 +40,6 @@ class CutlassFp4MoeQuantInfo(MoeQuantInfo):
     num_local_experts: int
     hidden_size: int
     intermediate_size_per_partition: int
-    moe_ep_rank: int
     # ``[Up|Gate]`` W13 layout (Kimi-K2.5): silu the second half, multiply the first.
     w13_swap_halves: bool
 
@@ -102,12 +101,14 @@ class CutlassFp4LoraRunnerCore:
         offsets = params.expert_offsets
         total_tokens = m_a * num_topk
 
-        # StandardDispatcher hands flashinfer_cutlass global topk_ids; remap
-        # to local. Non-local tokens go to local expert 0 with weight 0.
-        local_offset = quant_info.moe_ep_rank * E
-        local_ids = topk_ids.to(torch.int32) - local_offset
-        non_local = (local_ids < 0) | (local_ids >= E)
-        local_ids = local_ids.masked_fill(non_local, 0)
+        # The LoRA wrapper makes FlashInfer-CUTLASS dispatch use the same
+        # local-ID convention as Triton/Marlin: local expert IDs for owned
+        # experts and -1 for non-local experts under EP. The CUTLASS kernels
+        # still need an in-bounds expert ID, so non-local rows are routed to
+        # local expert 0 with router weight 0.
+        topk_ids_int = topk_ids.to(torch.int32)
+        non_local = (topk_ids_int < 0) | (topk_ids_int >= E)
+        local_ids = topk_ids_int.masked_fill(non_local, 0)
         local_weights = topk_weights.to(torch.float32).masked_fill(non_local, 0.0)
 
         a_map = torch.empty(total_tokens, dtype=torch.int32, device=device)
@@ -185,7 +186,7 @@ class CutlassFp4LoraRunnerCore:
         # out_flat; router weighting happens once in the combine below.
         if hooks is not None and hooks.after_down is not None:
             out_3d_sorted_view = out_flat.view(m_a, num_topk, K)
-            hooks.after_down(intermediate, out_3d_sorted_view, local_weights, topk_ids)
+            hooks.after_down(intermediate, out_3d_sorted_view, topk_weights, topk_ids)
 
         # ---- combine: un-sort, weight (base + delta), sum. Router weights stay
         # fp32 to match FlashInfer-CUTLASS fused MoE's final accumulation.

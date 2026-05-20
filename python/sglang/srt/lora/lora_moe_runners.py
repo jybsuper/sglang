@@ -326,6 +326,24 @@ def _sorted_layout_active(lora_info: LoRAInfo) -> bool:
     return lora_info.sorted_layout and lora_info.c_map is not None
 
 
+def _has_active_lora_or_capture(lora_info: LoRAInfo) -> bool:
+    if get_is_capture_mode():
+        # During CUDA graph capture, always enter the LoRA path so that the
+        # LoRA kernels are recorded in the graph. adapter_enabled is updated
+        # in-place before replay.
+        return True
+
+    num_loras = len(lora_info.lora_ranks)
+    return (
+        (
+            lora_info.adapter_enabled[:num_loras]
+            * (lora_info.lora_ranks > 0).to(lora_info.adapter_enabled.dtype)
+        )
+        .any()
+        .item()
+    )
+
+
 def _add_lora_gate_up_delta(
     hidden_states: torch.Tensor,
     intermediate_cache: torch.Tensor,
@@ -345,24 +363,11 @@ def _add_lora_gate_up_delta(
         merged_experts_fused_moe_lora_add,
     )
 
-    if get_is_capture_mode():
-        # During CUDA graph capture, always enter the LoRA path so that
-        # the LoRA kernels are recorded in the graph.  adapter_enabled is
-        # all-zeros during capture, so the Triton kernel early-exits per
-        # program (zero overhead).  During replay the tensor is updated
-        # in-place with the real adapter mask before graph.replay().
-        has_active_lora = True
-    else:
-        num_loras = len(lora_info.lora_ranks)
-        has_active_lora = (
-            (
-                lora_info.adapter_enabled[:num_loras]
-                * (lora_info.lora_ranks > 0).to(lora_info.adapter_enabled.dtype)
-            )
-            .any()
-            .item()
-        )
-    if not has_active_lora or lora_info is None or lora_info.max_lora_rank == 0:
+    if (
+        lora_info is None
+        or lora_info.max_lora_rank == 0
+        or not _has_active_lora_or_capture(lora_info)
+    ):
         return
 
     M, top_k, gate_up_dim = intermediate_cache.shape
@@ -459,7 +464,11 @@ def _add_lora_down_delta(
         merged_experts_fused_moe_lora_add,
     )
 
-    if lora_info.max_lora_rank == 0:
+    if (
+        lora_info is None
+        or lora_info.max_lora_rank == 0
+        or not _has_active_lora_or_capture(lora_info)
+    ):
         return
 
     M, top_k, hidden_dim = intermediate_cache.shape

@@ -2025,7 +2025,6 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
             num_local_experts=layer.num_local_experts,
             hidden_size=layer.hidden_size,
             intermediate_size_per_partition=layer.intermediate_size_per_partition,
-            moe_ep_rank=layer.moe_ep_rank,
             w13_swap_halves=self.load_up_proj_weight_first,
         )
 

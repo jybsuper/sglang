@@ -912,6 +912,17 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         else:
             runner_backend = MoeRunnerBackend.TRITON
 
+        if runner_backend.is_flashinfer_cutlass() and hasattr(
+            self.dispatcher, "skip_local_expert_mapping"
+        ):
+            # Non-LoRA FlashInfer-CUTLASS fused MoE keeps global expert IDs
+            # because the fused kernels handle EP internally. The LoRA path is
+            # unfused and indexes per-rank MoE/LoRA buffers, so make this
+            # wrapped module follow the Triton/Marlin convention: local IDs
+            # plus -1 for non-local experts.
+            self.dispatcher.skip_local_expert_mapping = False
+            self.dispatcher.local_expert_mapping = None
+
         self._lora_runner = MoeRunner(
             runner_backend,
             base_layer.moe_runner_config,
@@ -994,6 +1005,11 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             else batch_info.seg_indptr
         )
         req_to_lora = wi
+        num_experts = (
+            self.down_lora_a_weights.shape[1]
+            if self.down_lora_a_weights is not None
+            else self.num_local_experts
+        )
 
         return LoRAInfo(
             gate_up_lora_a_weights=self.gate_up_lora_a_weights,
@@ -1005,7 +1021,7 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             lora_ranks=lora_ranks,
             adapter_enabled=adapter_enabled,
             max_lora_rank=max_lora_rank,
-            num_experts=self.base_layer.num_experts,
+            num_experts=num_experts,
             experts_shared_outer_loras=self.experts_shared_outer_loras,
             cg_buffers=cg_buffers,
             tp_size=self.tp_size,
