@@ -48,12 +48,12 @@ def _fused_virtual_topk_ids_kernel(
     safe_lora = tl.maximum(lora_id, 0)
 
     base = tl.load(topk_ids_ptr + offs, mask=valid, other=0)
-    # Preserve negative sentinel topk_ids (e.g. -1 for non-local experts after
-    # EP dispatch). Without this, `-1 + safe_lora * num_experts` would land on
-    # a real virtual-expert slot belonging to another adapter and trigger OOB
-    # loads in downstream LoRA kernels.
+    # Route negative sentinel topk_ids (e.g. -1 for non-local experts after EP
+    # dispatch) and inactive/no-LoRA tokens into the sentinel bucket. Without
+    # this, they can land on a real virtual-expert slot and do unnecessary work
+    # or trigger OOB loads downstream.
     shifted = base + safe_lora * num_experts_for_weight
-    result = tl.where(base < 0, base, shifted)
+    result = tl.where(base < 0, base, tl.where(mask_val, shifted, -1))
     tl.store(virtual_topk_ids_ptr + offs, result, mask=valid)
 
     # Write mask once per row (at first k position)

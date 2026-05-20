@@ -1985,7 +1985,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
             if (
                 existing_params is None
                 or existing_params.cutlass_moe_type != CutlassMoEType.BlockscaledFP4
-                or existing_params.num_experts != layer.num_experts
+                or existing_params.num_experts != layer.num_local_experts
                 or existing_params.intermediate_size_per_partition != inter_size
                 or existing_params.hidden_size != hidden_size
                 or existing_params.device != device
@@ -1993,7 +1993,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
                 layer.cutlass_moe_params = CutlassMoEParams(
                     CutlassMoEType.BlockscaledFP4,
                     device,
-                    num_experts=layer.num_experts,  # global num experts
+                    num_experts=layer.num_local_experts,
                     intermediate_size_per_partition=inter_size,  # n
                     hidden_size=hidden_size,
                 )  # k
@@ -2025,7 +2025,6 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
             num_local_experts=layer.num_local_experts,
             hidden_size=layer.hidden_size,
             intermediate_size_per_partition=layer.intermediate_size_per_partition,
-            moe_ep_rank=layer.moe_ep_rank,
             w13_swap_halves=self.load_up_proj_weight_first,
         )
 

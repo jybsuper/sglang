@@ -117,9 +117,9 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
                 expected = base + max(lora, 0) * num_experts
                 self.assertEqual(virtual_ids[m, k].item(), expected)
 
-    def test_no_lora_token_does_not_shift_base(self):
-        """`token_lora_mapping[m] == -1` (no LoRA) keeps `safe_lora=0`,
-        so positive bases pass through unchanged and the row mask is False."""
+    def test_no_lora_token_routes_to_sentinel(self):
+        """`token_lora_mapping[m] == -1` (no LoRA) should route the row to
+        the sentinel bucket and mark the row mask False."""
         topk_ids = torch.tensor([[3, 5]], dtype=torch.int32, device=self.device)
         token_lora_mapping = torch.tensor([-1], dtype=torch.int32, device=self.device)
         num_experts = 16
@@ -127,8 +127,8 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
         virtual_ids, mask, _ = _fused_virtual_topk_ids(
             topk_ids, token_lora_mapping, num_experts, False, max_loras=4
         )
-        self.assertEqual(virtual_ids[0, 0].item(), 3)
-        self.assertEqual(virtual_ids[0, 1].item(), 5)
+        self.assertEqual(virtual_ids[0, 0].item(), -1)
+        self.assertEqual(virtual_ids[0, 1].item(), -1)
         self.assertFalse(bool(mask[0].item()))
 
 
