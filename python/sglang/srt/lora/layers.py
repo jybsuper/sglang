@@ -994,6 +994,7 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             else batch_info.seg_indptr
         )
         req_to_lora = wi
+        has_active_lora = bool(getattr(batch_info, "has_active_lora", False))
 
         return LoRAInfo(
             gate_up_lora_a_weights=self.gate_up_lora_a_weights,
@@ -1006,6 +1007,7 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             adapter_enabled=adapter_enabled,
             max_lora_rank=max_lora_rank,
             num_experts=self.base_layer.num_experts,
+            has_active_lora=has_active_lora,
             experts_shared_outer_loras=self.experts_shared_outer_loras,
             cg_buffers=cg_buffers,
             tp_size=self.tp_size,
