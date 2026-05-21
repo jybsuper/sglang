@@ -335,6 +335,9 @@ def _invoke_moe_lora_shrink_splitk(
     max_split_k = max(1, K // BLOCK_SIZE_K)
     SPLIT_K = min(max_split_k, max(1, 128 // base_grid)) if base_grid < 128 else 1
 
+    if SPLIT_K != 1:
+        output.zero_()
+
     grid = (SPLIT_K * base_grid,)
 
     _moe_lora_shrink_splitk_kernel[grid](
@@ -718,7 +721,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_experts_a = lora_a.shape[1]
     num_experts_b = lora_b.shape[1]
 
-    intermediate = torch.zeros(
+    intermediate = torch.empty(
         [token_lora_mapping.shape[0], topk_ids.shape[1], max_lora_rank],
         dtype=hidden_states.dtype,
         device=hidden_states.device,
