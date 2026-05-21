@@ -756,6 +756,10 @@ def _merged_experts_fused_moe_lora_add_impl(
     )
 
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
+    if lora_b_virtual.shape[2] <= 32 and lora_b_virtual.shape[1] >= 128:
+        b_stage_config = dict(b_stage_config)
+        b_stage_config["BLOCK_SIZE_N"] = max(b_stage_config["BLOCK_SIZE_N"], 128)
+        b_stage_config["BLOCK_SIZE_K"] = min(b_stage_config["BLOCK_SIZE_K"], 32)
     (
         sorted_token_ids,
         expert_ids,
