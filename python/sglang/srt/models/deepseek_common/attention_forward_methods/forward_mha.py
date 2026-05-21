@@ -9,6 +9,7 @@ from sglang.srt.layers.attention.nsa.dequant_k_cache import dequantize_k_cache_p
 from sglang.srt.layers.attention.tbo_backend import TboAttnBackend
 from sglang.srt.layers.attention.utils import concat_and_cast_mha_k_triton
 from sglang.srt.layers.communicator import get_attn_tp_context
+from sglang.srt.lora.utils import LoRABatchInfo
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.models.deepseek_common.utils import (
     _is_cuda,
@@ -42,6 +43,67 @@ def _resolve_attn_backend(forward_batch: ForwardBatch):
     if isinstance(backend, TboAttnBackend):
         backend = backend.primary
     return backend
+
+
+_MISSING = object()
+
+
+def _enter_prefix_chunk_lora_batch_info(
+    module: torch.nn.Module,
+    forward_batch: ForwardBatch,
+    chunk_idx: int,
+):
+    if not getattr(module, "set_lora", False) or not hasattr(module, "lora_backend"):
+        return None
+
+    lora_backend = module.lora_backend
+    batch_info = getattr(lora_backend, "batch_info", None)
+    if batch_info is None:
+        return None
+
+    req_weight_indices = (
+        batch_info.req_weight_indices
+        if batch_info.req_weight_indices is not None
+        else batch_info.weight_indices
+    )
+    bs = forward_batch.batch_size
+    seg_indptr = forward_batch.prefix_chunk_cu_seq_lens[chunk_idx]
+    weight_indices = req_weight_indices[:bs]
+    expected_tokens = forward_batch.prefix_chunk_num_tokens[chunk_idx]
+    prefix_batch_info = LoRABatchInfo(
+        use_cuda_graph=False,
+        bs=bs,
+        num_segments=bs,
+        seg_indptr=seg_indptr,
+        weight_indices=weight_indices,
+        lora_ranks=batch_info.lora_ranks,
+        scalings=batch_info.scalings,
+        max_len=forward_batch.prefix_chunk_max_seq_lens[chunk_idx],
+        seg_lens=forward_batch.prefix_chunk_seq_lens[chunk_idx],
+        permutation=None,
+        expected_tokens=expected_tokens,
+        has_active_lora=batch_info.has_active_lora,
+        req_seg_indptr=seg_indptr,
+        req_weight_indices=weight_indices,
+    )
+
+    old_batch_info = lora_backend.batch_info
+    old_sgemm_batch_info = getattr(lora_backend, "sgemm_batch_info", _MISSING)
+    lora_backend.batch_info = prefix_batch_info
+    lora_backend.sgemm_batch_info = None
+    return lora_backend, old_batch_info, old_sgemm_batch_info
+
+
+def _exit_prefix_chunk_lora_batch_info(state):
+    if state is None:
+        return
+    lora_backend, old_batch_info, old_sgemm_batch_info = state
+    lora_backend.batch_info = old_batch_info
+    if old_sgemm_batch_info is _MISSING:
+        if hasattr(lora_backend, "sgemm_batch_info"):
+            delattr(lora_backend, "sgemm_batch_info")
+    else:
+        lora_backend.sgemm_batch_info = old_sgemm_batch_info
 
 
 # Configs for DeepSeek-V3:
@@ -391,7 +453,13 @@ class DeepseekMHAForwardMixin:
             kv_a_normed, k_pe = self._get_mla_kv_buffer(
                 kv_indices, kv_a_dtype, forward_batch
             )
-            kv = self.kv_b_proj(kv_a_normed)[0]
+            prefix_lora_state = _enter_prefix_chunk_lora_batch_info(
+                self.kv_b_proj, forward_batch, i
+            )
+            try:
+                kv = self.kv_b_proj(kv_a_normed)[0]
+            finally:
+                _exit_prefix_chunk_lora_batch_info(prefix_lora_state)
             kv = kv.view(
                 -1, self.num_local_heads, self.qk_nope_head_dim + self.v_head_dim
             )
