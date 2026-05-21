@@ -577,7 +577,6 @@ def _merged_experts_fused_moe_lora_add_fake(
     mul_routed_weight: bool,
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
-    expert_ids_may_be_invalid: bool = True,
     c_map: torch.Tensor | None = None,
     input_is_sorted: bool = False,
     output_is_sorted: bool = False,
@@ -596,7 +595,6 @@ def _merged_experts_fused_moe_lora_add_impl(
     mul_routed_weight: bool,
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
-    expert_ids_may_be_invalid: bool = True,
     routing_cache: dict | None = None,
     c_map: torch.Tensor | None = None,
     input_is_sorted: bool = False,
@@ -705,8 +703,7 @@ def _merged_experts_fused_moe_lora_add_impl(
         )
         sorted_token_ids = sorted_token_ids[:tight_padded]
         expert_ids = expert_ids[: tight_padded // block_size]
-        if expert_ids_may_be_invalid:
-            expert_ids = fused_sanitize_expert_ids(expert_ids, virtual_num_experts)
+        expert_ids = fused_sanitize_expert_ids(expert_ids, virtual_num_experts)
         result = (
             sorted_token_ids,
             expert_ids,
@@ -860,7 +857,6 @@ def _merged_experts_fused_moe_lora_add_op(
     mul_routed_weight: bool,
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
-    expert_ids_may_be_invalid: bool = True,
     c_map: torch.Tensor | None = None,
     input_is_sorted: bool = False,
     output_is_sorted: bool = False,
@@ -876,7 +872,6 @@ def _merged_experts_fused_moe_lora_add_op(
         mul_routed_weight,
         experts_shared_outer_loras_a,
         experts_shared_outer_loras_b,
-        expert_ids_may_be_invalid,
         c_map=c_map,
         input_is_sorted=input_is_sorted,
         output_is_sorted=output_is_sorted,
@@ -904,7 +899,6 @@ def merged_experts_fused_moe_lora_add(
     mul_routed_weight: bool,
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
-    expert_ids_may_be_invalid: bool = True,
     routing_cache: dict | None = None,
     c_map: torch.Tensor | None = None,
     input_is_sorted: bool = False,
@@ -922,7 +916,6 @@ def merged_experts_fused_moe_lora_add(
         mul_routed_weight,
         experts_shared_outer_loras_a,
         experts_shared_outer_loras_b,
-        expert_ids_may_be_invalid,
         routing_cache,
         c_map=c_map,
         input_is_sorted=input_is_sorted,

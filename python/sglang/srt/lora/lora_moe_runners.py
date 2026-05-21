@@ -186,7 +186,6 @@ class LoRAInfo:
     fully_sharded: bool = False
     tp_size: int = 1
     tp_rank: int = 0
-    expert_ids_may_be_invalid: bool = False
     hidden_size: int = 0
     lora_use_virtual_experts: bool = False
 
@@ -388,7 +387,6 @@ def _add_lora_gate_up_delta(
             mul_routed_weight=False,
             experts_shared_outer_loras_a=lora_info.experts_shared_outer_loras,
             experts_shared_outer_loras_b=False,
-            expert_ids_may_be_invalid=lora_info.expert_ids_may_be_invalid,
             routing_cache=routing_cache,
             c_map=lora_info.c_map if sorted_layout_active else None,
             input_is_sorted=False,
@@ -476,7 +474,6 @@ def _add_lora_down_delta(
             mul_routed_weight=not sorted_layout_active,
             experts_shared_outer_loras_a=False,
             experts_shared_outer_loras_b=lora_info.experts_shared_outer_loras,
-            expert_ids_may_be_invalid=lora_info.expert_ids_may_be_invalid,
             routing_cache=routing_cache,
             c_map=lora_info.c_map if sorted_layout_active else None,
             input_is_sorted=sorted_layout_active,
