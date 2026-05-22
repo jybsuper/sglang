@@ -36,6 +36,7 @@ from sglang.srt.lora.triton_ops.virtual_experts import (
     _align_block_size_jit,
     _align_block_size_torch,
     _fused_virtual_topk_ids,
+    compute_token_lora_mapping,
     fused_sanitize_expert_ids,
 )
 
@@ -116,9 +117,9 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
                 expected = base + max(lora, 0) * num_experts
                 self.assertEqual(virtual_ids[m, k].item(), expected)
 
-    def test_no_lora_token_does_not_shift_base(self):
-        """`token_lora_mapping[m] == -1` (no LoRA) keeps `safe_lora=0`,
-        so positive bases pass through unchanged and the row mask is False."""
+    def test_no_lora_token_routes_to_sentinel(self):
+        """`token_lora_mapping[m] == -1` (no LoRA) should route the row to
+        the sentinel bucket and mark the row mask False."""
         topk_ids = torch.tensor([[3, 5]], dtype=torch.int32, device=self.device)
         token_lora_mapping = torch.tensor([-1], dtype=torch.int32, device=self.device)
         num_experts = 16
@@ -126,9 +127,49 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
         virtual_ids, mask, _ = _fused_virtual_topk_ids(
             topk_ids, token_lora_mapping, num_experts, False, max_loras=4
         )
-        self.assertEqual(virtual_ids[0, 0].item(), 3)
-        self.assertEqual(virtual_ids[0, 1].item(), 5)
+        self.assertEqual(virtual_ids[0, 0].item(), -1)
+        self.assertEqual(virtual_ids[0, 1].item(), -1)
         self.assertFalse(bool(mask[0].item()))
+
+
+class TestComputeTokenLoraMapping(CustomTestCase):
+    """Regression coverage for request-segment based token LoRA mapping."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("CUDA required")
+        cls.device = "cuda:0"
+
+    def test_uses_valid_segment_count_not_padded_req_to_lora_len(self):
+        seg_indptr = torch.tensor([0, 2, 5], dtype=torch.int32, device=self.device)
+        # The tail simulates request-table backing storage beyond the two active
+        # segments. It must not participate in the binary search.
+        req_to_lora = torch.tensor(
+            [1, -1, 7, 7, 7, 7, 7, 7], dtype=torch.int32, device=self.device
+        )
+        adapter_enabled = torch.ones(8, dtype=torch.int32, device=self.device)
+
+        out = compute_token_lora_mapping(
+            seg_indptr, req_to_lora, adapter_enabled, num_tokens=5
+        )
+
+        expected = torch.tensor(
+            [1, 1, -1, -1, -1], dtype=torch.int32, device=self.device
+        )
+        torch.testing.assert_close(out, expected, rtol=0, atol=0)
+
+    def test_disabled_adapter_maps_to_no_lora(self):
+        seg_indptr = torch.tensor([0, 1, 4], dtype=torch.int32, device=self.device)
+        req_to_lora = torch.tensor([0, 2], dtype=torch.int32, device=self.device)
+        adapter_enabled = torch.tensor([1, 1, 0], dtype=torch.int32, device=self.device)
+
+        out = compute_token_lora_mapping(
+            seg_indptr, req_to_lora, adapter_enabled, num_tokens=4
+        )
+
+        expected = torch.tensor([0, -1, -1, -1], dtype=torch.int32, device=self.device)
+        torch.testing.assert_close(out, expected, rtol=0, atol=0)
 
 
 class _AlignBlockSizeSentinelBucketBase(CustomTestCase):

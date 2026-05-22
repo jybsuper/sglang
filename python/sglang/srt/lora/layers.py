@@ -879,6 +879,12 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self.experts_shared_outer_loras: bool = False
         self.lora_use_virtual_experts: bool = False
         self.quant_method = base_layer.quant_method
+        self.moe_runner_config = base_layer.moe_runner_config
+        self.dispatcher = base_layer.dispatcher
+        self.num_local_experts = base_layer.num_local_experts
+        self.should_fuse_routed_scaling_factor_in_topk = (
+            base_layer.should_fuse_routed_scaling_factor_in_topk
+        )
 
         self.tp_size = getattr(base_layer, "moe_tp_size", 1)
         self.tp_rank = getattr(base_layer, "moe_tp_rank", 0)
@@ -906,6 +912,17 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         else:
             runner_backend = MoeRunnerBackend.TRITON
 
+        if runner_backend.is_flashinfer_cutlass() and hasattr(
+            self.dispatcher, "skip_local_expert_mapping"
+        ):
+            # Non-LoRA FlashInfer-CUTLASS fused MoE keeps global expert IDs
+            # because the fused kernels handle EP internally. The LoRA path is
+            # unfused and indexes per-rank MoE/LoRA buffers, so make this
+            # wrapped module follow the Triton/Marlin convention: local IDs
+            # plus -1 for non-local experts.
+            self.dispatcher.skip_local_expert_mapping = False
+            self.dispatcher.local_expert_mapping = None
+
         self._lora_runner = MoeRunner(
             runner_backend,
             base_layer.moe_runner_config,
@@ -927,6 +944,11 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         elif runner_backend.is_triton():
             assert base_layer.quant_method is not None, "Quant method must be set"
             self._quant_info = base_layer.quant_method.get_triton_quant_info(base_layer)
+        elif runner_backend.is_flashinfer_cutlass():
+            assert base_layer.quant_method is not None, "Quant method must be set"
+            self._quant_info = base_layer.quant_method.get_cutlass_fp4_quant_info(
+                base_layer
+            )
         else:
             raise NotImplementedError(
                 f"LoRA MoE not supported for backend {runner_backend}"
@@ -972,6 +994,10 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
                 len(lora_ranks), dtype=torch.int32, device=lora_ranks.device
             )
             adapter_enabled.index_fill_(0, wi.long(), 1)
+        rank_enabled = (lora_ranks > 0).to(
+            device=adapter_enabled.device, dtype=adapter_enabled.dtype
+        )
+        adapter_enabled.mul_(rank_enabled)
 
         seg_indptr = (
             batch_info.req_seg_indptr
@@ -983,6 +1009,11 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         # Single source of truth: lora_manager precomputes this per-batch from
         # the Python weight_indices list, no GPU sync needed.
         has_active_lora = bool(getattr(batch_info, "has_active_lora", False))
+        num_experts = (
+            self.down_lora_a_weights.shape[1]
+            if self.down_lora_a_weights is not None
+            else self.num_local_experts
+        )
 
         return LoRAInfo(
             gate_up_lora_a_weights=self.gate_up_lora_a_weights,
@@ -995,7 +1026,7 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             adapter_enabled=adapter_enabled,
             has_active_lora=has_active_lora,
             max_lora_rank=max_lora_rank,
-            num_experts=self.base_layer.num_experts,
+            num_experts=num_experts,
             experts_shared_outer_loras=self.experts_shared_outer_loras,
             cg_buffers=cg_buffers,
             tp_size=self.tp_size,
@@ -1037,10 +1068,8 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             hidden_states=hidden_states, topk_output=topk_output
         )
 
-        # Use pre-computed quant info (doesn't change so not sure why we need to pass it in every time)
         quant_info = self._quant_info
 
-        # Run the only lora moe runner (Triton)
         combine_input = self._lora_runner.run(
             dispatch_output, quant_info, lora_info=lora_info
         )

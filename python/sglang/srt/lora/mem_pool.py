@@ -90,6 +90,22 @@ def _moe_runner_keeps_global_expert_ids() -> bool:
         return False
 
 
+def _has_moe_lora_module_with_local_expert_ids(
+    base_model: torch.nn.Module,
+) -> bool:
+    """Whether any wrapped MoE LoRA module dispatches local expert IDs."""
+    try:
+        from sglang.srt.lora.layers import FusedMoEWithLoRA
+
+        return any(
+            isinstance(m, FusedMoEWithLoRA)
+            and not getattr(m.dispatcher, "skip_local_expert_mapping", True)
+            for m in base_model.modules()
+        )
+    except Exception:  # pragma: no cover - backend/model not initialized
+        return False
+
+
 class LoRAMemoryPool:
     """Class for memory pool management of lora modules"""
 
@@ -120,18 +136,21 @@ class LoRAMemoryPool:
         self.experts_shared_outer_loras: bool = experts_shared_outer_loras
         self.strict_loading: bool = strict_loading
 
-        # Under EP with a Triton/DeepGEMM runner, `StandardDispatcher` remaps
-        # global `topk_ids` -> local expert IDs before the MoE kernel, so
-        # per-expert LoRA buffers must be sized and keyed by the local slice.
-        # FlashInfer CUTLASS/CuteDSL/TRTLLM-routed keep global IDs, and an
-        # uneven expert split (`num_experts % moe_ep_size != 0`, shouldn't
-        # happen in practice) is also treated as globally-keyed so we don't
-        # silently truncate experts.
+        # MoE LoRA buffers must use the same expert-id coordinate system as the
+        # LoRA hooks. Triton/Marlin get local IDs from StandardDispatcher.
+        # FlashInfer-CUTLASS normally keeps global IDs for fused non-LoRA
+        # kernels, but FusedMoEWithLoRA overrides its wrapped dispatcher to
+        # local IDs for the unfused LoRA runner. Uneven expert splits stay
+        # globally-keyed so we don't silently truncate experts.
         self.moe_ep_size, self.moe_ep_rank = _get_moe_ep_context()
         num_experts_global = self._get_num_experts(base_model)
+        runner_uses_local_lora_ids = (
+            not _moe_runner_keeps_global_expert_ids()
+            or _has_moe_lora_module_with_local_expert_ids(base_model)
+        )
         self.moe_use_local_expert_ids = (
             self.moe_ep_size > 1
-            and not _moe_runner_keeps_global_expert_ids()
+            and runner_uses_local_lora_ids
             and num_experts_global % self.moe_ep_size == 0
         )
 
