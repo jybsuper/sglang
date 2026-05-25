@@ -91,6 +91,7 @@ class MoeRunnerBackend(Enum):
     TRITON = "triton"
     TRITON_KERNELS = "triton_kernel"
     FLASHINFER_TRTLLM = "flashinfer_trtllm"
+    SGL_FLASHINFER_TRTLLM = "sgl_flashinfer_trtllm"
     FLASHINFER_TRTLLM_ROUTED = "flashinfer_trtllm_routed"
     FLASHINFER_CUTLASS = "flashinfer_cutlass"
     FLASHINFER_MXFP4 = "flashinfer_mxfp4"
@@ -112,7 +113,13 @@ class MoeRunnerBackend(Enum):
         return self == MoeRunnerBackend.TRITON_KERNELS
 
     def is_flashinfer_trtllm(self):
-        return self == MoeRunnerBackend.FLASHINFER_TRTLLM
+        return self in (
+            MoeRunnerBackend.FLASHINFER_TRTLLM,
+            MoeRunnerBackend.SGL_FLASHINFER_TRTLLM,
+        )
+
+    def is_sgl_flashinfer_trtllm(self):
+        return self == MoeRunnerBackend.SGL_FLASHINFER_TRTLLM
 
     def is_flashinfer_trtllm_routed(self):
         return self == MoeRunnerBackend.FLASHINFER_TRTLLM_ROUTED
