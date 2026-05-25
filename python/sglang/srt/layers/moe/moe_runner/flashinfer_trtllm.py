@@ -892,6 +892,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             experts_shared_outer_loras_b=False,
             routing_cache=fused_lora_routing_cache,
             fuse_add_to_output=False,
+            use_direct_expand_add=True,
         )
     elif hooks.after_gate_up is not None:
         hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
@@ -972,6 +973,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             routing_cache=fused_lora_routing_cache,
             fuse_add_to_output=False,
             fuse_sum_all_reduce=True,
+            use_direct_expand_add=True,
         )
         return StandardCombineInput(hidden_states=output)
 
