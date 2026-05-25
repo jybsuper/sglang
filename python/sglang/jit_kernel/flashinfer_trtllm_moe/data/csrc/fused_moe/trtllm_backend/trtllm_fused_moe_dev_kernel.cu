@@ -73,19 +73,38 @@ __global__ void activationKernel(KernelParams params) {
     for (int k = blockIdx.y; k < params.topK; k += gridDim.y) {
       int const expandedIdx = tokenIdx * params.topK + k;
       int const permutedIdx = params.expandedIdxToPermutedIdx[expandedIdx];
-      if (permutedIdx == -1) continue;
 
       // Loop over hidden dim
       for (int hiddenIdx = threadIdx.x + blockDim.x * blockIdx.x; hiddenIdx < params.innerDim / 2;
            hiddenIdx += blockDim.x * gridDim.x) {
+        if (permutedIdx == -1) {
+          if (params.activationLoraInputOutPtr != nullptr) {
+            int64_t const activationIdx =
+                (int64_t)expandedIdx * (params.innerDim / 2) + hiddenIdx;
+            params.activationLoraInputOutPtr[activationIdx] = cutlass::bfloat16_t(0.0f);
+          }
+          continue;
+        }
+
         // Use int64_t to avoid overflow when permutedIdx * innerDim > INT32_MAX
         int64_t const baseIdx = (int64_t)permutedIdx * params.innerDim + hiddenIdx;
 
         float x1 = (float)params.inPtr[baseIdx];
         float x2 = (float)params.inPtr[baseIdx + params.innerDim / 2];
+        if (params.gateUpLoraDeltaPtr != nullptr) {
+          int64_t const loraBaseIdx = (int64_t)expandedIdx * params.innerDim + hiddenIdx;
+          x1 += static_cast<float>(params.gateUpLoraDeltaPtr[loraBaseIdx + params.innerDim / 2]);
+          x2 += static_cast<float>(params.gateUpLoraDeltaPtr[loraBaseIdx]);
+        }
 
         float act = silu(x2);
         Type out = (Type)(act * x1);
+        if (params.activationLoraInputOutPtr != nullptr) {
+          int64_t const activationIdx =
+              (int64_t)expandedIdx * (params.innerDim / 2) + hiddenIdx;
+          params.activationLoraInputOutPtr[activationIdx] =
+              static_cast<cutlass::bfloat16_t>(act * x1);
+        }
 
         int64_t const outIdx = (int64_t)permutedIdx * (params.innerDim / 2) + hiddenIdx;
         params.outPtr[outIdx] = out;
@@ -278,6 +297,14 @@ __global__ void activationDeepSeekKernel(KernelParams params) {
         for (int tokenInCtaIdx = 0; tokenInCtaIdx < NumTokensPerCta; tokenInCtaIdx++) {
           float x1 = scale1Arr[tokenInCtaIdx] * dataX1Arr[tokenInCtaIdx];
           float x2 = scale2Arr[tokenInCtaIdx] * dataX2Arr[tokenInCtaIdx];
+          auto const tokenIdx = tokenCtaIdx + tokenInCtaIdx;
+          if (params.gateUpLoraDeltaPtr != nullptr && tokenIdx < params.numTokens) {
+            int const expandedIdx = tokenIdx * params.topK + k;
+            int64_t const loraBaseIdx = (int64_t)expandedIdx * params.innerDim + hiddenIdx;
+            x1 += static_cast<float>(
+                params.gateUpLoraDeltaPtr[loraBaseIdx + params.innerDim / 2]);
+            x2 += static_cast<float>(params.gateUpLoraDeltaPtr[loraBaseIdx]);
+          }
           float act = silu(x2);
           float out = act * x1;
           outArr[tokenInCtaIdx] = out;
@@ -319,11 +346,24 @@ __global__ void activationDeepSeekKernel(KernelParams params) {
           }
           int const permutedIdx = permutedIdxArr[tokenInCtaIdx];
           if (permutedIdx == -1) {
+            if (params.activationLoraInputOutPtr != nullptr) {
+              int const expandedIdx = tokenIdx * params.topK + k;
+              int64_t const activationIdx =
+                  (int64_t)expandedIdx * (params.innerDim / 2) + hiddenIdx;
+              params.activationLoraInputOutPtr[activationIdx] = cutlass::bfloat16_t(0.0f);
+            }
             continue;
           }
           float const scaleOut = s_scaleOutArr[tokenInCtaIdx];
           int64_t const outIdx = (int64_t)permutedIdx * (params.innerDim / 2) + hiddenIdx;
           params.outPtr[outIdx] = static_cast<Type>(outArr[tokenInCtaIdx] / scaleOut);
+          if (params.activationLoraInputOutPtr != nullptr) {
+            int const expandedIdx = tokenIdx * params.topK + k;
+            int64_t const activationIdx =
+                (int64_t)expandedIdx * (params.innerDim / 2) + hiddenIdx;
+            params.activationLoraInputOutPtr[activationIdx] =
+                static_cast<cutlass::bfloat16_t>(outArr[tokenInCtaIdx]);
+          }
         }
       }
     }

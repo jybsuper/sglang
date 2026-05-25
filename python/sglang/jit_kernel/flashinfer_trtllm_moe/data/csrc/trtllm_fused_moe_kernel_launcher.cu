@@ -920,7 +920,9 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
                         TensorView const& hidden_states_scale, TensorView const& gemm1_weights,
                         TensorView const& gemm1_weights_scale, TensorView const& gemm2_weights,
                         TensorView const& gemm2_weights_scale, TensorView const& expert_indices,
-                        TensorView const& expert_weights, Fp8QuantizationType quantization_type)
+                        TensorView const& expert_weights, Fp8QuantizationType quantization_type,
+                        Optional<TensorView> const& gate_up_lora_delta = Optional<TensorView>(),
+                        Optional<TensorView> const& activation_lora_input = Optional<TensorView>())
       : FusedMoeLauncher(routing_logits, routing_bias, hidden_states, gemm1_weights,
                          Optional<TensorView>(), Optional<TensorView>(), gemm2_weights,
                          Optional<TensorView>(), Optional<TensorView>()),
@@ -929,6 +931,8 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
         gemm2_weights_scale(gemm2_weights_scale),
         expert_indices(expert_indices),
         expert_weights(expert_weights),
+        gate_up_lora_delta(gate_up_lora_delta),
+        activation_lora_input(activation_lora_input),
         quantization_type(quantization_type) {}
 
   void init(std::unique_ptr<tensorrt_llm::kernels::trtllmgen_moe::MoE::MoERunnerArgs>&& args,
@@ -1137,6 +1141,26 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
     check_weights_shape("gemm1");
     check_weights_shape("gemm2");
 
+    if (gate_up_lora_delta.has_value()) {
+      TVM_FFI_ICHECK_EQ(gate_up_lora_delta.value().dtype(), dl_bfloat16)
+          << "gate_up_lora_delta must be bf16.";
+      TVM_FFI_ICHECK_EQ(gate_up_lora_delta.value().ndim(), 3)
+          << "gate_up_lora_delta must be [num_tokens, top_k, 2 * intermediate_size].";
+      TVM_FFI_ICHECK_EQ(gate_up_lora_delta.value().size(0), args->num_tokens);
+      TVM_FFI_ICHECK_EQ(gate_up_lora_delta.value().size(1), args->top_k);
+      TVM_FFI_ICHECK_EQ(gate_up_lora_delta.value().size(2),
+                        args->intermediate_size * intermediate_size_factor);
+    }
+    if (activation_lora_input.has_value()) {
+      TVM_FFI_ICHECK_EQ(activation_lora_input.value().dtype(), dl_bfloat16)
+          << "activation_lora_input must be bf16.";
+      TVM_FFI_ICHECK_EQ(activation_lora_input.value().ndim(), 3)
+          << "activation_lora_input must be [num_tokens, top_k, intermediate_size].";
+      TVM_FFI_ICHECK_EQ(activation_lora_input.value().size(0), args->num_tokens);
+      TVM_FFI_ICHECK_EQ(activation_lora_input.value().size(1), args->top_k);
+      TVM_FFI_ICHECK_EQ(activation_lora_input.value().size(2), args->intermediate_size);
+    }
+
     if (quantization_type == Fp8QuantizationType::DeepSeekFp8) {
       TVM_FFI_ICHECK_EQ(args->intermediate_size % 128, 0)
           << "intermediate_size must be a multiple of 128.";
@@ -1202,6 +1226,10 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
     args->hidden_states_scale = static_cast<float*>(hidden_states_scale.data_ptr());
     args->gemm1_weights_scale = static_cast<float*>(gemm1_weights_scale.data_ptr());
     args->gemm2_weights_scale = static_cast<float*>(gemm2_weights_scale.data_ptr());
+    args->gate_up_lora_delta =
+        gate_up_lora_delta.has_value() ? gate_up_lora_delta.value().data_ptr() : nullptr;
+    args->activation_lora_input =
+        activation_lora_input.has_value() ? activation_lora_input.value().data_ptr() : nullptr;
   }
 
  private:
@@ -1212,6 +1240,8 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
   Tensor activation_output_scale;
   TensorView expert_indices;
   TensorView expert_weights;
+  Optional<TensorView> gate_up_lora_delta;
+  Optional<TensorView> activation_lora_input;
   Fp8QuantizationType quantization_type;
 
  public:
@@ -1975,7 +2005,7 @@ Array<Tensor> trtllm_fp8_per_tensor_scale_moe(
   return selected_launcher->run(config, enable_pdl, use_routing_scales_on_input);
 }
 
-Array<Tensor> trtllm_fp8_block_scale_moe(
+Array<Tensor> trtllm_fp8_block_scale_moe_impl(
     Optional<TensorView> routing_logits, TensorView expert_indices, TensorView expert_weights,
     Optional<TensorView> routing_bias, TensorView hidden_states, TensorView hidden_states_scale,
     TensorView gemm1_weights, TensorView gemm1_weights_scale, TensorView gemm2_weights,
@@ -1984,7 +2014,8 @@ Array<Tensor> trtllm_fp8_block_scale_moe(
     int64_t local_expert_offset, int64_t local_num_experts, Optional<double> routed_scaling_factor,
     int64_t routing_method_type, bool use_shuffled_weight, int64_t weight_layout, bool do_finalize,
     bool enable_pdl, Array<int64_t> config_index, Fp8QuantizationType quantization_type,
-    int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out) {
+    int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out,
+    Optional<TensorView> gate_up_lora_delta, Optional<TensorView> activation_lora_input) {
   auto activation_type = validateAndCastActivationType(act_type);
   // DeepSeekFp8 currently uses a TRTLLM runner that hardwires Swiglu activation semantics.
   // Fail for any other activation to avoid silently running incorrect activation behavior.
@@ -2079,7 +2110,7 @@ Array<Tensor> trtllm_fp8_block_scale_moe(
     auto launcher = std::make_unique<Fp8BlockScaleLauncher>(
         routing_logits, routing_bias, hidden_states, hidden_states_scale, gemm1_weights,
         gemm1_weights_scale, gemm2_weights, gemm2_weights_scale, expert_indices, expert_weights,
-        quantization_type);
+        quantization_type, gate_up_lora_delta, activation_lora_input);
     launcher->init(std::move(args), curr_tile_N, routing_method_type, use_shuffled_weight,
                    weight_layout, activation_type, norm_topk_prob);
     launcher->set_routing_replay_out(routing_replay_out);
@@ -2100,6 +2131,136 @@ Array<Tensor> trtllm_fp8_block_scale_moe(
   return selected_launcher->run(
       config, enable_pdl, false /* use_routing_scales_on_input */,
       quantization_type == Fp8QuantizationType::DeepSeekFp8 /* use_deep_seek_fp8 */);
+}
+
+Array<Tensor> trtllm_fp8_block_scale_moe(
+    Optional<TensorView> routing_logits, TensorView expert_indices, TensorView expert_weights,
+    Optional<TensorView> routing_bias, TensorView hidden_states, TensorView hidden_states_scale,
+    TensorView gemm1_weights, TensorView gemm1_weights_scale, TensorView gemm2_weights,
+    TensorView gemm2_weights_scale, TensorView output, int64_t num_experts, int64_t top_k,
+    Optional<int64_t> n_group, Optional<int64_t> topk_group, int64_t intermediate_size,
+    int64_t local_expert_offset, int64_t local_num_experts, Optional<double> routed_scaling_factor,
+    int64_t routing_method_type, bool use_shuffled_weight, int64_t weight_layout, bool do_finalize,
+    bool enable_pdl, Array<int64_t> config_index, Fp8QuantizationType quantization_type,
+    int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out) {
+  return trtllm_fp8_block_scale_moe_impl(
+      routing_logits, expert_indices, expert_weights, routing_bias, hidden_states,
+      hidden_states_scale, gemm1_weights, gemm1_weights_scale, gemm2_weights, gemm2_weights_scale,
+      output, num_experts, top_k, n_group, topk_group, intermediate_size, local_expert_offset,
+      local_num_experts, routed_scaling_factor, routing_method_type, use_shuffled_weight,
+      weight_layout, do_finalize, enable_pdl, config_index, quantization_type, act_type,
+      norm_topk_prob, routing_replay_out, Optional<TensorView>(), Optional<TensorView>());
+}
+
+Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora(
+    Optional<TensorView> routing_logits, TensorView expert_indices, TensorView expert_weights,
+    Optional<TensorView> routing_bias, TensorView hidden_states, TensorView hidden_states_scale,
+    TensorView gemm1_weights, TensorView gemm1_weights_scale, TensorView gemm2_weights,
+    TensorView gemm2_weights_scale, TensorView output, int64_t num_experts, int64_t top_k,
+    Optional<int64_t> n_group, Optional<int64_t> topk_group, int64_t intermediate_size,
+    int64_t local_expert_offset, int64_t local_num_experts, Optional<double> routed_scaling_factor,
+    int64_t routing_method_type, bool use_shuffled_weight, int64_t weight_layout, bool do_finalize,
+    bool enable_pdl, Array<int64_t> config_index, Fp8QuantizationType quantization_type,
+    int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out,
+    TensorView gate_up_lora_delta, TensorView activation_lora_input) {
+  if (quantization_type != Fp8QuantizationType::DeepSeekFp8) {
+    TVM_FFI_LOG_AND_THROW(NotImplementedError)
+        << "sgl_trtllm_fp8_block_scale_moe_lora currently supports DeepSeekFp8 only.";
+  }
+  return trtllm_fp8_block_scale_moe_impl(
+      routing_logits, expert_indices, expert_weights, routing_bias, hidden_states,
+      hidden_states_scale, gemm1_weights, gemm1_weights_scale, gemm2_weights, gemm2_weights_scale,
+      output, num_experts, top_k, n_group, topk_group, intermediate_size, local_expert_offset,
+      local_num_experts, routed_scaling_factor, routing_method_type, use_shuffled_weight,
+      weight_layout, do_finalize, enable_pdl, config_index, quantization_type, act_type,
+      norm_topk_prob, routing_replay_out, Optional<TensorView>(gate_up_lora_delta),
+      Optional<TensorView>(activation_lora_input));
+}
+
+__global__ void sgl_trtllm_fp8_block_scale_moe_lora_finalize_kernel(
+    cutlass::bfloat16_t const* __restrict__ gemm2_output,
+    cutlass::bfloat16_t const* __restrict__ expert_weights,
+    int32_t const* __restrict__ expanded_idx_to_permuted_idx,
+    cutlass::bfloat16_t const* __restrict__ down_lora_delta,
+    cutlass::bfloat16_t* __restrict__ output, int64_t num_tokens, int64_t top_k,
+    int64_t hidden_size, int64_t hidden_size_padded, float routed_scaling_factor) {
+  for (int64_t token_idx = blockIdx.y; token_idx < num_tokens; token_idx += gridDim.y) {
+    for (int64_t hidden_idx = threadIdx.x + blockDim.x * blockIdx.x; hidden_idx < hidden_size;
+         hidden_idx += blockDim.x * gridDim.x) {
+      float acc = 0.0f;
+      float lora_acc = 0.0f;
+      for (int64_t k = 0; k < top_k; ++k) {
+        int64_t const expanded_idx = token_idx * top_k + k;
+        int32_t const permuted_idx = expanded_idx_to_permuted_idx[expanded_idx];
+        if (permuted_idx != -1) {
+          float const expert_prob =
+              static_cast<float>(expert_weights[token_idx * top_k + k]);
+          acc += expert_prob *
+                 static_cast<float>(gemm2_output[permuted_idx * hidden_size_padded + hidden_idx]);
+        }
+        lora_acc +=
+            static_cast<float>(down_lora_delta[expanded_idx * hidden_size + hidden_idx]);
+      }
+      output[token_idx * hidden_size + hidden_idx] =
+          static_cast<cutlass::bfloat16_t>(acc + routed_scaling_factor * lora_acc);
+    }
+  }
+}
+
+void sgl_trtllm_fp8_block_scale_moe_lora_finalize(
+    TensorView gemm2_output, TensorView expert_weights, TensorView expanded_idx_to_permuted_idx,
+    TensorView down_lora_delta, TensorView output, Optional<double> routed_scaling_factor) {
+  TVM_FFI_ICHECK_EQ(gemm2_output.dtype(), dl_bfloat16)
+      << "gemm2_output must be bfloat16.";
+  TVM_FFI_ICHECK_EQ(expert_weights.dtype(), dl_bfloat16)
+      << "expert_weights must be bfloat16.";
+  TVM_FFI_ICHECK((expanded_idx_to_permuted_idx.dtype() == DLDataType{kDLInt, 32, 1}))
+      << "expanded_idx_to_permuted_idx must be int32.";
+  TVM_FFI_ICHECK_EQ(down_lora_delta.dtype(), dl_bfloat16)
+      << "down_lora_delta must be bfloat16.";
+  TVM_FFI_ICHECK_EQ(output.dtype(), dl_bfloat16) << "output must be bfloat16.";
+  TVM_FFI_ICHECK_EQ(gemm2_output.ndim(), 2) << "gemm2_output must be 2D.";
+  TVM_FFI_ICHECK_EQ(expert_weights.ndim(), 2) << "expert_weights must be 2D.";
+  TVM_FFI_ICHECK_EQ(expanded_idx_to_permuted_idx.ndim(), 1)
+      << "expanded_idx_to_permuted_idx must be 1D.";
+  TVM_FFI_ICHECK_EQ(down_lora_delta.ndim(), 3) << "down_lora_delta must be 3D.";
+  TVM_FFI_ICHECK_EQ(output.ndim(), 2) << "output must be 2D.";
+  TVM_FFI_ICHECK(gemm2_output.IsContiguous()) << "gemm2_output must be contiguous.";
+  TVM_FFI_ICHECK(expert_weights.IsContiguous()) << "expert_weights must be contiguous.";
+  TVM_FFI_ICHECK(expanded_idx_to_permuted_idx.IsContiguous())
+      << "expanded_idx_to_permuted_idx must be contiguous.";
+  TVM_FFI_ICHECK(down_lora_delta.IsContiguous()) << "down_lora_delta must be contiguous.";
+  TVM_FFI_ICHECK(output.IsContiguous()) << "output must be contiguous.";
+
+  int64_t const num_tokens = output.size(0);
+  int64_t const hidden_size = output.size(1);
+  int64_t const top_k = down_lora_delta.size(1);
+  TVM_FFI_ICHECK_EQ(expert_weights.size(0), num_tokens)
+      << "expert_weights dim0 must equal num_tokens.";
+  TVM_FFI_ICHECK_EQ(expert_weights.size(1), top_k) << "expert_weights dim1 must equal top_k.";
+  TVM_FFI_ICHECK_EQ(down_lora_delta.size(0), num_tokens)
+      << "down_lora_delta dim0 must equal num_tokens.";
+  TVM_FFI_ICHECK_EQ(down_lora_delta.size(2), hidden_size)
+      << "down_lora_delta dim2 must equal hidden_size.";
+  TVM_FFI_ICHECK_EQ(expanded_idx_to_permuted_idx.size(0), num_tokens * top_k)
+      << "expanded_idx_to_permuted_idx size must equal num_tokens * top_k.";
+  TVM_FFI_ICHECK(gemm2_output.size(1) >= hidden_size)
+      << "gemm2_output hidden dimension is smaller than output hidden dimension.";
+
+  int const num_threads = 128;
+  int const num_blocks_x = (hidden_size + num_threads - 1) / num_threads;
+  int const num_blocks_y = std::min<int64_t>(8192, num_tokens);
+  dim3 grid(num_blocks_x, num_blocks_y);
+  cudaStream_t stream = get_stream(output.device());
+  sgl_trtllm_fp8_block_scale_moe_lora_finalize_kernel<<<grid, num_threads, 0, stream>>>(
+      static_cast<cutlass::bfloat16_t const*>(gemm2_output.data_ptr()),
+      static_cast<cutlass::bfloat16_t const*>(expert_weights.data_ptr()),
+      static_cast<int32_t const*>(expanded_idx_to_permuted_idx.data_ptr()),
+      static_cast<cutlass::bfloat16_t const*>(down_lora_delta.data_ptr()),
+      static_cast<cutlass::bfloat16_t*>(output.data_ptr()), num_tokens, top_k, hidden_size,
+      gemm2_output.size(1), static_cast<float>(routed_scaling_factor.value_or(1.0)));
+  auto err = cudaGetLastError();
+  FLASHINFER_CHECK(err == cudaSuccess, cudaGetErrorString(err));
 }
 
 Array<Tensor> trtllm_fp4_block_scale_moe(
@@ -2403,6 +2564,10 @@ namespace trtllm_cubin_loader {
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_bf16_moe, trtllm_bf16_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_per_tensor_scale_moe, trtllm_fp8_per_tensor_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_block_scale_moe, trtllm_fp8_block_scale_moe);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora,
+                              sgl_trtllm_fp8_block_scale_moe_lora);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_finalize,
+                              sgl_trtllm_fp8_block_scale_moe_lora_finalize);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp4_block_scale_moe, trtllm_fp4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_mxint4_block_scale_moe, trtllm_mxint4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_get_valid_moe_configs, trtllm_get_valid_moe_configs);

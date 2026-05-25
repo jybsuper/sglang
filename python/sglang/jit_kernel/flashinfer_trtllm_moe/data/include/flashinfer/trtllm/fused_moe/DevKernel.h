@@ -171,6 +171,8 @@ struct Data {
   void* outPtr;
   float* inDqSfsPtr = nullptr;
   float* outDqSfsPtr = nullptr;
+  cutlass::bfloat16_t const* gateUpLoraDeltaPtr = nullptr;
+  cutlass::bfloat16_t* activationLoraInputOutPtr = nullptr;
 
   int32_t innerDim;
   int32_t numTokens;
@@ -191,6 +193,8 @@ struct KernelParams {
 
   float* inDqSfsPtr = nullptr;
   float* outDqSfsPtr = nullptr;
+  cutlass::bfloat16_t const* gateUpLoraDeltaPtr = nullptr;
+  cutlass::bfloat16_t* activationLoraInputOutPtr = nullptr;
 
   int32_t innerDim;
   int32_t numTokens;
@@ -206,6 +210,8 @@ struct KernelParams {
     params.outPtr = (Type*)data.outPtr;
     params.inDqSfsPtr = data.inDqSfsPtr;
     params.outDqSfsPtr = data.outDqSfsPtr;
+    params.gateUpLoraDeltaPtr = data.gateUpLoraDeltaPtr;
+    params.activationLoraInputOutPtr = data.activationLoraInputOutPtr;
 
     params.expandedIdxToPermutedIdx = data.expandedIdxToPermutedIdx;
 

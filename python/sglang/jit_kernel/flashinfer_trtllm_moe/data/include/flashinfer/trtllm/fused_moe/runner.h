@@ -337,6 +337,14 @@ struct MoERunnerArgs {
   float* output1_scales_gate_scalar = nullptr;
   float* output2_scales_scalar = nullptr;
 
+  // Optional LoRA bridge buffers used by the copied SGLang TRTLLM FP8 path.
+  // gate_up_lora_delta: [num_tokens * top_k, 2 * intermediate_size], bf16,
+  // in FlashInfer gate/up order (up first, gate second).
+  // activation_lora_input: [num_tokens * top_k, intermediate_size], bf16,
+  // populated with the post-activation intermediate for down-proj LoRA.
+  void* gate_up_lora_delta = nullptr;
+  void* activation_lora_input = nullptr;
+
   // Output:
   void* output = nullptr;
   float* output_scale = nullptr;
