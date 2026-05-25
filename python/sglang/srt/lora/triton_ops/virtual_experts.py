@@ -267,8 +267,7 @@ def _invoke_moe_lora_shrink_splitk(
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], BLOCK_SIZE_M)
     num_n_blocks = triton.cdiv(N, BLOCK_SIZE_N)
     base_grid = num_m_blocks * num_n_blocks
-    max_split_k = max(1, K // BLOCK_SIZE_K)
-    SPLIT_K = min(max_split_k, max(1, 128 // base_grid)) if base_grid < 128 else 1
+    SPLIT_K = _get_moe_lora_shrink_split_k(weight, sorted_token_ids, config)
 
     grid = (SPLIT_K * base_grid,)
 
@@ -298,6 +297,23 @@ def _invoke_moe_lora_shrink_splitk(
         num_warps=config.get("num_warps", 4),
         num_stages=config.get("num_stages", 4),
     )
+
+
+def _get_moe_lora_shrink_split_k(
+    weight: torch.Tensor,
+    sorted_token_ids: torch.Tensor,
+    config: dict[str, Any],
+) -> int:
+    N = weight.shape[1]
+    K = weight.shape[2]
+    block_size_m = config["BLOCK_SIZE_M"]
+    block_size_n = min(config.get("BLOCK_SIZE_N", 64), max(16, N))
+    block_size_k = config.get("BLOCK_SIZE_K", 64)
+    num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], block_size_m)
+    num_n_blocks = triton.cdiv(N, block_size_n)
+    base_grid = num_m_blocks * num_n_blocks
+    max_split_k = max(1, K // block_size_k)
+    return min(max_split_k, max(1, 128 // base_grid)) if base_grid < 128 else 1
 
 
 def _align_block_size_jit(
@@ -523,6 +539,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
     routing_cache: dict | None = None,
+    fuse_add_to_output: bool = True,
 ) -> None:
     """
     1. Prepare virtual expert routing metadata from topk_ids + token_lora_mapping * num_experts.
@@ -646,12 +663,6 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_experts_a = lora_a.shape[1]
     num_experts_b = lora_b.shape[1]
 
-    intermediate = torch.zeros(
-        [token_lora_mapping.shape[0], topk_ids.shape[1], max_lora_rank],
-        dtype=hidden_states.dtype,
-        device=hidden_states.device,
-    )
-
     a_stage_config = _get_stage_config(lora_a_virtual, input_top_k)
     (
         sorted_token_ids,
@@ -664,6 +675,27 @@ def _merged_experts_fused_moe_lora_add_impl(
         num_experts_a,
         experts_shared_outer_loras_a,
         a_stage_config["BLOCK_SIZE_M"],
+    )
+    intermediate_shape = [
+        token_lora_mapping.shape[0],
+        topk_ids.shape[1],
+        max_lora_rank,
+    ]
+    intermediate_split_k = _get_moe_lora_shrink_split_k(
+        lora_a_virtual, sorted_token_ids, a_stage_config
+    )
+    intermediate = (
+        torch.zeros(
+            intermediate_shape,
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+        if intermediate_split_k > 1
+        else torch.empty(
+            intermediate_shape,
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
     )
 
     _invoke_moe_lora_shrink_splitk(
@@ -715,8 +747,9 @@ def _merged_experts_fused_moe_lora_add_impl(
         False,
         False,
         None,
-        fuse_add_to_output=True,
+        fuse_add_to_output=fuse_add_to_output,
         add_output_mask=token_lora_mask,
+        mask_output=not fuse_add_to_output,
         router_topk=topk_ids.shape[1],
     )
 
@@ -769,6 +802,7 @@ def merged_experts_fused_moe_lora_add(
     experts_shared_outer_loras_a: bool,
     experts_shared_outer_loras_b: bool,
     routing_cache: dict | None = None,
+    fuse_add_to_output: bool = True,
 ) -> None:
     """Public API: wraps the registered op with routing_cache support."""
     _merged_experts_fused_moe_lora_add_impl(
@@ -783,4 +817,5 @@ def merged_experts_fused_moe_lora_add(
         experts_shared_outer_loras_a,
         experts_shared_outer_loras_b,
         routing_cache,
+        fuse_add_to_output=fuse_add_to_output,
     )

@@ -818,7 +818,11 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
     from sglang.srt.layers.moe.topk import TopKOutputChecker
     from sglang.srt.layers.moe.utils import RoutingMethodType
-    from sglang.srt.lora.lora_moe_runners import build_lora_hooks
+    from sglang.srt.lora.lora_moe_runners import (
+        _compute_token_lora_mapping,
+        build_lora_hooks,
+    )
+    from sglang.srt.lora.triton_ops import merged_experts_fused_moe_lora_add
     from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
 
     assert runner_config.activation == "silu" and runner_config.is_gated, (
@@ -849,15 +853,47 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
 
     topk_ids = topk_output.topk_ids
     topk_weights = topk_output.topk_weights
-    hooks = build_lora_hooks(hidden_states, lora_info, topk_ids)
+    use_virtual_lora_store = bool(
+        lora_info.lora_use_virtual_experts and lora_info.max_lora_rank > 0
+    )
+    if use_virtual_lora_store:
+        hooks = None
+        token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
+        fused_lora_routing_cache: dict = {}
+    else:
+        hooks = build_lora_hooks(hidden_states, lora_info, topk_ids)
+        token_lora_mapping = None
+        fused_lora_routing_cache = {}
 
     a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
     a_sf_t = a_sf.t().contiguous()
 
-    gate_up_delta = hidden_states.new_zeros(
-        (hidden_states.shape[0], runner_config.top_k, quant_info.w13_weight.shape[1])
+    gate_up_delta_shape = (
+        hidden_states.shape[0],
+        runner_config.top_k,
+        quant_info.w13_weight.shape[1],
     )
-    if hooks.after_gate_up is not None:
+    gate_up_delta = (
+        hidden_states.new_empty(gate_up_delta_shape)
+        if use_virtual_lora_store
+        else hidden_states.new_zeros(gate_up_delta_shape)
+    )
+    if use_virtual_lora_store:
+        merged_experts_fused_moe_lora_add(
+            output=gate_up_delta,
+            hidden_states=hidden_states,
+            lora_a=lora_info.gate_up_lora_a_weights,
+            lora_b=lora_info.gate_up_lora_b_weights,
+            topk_ids=topk_ids,
+            topk_weights=topk_weights,
+            token_lora_mapping=token_lora_mapping,
+            mul_routed_weight=False,
+            experts_shared_outer_loras_a=lora_info.experts_shared_outer_loras,
+            experts_shared_outer_loras_b=False,
+            routing_cache=fused_lora_routing_cache,
+            fuse_add_to_output=False,
+        )
+    elif hooks.after_gate_up is not None:
         hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
 
     activation_lora_input = torch.empty(
@@ -908,10 +944,32 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     )
     gemm2_output, expert_weights, expanded_idx_to_permuted_idx = moe_result
 
-    down_delta = hidden_states.new_zeros(
-        (hidden_states.shape[0], runner_config.top_k, hidden_states.shape[1])
+    down_delta_shape = (
+        hidden_states.shape[0],
+        runner_config.top_k,
+        hidden_states.shape[1],
     )
-    if hooks.after_down is not None:
+    down_delta = (
+        hidden_states.new_empty(down_delta_shape)
+        if use_virtual_lora_store
+        else hidden_states.new_zeros(down_delta_shape)
+    )
+    if use_virtual_lora_store:
+        merged_experts_fused_moe_lora_add(
+            output=down_delta,
+            hidden_states=activation_lora_input.view(-1, quant_info.intermediate_size),
+            lora_a=lora_info.down_lora_a_weights,
+            lora_b=lora_info.down_lora_b_weights,
+            topk_ids=topk_ids,
+            topk_weights=topk_weights,
+            token_lora_mapping=token_lora_mapping,
+            mul_routed_weight=True,
+            experts_shared_outer_loras_a=False,
+            experts_shared_outer_loras_b=lora_info.experts_shared_outer_loras,
+            routing_cache=fused_lora_routing_cache,
+            fuse_add_to_output=False,
+        )
+    elif hooks.after_down is not None:
         hooks.after_down(
             activation_lora_input.view(-1, quant_info.intermediate_size),
             down_delta,
