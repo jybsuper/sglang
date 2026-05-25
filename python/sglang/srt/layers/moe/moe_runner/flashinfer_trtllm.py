@@ -907,6 +907,16 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         topk_weights=topk_weights,
     )
 
+    direct_down_output = None
+    if use_virtual_lora_store:
+        with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+            direct_down_output = torch.empty(
+                hidden_states.shape[0],
+                hidden_states.shape[1],
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,
         routing_bias=None,
@@ -936,12 +946,35 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             else quant_info.routing_method_type
         ),
         use_shuffled_weight=False,
-        do_finalize=False,
-        output=torch.empty_like(hidden_states),
+        do_finalize=use_virtual_lora_store,
+        output=(
+            direct_down_output
+            if direct_down_output is not None
+            else torch.empty_like(hidden_states)
+        ),
         tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
         fp8_quantization_type=Fp8QuantizationType.DeepSeekFp8,
         activation_type=quant_info.activation_type,
     )
+    if use_virtual_lora_store:
+        output = moe_result
+        merged_experts_fused_moe_lora_add(
+            output=output,
+            hidden_states=activation_lora_input.view(-1, quant_info.intermediate_size),
+            lora_a=lora_info.down_lora_a_weights,
+            lora_b=lora_info.down_lora_b_weights,
+            topk_ids=topk_ids,
+            topk_weights=topk_weights,
+            token_lora_mapping=token_lora_mapping,
+            mul_routed_weight=True,
+            experts_shared_outer_loras_a=False,
+            experts_shared_outer_loras_b=lora_info.experts_shared_outer_loras,
+            routing_cache=fused_lora_routing_cache,
+            fuse_add_to_output=False,
+            fuse_sum_all_reduce=True,
+        )
+        return StandardCombineInput(hidden_states=output)
+
     gemm2_output, expert_weights, expanded_idx_to_permuted_idx = moe_result
 
     down_delta_shape = (

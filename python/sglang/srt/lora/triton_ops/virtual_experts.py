@@ -54,6 +54,7 @@ def _fused_virtual_topk_ids_kernel(
     # loads in downstream LoRA kernels.
     shifted = base + safe_lora * num_experts_for_weight
     result = tl.where(base < 0, base, shifted)
+    result = tl.where(mask_val, result, -1)
     tl.store(virtual_topk_ids_ptr + offs, result, mask=valid)
 
     # Write mask once per row (at first k position)
@@ -540,6 +541,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     experts_shared_outer_loras_b: bool,
     routing_cache: dict | None = None,
     fuse_add_to_output: bool = True,
+    fuse_sum_all_reduce: bool = False,
 ) -> None:
     """
     1. Prepare virtual expert routing metadata from topk_ids + token_lora_mapping * num_experts.
@@ -748,8 +750,9 @@ def _merged_experts_fused_moe_lora_add_impl(
         False,
         None,
         fuse_add_to_output=fuse_add_to_output,
+        fuse_sum_all_reduce=fuse_sum_all_reduce,
         add_output_mask=token_lora_mask,
-        mask_output=not fuse_add_to_output,
+        mask_output=not fuse_add_to_output and not fuse_sum_all_reduce,
         router_topk=topk_ids.shape[1],
     )
 
@@ -803,6 +806,7 @@ def merged_experts_fused_moe_lora_add(
     experts_shared_outer_loras_b: bool,
     routing_cache: dict | None = None,
     fuse_add_to_output: bool = True,
+    fuse_sum_all_reduce: bool = False,
 ) -> None:
     """Public API: wraps the registered op with routing_cache support."""
     _merged_experts_fused_moe_lora_add_impl(
@@ -818,4 +822,5 @@ def merged_experts_fused_moe_lora_add(
         experts_shared_outer_loras_b,
         routing_cache,
         fuse_add_to_output=fuse_add_to_output,
+        fuse_sum_all_reduce=fuse_sum_all_reduce,
     )

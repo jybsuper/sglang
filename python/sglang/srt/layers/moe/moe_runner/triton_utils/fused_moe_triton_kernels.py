@@ -442,10 +442,9 @@ def fused_moe_kernel(
 
     if filter_expert and off_experts == -1:
         # -----------------------------------------------------------
-        # Write back zeros to the output when the expert is not
-        # in the current expert parallel rank.
-        if not FUSE_ADD_TO_OUTPUT:
-            # skip the zero-write to preserve existing values.
+        if not FUSE_ADD_TO_OUTPUT and not FUSE_SUM_ALL_REDUCE:
+            # Write zeros only when this kernel owns the full output buffer.
+            # Direct-add modes must preserve the base output from another kernel.
             write_zeros_to_output(
                 c_ptr,
                 stride_cm,
