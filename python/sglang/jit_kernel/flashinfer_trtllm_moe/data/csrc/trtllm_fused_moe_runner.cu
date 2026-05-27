@@ -717,24 +717,16 @@ int64_t Runner::getDefaultValidConfigIndex(int32_t topK, int32_t hiddenSize,
   return std::distance(mPassingConfigs.begin(), it);
 }
 
-void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
-                 cudaStream_t stream, int64_t configIndex, bool enable_pdl) {
+void Runner::runGemm1(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
+                      cudaStream_t stream, int64_t configIndex, bool enable_pdl) {
   FLASHINFER_CHECK(configIndex >= 0 && configIndex < static_cast<int64_t>(mPassingConfigs.size()),
                    "Invalid MoE config index ", configIndex, ", valid range is [0, ",
                    static_cast<int64_t>(mPassingConfigs.size()) - 1, "].");
   FLASHINFER_CHECK(!mUsePerChannelScalingGemm1 && !mUsePerChannelScalingGemm2,
                    "Per-channel scaling is currently not supported.");
-  // Setup all operation data
-  moe::dev::activation::Data activationData;
-  moe::dev::finalize::Data finalizeData;
-  moe::dev::convertsf::Data convertSfData;
   sync_check_cuda_error(stream);
-  setOpsData(args, workspace, convertSfData, activationData, finalizeData);
-
   void* hidden_states_scale_linear{args.hidden_states_scale};
-
   auto const& config = mPassingConfigs[configIndex];
-
   mPermuteGemm1.run(
       args.hidden_states, hidden_states_scale_linear, args.gemm1_weights, args.gemm1_weights_scale,
       workspace.token_scales, /*perChannelScales*/ nullptr, args.output1_scales_scalar,
@@ -745,16 +737,18 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
       workspace.total_num_padded_tokens, workspace.cta_idx_xy_to_batch_idx,
       workspace.cta_idx_xy_to_mn_limit, workspace.bmm1_workspace, args.mUseRoutingScalesOnInput,
       device, stream, config.gemm1Config, enable_pdl);
+}
 
+void Runner::runActivation(MoERunnerArgs const& args, MoEWorkspace const& workspace,
+                           cudaStream_t stream) {
+  moe::dev::activation::Data activationData;
+  moe::dev::finalize::Data finalizeData;
+  moe::dev::convertsf::Data convertSfData;
+  setOpsData(args, workspace, convertSfData, activationData, finalizeData);
   // We do not fuse activation with FC1 for DeepSeek FP8 due to the weights shuffling constraint.
-  void* gemm2_input = workspace.gemm1_output;
-  void* gemm2_input_scale = workspace.gemm1_output_scale;
   // We do activation only for DeepSeek FP8, as cubins do not have fused activation.
   if (args.mDtypeElt == btg::Dtype::E4m3 && args.mUseDeepSeekFp8) {
-    // Run activation
     moe::dev::activation::run(activationData, stream);
-    gemm2_input = workspace.activation_output;
-    gemm2_input_scale = workspace.activation_output_scale;
   } else if (mUsePerTokenScalingGemm2) {
     // TODO(siyuan): currently only support per-token nvfp4 quantization
     FLASHINFER_CHECK(
@@ -765,11 +759,8 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
     FLASHINFER_CHECK(
         workspace.token_scales_fc2 != nullptr,
         "workspace.token_scales_fc2 must be provided When using explicit quantization.");
-    // FIXME(siyuan): Detect from the kernel config. Currently only tile size >= 128 will use R128c4
     auto sfLayout = mGemm2.mTileTokensDim >= 128 ? QuantizationSFLayout::SWIZZLED_128x4
                                                  : QuantizationSFLayout::SWIZZLED_8x4;
-
-    // TODO(siyuan): should this value be exposed?
     float globalScaleInv = 1.f / 448.f / 6.f;
     invokeNvfp4QuantAndPerTokenScale<__nv_bfloat16>(
         args.num_tokens * args.top_k, args.intermediate_size,
@@ -778,12 +769,18 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
         reinterpret_cast<uint8_t*>(workspace.activation_output),
         reinterpret_cast<uint8_t*>(workspace.activation_output_scale),
         reinterpret_cast<float*>(workspace.token_scales_fc2), sfLayout, stream);
+  }
+}
 
+void Runner::runGemm2(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
+                      cudaStream_t stream, int64_t configIndex, bool enable_pdl) {
+  auto const& config = mPassingConfigs[configIndex];
+  void* gemm2_input = workspace.gemm1_output;
+  void* gemm2_input_scale = workspace.gemm1_output_scale;
+  if ((args.mDtypeElt == btg::Dtype::E4m3 && args.mUseDeepSeekFp8) || mUsePerTokenScalingGemm2) {
     gemm2_input = workspace.activation_output;
     gemm2_input_scale = workspace.activation_output_scale;
   }
-
-  // Run gemm2
   mGemm2.run(gemm2_input, gemm2_input_scale, args.gemm2_weights, args.gemm2_weights_scale,
              workspace.token_scales_fc2, /*perChannelScales*/ nullptr, args.output2_scales_scalar,
              args.gemm2_bias, workspace.gemm2_output, workspace.gemm2_output_scale, args.top_k,
@@ -791,12 +788,25 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
              workspace.num_non_exiting_ctas, workspace.total_num_padded_tokens,
              workspace.cta_idx_xy_to_batch_idx, workspace.cta_idx_xy_to_mn_limit,
              workspace.bmm2_workspace, device, stream, config.gemm2Config, enable_pdl);
+}
 
-  // Run finalize
+void Runner::runFinalize(MoERunnerArgs const& args, MoEWorkspace const& workspace,
+                         cudaStream_t stream) {
+  moe::dev::activation::Data activationData;
+  moe::dev::finalize::Data finalizeData;
+  moe::dev::convertsf::Data convertSfData;
+  setOpsData(args, workspace, convertSfData, activationData, finalizeData);
+  moe::dev::finalize::run(finalizeData, stream);
+  sync_check_cuda_error(stream);
+}
+
+void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
+                 cudaStream_t stream, int64_t configIndex, bool enable_pdl) {
+  runGemm1(args, workspace, device, stream, configIndex, enable_pdl);
+  runActivation(args, workspace, stream);
+  runGemm2(args, workspace, device, stream, configIndex, enable_pdl);
   if (args.do_finalize) {
-    // Run finalize
-    moe::dev::finalize::run(finalizeData, stream);
-    sync_check_cuda_error(stream);
+    runFinalize(args, workspace, stream);
   }
 }
 }  // namespace MoE
