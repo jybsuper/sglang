@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -803,6 +804,33 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
     return StandardCombineInput(hidden_states=output)
 
 
+# --- Two-stream LoRA overlap (decode-only) ---------------------------------
+# Run the LoRA shrink/expand on a dedicated CUDA stream so it overlaps the base
+# trtllm MoE path on the main stream. Gated to decode (small token count): in
+# prefill the kernels already saturate the GPU and the extra stream sync/merge
+# only adds overhead. Master switch: env SGLANG_LORA_TWO_STREAM=1.
+_LORA_SIDE_STREAM = None
+
+
+def _get_lora_side_stream():
+    global _LORA_SIDE_STREAM
+    if _LORA_SIDE_STREAM is None:
+        _LORA_SIDE_STREAM = torch.cuda.Stream()
+    return _LORA_SIDE_STREAM
+
+
+def _two_stream_active(hidden_states) -> bool:
+    if os.environ.get("SGLANG_LORA_TWO_STREAM") != "1":
+        return False
+    try:
+        max_tok = int(os.environ.get("SGLANG_TWO_STREAM_MAX_TOKENS", "256"))
+    except ValueError:
+        max_tok = 256
+    # decode proxy: decode token count == batch size (<= cuda_graph_max_bs);
+    # prefill chunks are >= input_len (thousands) and stay on the serial path.
+    return hidden_states.shape[0] <= max_tok
+
+
 def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     dispatch_output: StandardDispatchOutput,
     quant_info: FlashInferTrtllmFp8MoeQuantInfo,
@@ -865,8 +893,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         token_lora_mapping = None
         fused_lora_routing_cache = {}
 
-    a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
-    a_sf_t = a_sf.t().contiguous()
+    two_stream = use_virtual_lora_store and _two_stream_active(hidden_states)
+    side_stream = _get_lora_side_stream() if two_stream else None
 
     gate_up_delta_shape = (
         hidden_states.shape[0],
@@ -878,7 +906,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         if use_virtual_lora_store
         else hidden_states.new_zeros(gate_up_delta_shape)
     )
-    if use_virtual_lora_store:
+
+    def _run_gate_up_lora():
         merged_experts_fused_moe_lora_add(
             output=gate_up_delta,
             hidden_states=hidden_states,
@@ -894,8 +923,23 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             fuse_add_to_output=False,
             use_direct_expand_add=True,
         )
-    elif hooks.after_gate_up is not None:
-        hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
+
+    if two_stream:
+        # Fork the LoRA side stream off the pre-MoE state; gate_up shrink/expand
+        # needs only hidden_states + token_lora_mapping, so the base FP8 quant
+        # below runs on the main stream concurrently.
+        side_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side_stream):
+            _run_gate_up_lora()
+
+    a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
+    a_sf_t = a_sf.t().contiguous()
+
+    if not two_stream:
+        if use_virtual_lora_store:
+            _run_gate_up_lora()
+        elif hooks.after_gate_up is not None:
+            hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
 
     activation_lora_input = torch.empty(
         (hidden_states.shape[0], runner_config.top_k, quant_info.intermediate_size),
@@ -917,6 +961,10 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
                 dtype=hidden_states.dtype,
                 device=hidden_states.device,
             )
+
+    if two_stream:
+        # Join: trtllm's activation consumes gate_up_delta produced on the side stream.
+        torch.cuda.current_stream().wait_stream(side_stream)
 
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,
