@@ -909,58 +909,12 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self._lora_runner_backend = runner_backend
 
         if runner_backend.is_sgl_flashinfer_trtllm():
-            from sglang.srt.layers.moe.moe_runner.flashinfer_trtllm import (
-                FlashInferTrtllmFp8MoeQuantInfo,
-                get_activation_type,
+            # sgl_flashinfer_trtllm LoRA setup lives in lora/trtllm_moe/.
+            from sglang.srt.lora.trtllm_moe.lora_layer import (
+                init_sgl_flashinfer_trtllm_lora,
             )
-            from sglang.srt.layers.moe.utils import RoutingMethodType
 
-            quant_method = base_layer.quant_method
-            quant_config = getattr(quant_method, "quant_config", None)
-            weight_block_size = getattr(quant_config, "weight_block_size", None)
-            if weight_block_size is None:
-                weight_block_size = getattr(quant_method, "weight_block_size", None)
-            use_mxfp8 = bool(getattr(quant_config, "use_mxfp8", False))
-            assert getattr(quant_method, "block_quant", False), (
-                "sgl_flashinfer_trtllm LoRA currently requires FP8 block quant."
-            )
-            assert not use_mxfp8, (
-                "sgl_flashinfer_trtllm LoRA currently targets the non-MX FP8 Qwen path."
-            )
-            assert weight_block_size is not None, (
-                "sgl_flashinfer_trtllm LoRA needs the FP8 weight block size."
-            )
-            w13_weight_scale = getattr(base_layer, "w13_weight_scale_inv", None)
-            if w13_weight_scale is None:
-                w13_weight_scale = getattr(base_layer, "w13_weight_scale", None)
-            w2_weight_scale = getattr(base_layer, "w2_weight_scale_inv", None)
-            if w2_weight_scale is None:
-                w2_weight_scale = getattr(base_layer, "w2_weight_scale", None)
-            assert w13_weight_scale is not None and w2_weight_scale is not None
-
-            self._lora_runner = None
-            self._quant_info = FlashInferTrtllmFp8MoeQuantInfo(
-                w13_weight=base_layer.w13_weight,
-                w2_weight=base_layer.w2_weight,
-                global_num_experts=int(base_layer.num_experts),
-                local_expert_offset=int(base_layer.moe_ep_rank)
-                * int(base_layer.num_local_experts),
-                local_num_experts=int(base_layer.num_local_experts),
-                intermediate_size=base_layer.w2_weight.shape[2],
-                routing_method_type=int(
-                    getattr(base_layer, "routing_method_type", None)
-                    or RoutingMethodType.DeepSeekV3
-                ),
-                block_quant=True,
-                use_mxfp8=False,
-                weight_block_k=weight_block_size[1],
-                w13_weight_scale_inv=w13_weight_scale,
-                w2_weight_scale_inv=w2_weight_scale,
-                activation_type=get_activation_type(
-                    base_layer.moe_runner_config.activation,
-                    is_gated=base_layer.moe_runner_config.is_gated,
-                ),
-            )
+            init_sgl_flashinfer_trtllm_lora(self, base_layer)
         elif runner_backend.is_marlin():
             self._lora_runner = MoeRunner(
                 runner_backend,
@@ -1100,15 +1054,12 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         quant_info = self._quant_info
 
         if self._lora_runner_backend.is_sgl_flashinfer_trtllm():
-            from sglang.srt.layers.moe.moe_runner.flashinfer_trtllm import (
-                fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora,
+            from sglang.srt.lora.trtllm_moe.lora_layer import (
+                dispatch_sgl_flashinfer_trtllm_lora,
             )
 
-            combine_input = fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
-                dispatch_output,
-                quant_info,
-                base_layer.moe_runner_config,
-                lora_info,
+            combine_input = dispatch_sgl_flashinfer_trtllm_lora(
+                dispatch_output, quant_info, base_layer, lora_info
             )
         else:
             combine_input = self._lora_runner.run(
