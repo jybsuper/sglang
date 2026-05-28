@@ -842,6 +842,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     from sglang.jit_kernel.flashinfer_trtllm_moe import (
         trtllm_fp8_block_scale_moe_lora_finalize,
         trtllm_fp8_block_scale_routed_moe_lora,
+        trtllm_fp8_block_scale_routed_moe_lora_begin,
+        trtllm_fp8_block_scale_routed_moe_lora_gemm2,
     )
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
     from sglang.srt.layers.moe.topk import TopKOutputChecker
@@ -963,8 +965,91 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             )
 
     if two_stream:
-        # Join: trtllm's activation consumes gate_up_delta produced on the side stream.
+        # === O6 increment A: split begin / (down LoRA ∥ GEMM2) / finalize ===
+        # two_stream implies use_virtual_lora_store. The gate_up LoRA ran on the
+        # side stream overlapping base prep (O1); join it before begin, whose
+        # activation stage consumes gate_up_delta and writes activation_lora_input.
+        routed_scaling_factor = (
+            runner_config.routed_scaling_factor
+            if runner_config.routed_scaling_factor is not None
+            else 1.0
+        )
+        routing_method_type = (
+            RoutingMethodType.TopK
+            if quant_info.routing_method_type == RoutingMethodType.DeepSeekV3
+            else quant_info.routing_method_type
+        )
         torch.cuda.current_stream().wait_stream(side_stream)
+
+        handle = trtllm_fp8_block_scale_routed_moe_lora_begin(
+            topk_ids=packed_topk_ids,
+            routing_bias=None,
+            hidden_states=a_q,
+            hidden_states_scale=a_sf_t,
+            gemm1_weights=quant_info.w13_weight,
+            gemm1_weights_scale=quant_info.w13_weight_scale_inv,
+            gemm2_weights=quant_info.w2_weight,
+            gemm2_weights_scale=quant_info.w2_weight_scale_inv,
+            gate_up_lora_delta=gate_up_delta,
+            activation_lora_input=activation_lora_input,
+            output=direct_down_output,
+            num_experts=quant_info.global_num_experts,
+            top_k=runner_config.top_k,
+            n_group=None,
+            topk_group=None,
+            intermediate_size=quant_info.intermediate_size,
+            local_expert_offset=quant_info.local_expert_offset,
+            local_num_experts=quant_info.local_num_experts,
+            routed_scaling_factor=routed_scaling_factor,
+            routing_method_type=routing_method_type,
+            use_shuffled_weight=False,
+            fp8_quantization_type=Fp8QuantizationType.DeepSeekFp8,
+            activation_type=quant_info.activation_type,
+        )
+
+        # Down LoRA delta (side stream) ∥ GEMM2 (main stream). The down LoRA
+        # shrink/expand needs only activation_lora_input (written by begin's
+        # activation), so fork the side stream off the post-begin state and run
+        # GEMM2 concurrently on the main stream.
+        down_delta = hidden_states.new_empty(
+            (hidden_states.shape[0], runner_config.top_k, hidden_states.shape[1])
+        )
+        side_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side_stream):
+            merged_experts_fused_moe_lora_add(
+                output=down_delta,
+                hidden_states=activation_lora_input.view(
+                    -1, quant_info.intermediate_size
+                ),
+                lora_a=lora_info.down_lora_a_weights,
+                lora_b=lora_info.down_lora_b_weights,
+                topk_ids=topk_ids,
+                topk_weights=topk_weights,
+                token_lora_mapping=token_lora_mapping,
+                mul_routed_weight=True,
+                experts_shared_outer_loras_a=False,
+                experts_shared_outer_loras_b=lora_info.experts_shared_outer_loras,
+                routing_cache=fused_lora_routing_cache,
+                fuse_add_to_output=False,
+            )
+
+        gemm2_output, expert_weights, expanded_idx_to_permuted_idx = (
+            trtllm_fp8_block_scale_routed_moe_lora_gemm2(handle)
+        )
+
+        # Join down LoRA before finalize (folds down_delta into the output).
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        output = direct_down_output
+        trtllm_fp8_block_scale_moe_lora_finalize(
+            gemm2_output=gemm2_output,
+            expert_weights=expert_weights,
+            expanded_idx_to_permuted_idx=expanded_idx_to_permuted_idx,
+            down_lora_delta=down_delta,
+            output=output,
+            routed_scaling_factor=routed_scaling_factor,
+        )
+        return StandardCombineInput(hidden_states=output)
 
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,

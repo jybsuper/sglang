@@ -20,6 +20,8 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -1244,6 +1246,11 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
   Optional<TensorView> activation_lora_input;
   Fp8QuantizationType quantization_type;
 
+  // Saved across the two-stream split (begin -> gemm2) so runGemm2Stage() can
+  // reuse the tile config / pdl resolved during runBeginGemm1Act().
+  int64_t mSplitConfigIndex{-1};
+  bool mSplitEnablePdl{true};
+
  public:
   // Override to handle pre-computed routing
   Array<Tensor> run(int64_t moe_tactic, bool enable_pdl = true,
@@ -1338,6 +1345,64 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
     }
 
     return valid_configs;
+  }
+
+  // --- Two-stream LoRA split -------------------------------------------------
+  // Mirrors run() above but stops after the activation stage (which writes
+  // activation_lora_input and consumes gate_up_lora_delta). A side stream can
+  // then compute the down-projection LoRA delta while runGemm2Stage() runs
+  // GEMM2 on the main stream. The launcher object is kept alive between the two
+  // calls (via the C++ handle map below) so all workspace/routing buffers, args
+  // and moe_runner persist. do_finalize is expected to be false: the caller runs
+  // the custom finalize op which folds in the down LoRA delta.
+  void runBeginGemm1Act(int64_t moe_tactic, bool enable_pdl, bool use_routing_scales_on_input,
+                        bool use_deep_seek_fp8) {
+    check_routing();
+    prepare_routing();
+
+    cudaStream_t routing_stream = get_stream(hidden_states.device());
+    tensorrt_llm::kernels::trtllmgen_moe::Routing::Runner routing_runner(tile_tokens_dim);
+
+    bool use_precomputed = expert_indices.ndim() == 2 && expert_indices.size(0) > 0;
+    int16_t* replay_ptr = nullptr;
+    if (routing_replay_out.has_value()) {
+      replay_ptr = reinterpret_cast<int16_t*>(routing_replay_out.value().data_ptr());
+    }
+
+    routing_runner.run(
+        use_precomputed ? nullptr : args->routing_logits, args->routing_bias, args->num_tokens,
+        args->num_experts, args->top_k, args->n_group, args->topk_group, args->local_expert_offset,
+        args->local_num_experts, args->routed_scaling_factor, workspace.routing_expert_indexes,
+        static_cast<int*>(expert_count_histogram.data_ptr()),
+        static_cast<int*>(total_num_padded_tokens.data_ptr()),
+        static_cast<int*>(expanded_idx_to_permuted_idx.data_ptr()),
+        nullptr /*permuted_idx_to_expanded_idx.data_ptr()*/,
+        static_cast<int*>(permuted_idx_to_token_idx.data_ptr()), workspace.expert_weights,
+        static_cast<int*>(num_tokens_per_expert.data_ptr()),
+        static_cast<int*>(cta_idx_xy_to_batch_idx.data_ptr()),
+        static_cast<int*>(cta_idx_xy_to_mn_limit.data_ptr()),
+        static_cast<int*>(num_non_exiting_ctas.data_ptr()), args->mDtypeElt, mRoutingBiasDtype,
+        use_routing_scales_on_input, use_deep_seek_fp8,
+        static_cast<RoutingMethodType>(routing_method_type), routing_stream, mRoutingLogitsDtype,
+        norm_topk_prob, replay_ptr);
+
+    check_moe();
+    prepare_moe(moe_tactic);
+
+    mSplitConfigIndex = moe_tactic;
+    mSplitEnablePdl = enable_pdl;
+
+    cudaStream_t moe_stream = get_stream(hidden_states.device());
+    moe_runner->runGemm1(*args, workspace, hidden_states.device().device_id, moe_stream, moe_tactic,
+                         enable_pdl);
+    moe_runner->runActivation(*args, workspace, moe_stream);
+  }
+
+  Array<Tensor> runGemm2Stage() {
+    cudaStream_t moe_stream = get_stream(hidden_states.device());
+    moe_runner->runGemm2(*args, workspace, hidden_states.device().device_id, moe_stream,
+                         mSplitConfigIndex, mSplitEnablePdl);
+    return {gemm2_output, FusedMoeLauncher::expert_weights, expanded_idx_to_permuted_idx};
   }
 };
 
@@ -2177,6 +2242,113 @@ Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora(
       Optional<TensorView>(activation_lora_input));
 }
 
+// ===========================================================================
+// Two-stream LoRA split ops (decode-only overlap of down LoRA with GEMM2).
+//
+// sgl_trtllm_fp8_block_scale_moe_lora_begin runs routing + GEMM1 + activation
+// (writing activation_lora_input, consuming gate_up_lora_delta) and parks the
+// selected launcher in a handle map so its workspace/routing buffers + runner
+// stay alive. sgl_trtllm_fp8_block_scale_moe_lora_gemm2 runs GEMM2 on that
+// parked launcher, returns the unfinalized outputs, and frees the launcher.
+// The Python orchestration then runs the custom finalize op (which folds in the
+// separately-computed down LoRA delta). do_finalize is forced false here; the
+// alloc/free pattern per layer matches the monolithic op so cuda-graph replay
+// reuses captured addresses identically.
+//
+// The map holds at most one entry per in-flight layer (begin inserts, gemm2
+// erases). Only exercised during eager exec and graph capture, never replay.
+// ===========================================================================
+namespace {
+std::mutex g_moe_split_mutex;
+std::unordered_map<int64_t, std::unique_ptr<Fp8BlockScaleLauncher>> g_moe_split_launchers;
+int64_t g_moe_split_next_handle = 1;
+}  // namespace
+
+int64_t sgl_trtllm_fp8_block_scale_moe_lora_begin(
+    Optional<TensorView> routing_logits, TensorView expert_indices, TensorView expert_weights,
+    Optional<TensorView> routing_bias, TensorView hidden_states, TensorView hidden_states_scale,
+    TensorView gemm1_weights, TensorView gemm1_weights_scale, TensorView gemm2_weights,
+    TensorView gemm2_weights_scale, TensorView output, int64_t num_experts, int64_t top_k,
+    Optional<int64_t> n_group, Optional<int64_t> topk_group, int64_t intermediate_size,
+    int64_t local_expert_offset, int64_t local_num_experts, Optional<double> routed_scaling_factor,
+    int64_t routing_method_type, bool use_shuffled_weight, int64_t weight_layout, bool enable_pdl,
+    Array<int64_t> config_index, Fp8QuantizationType quantization_type, int64_t act_type,
+    bool norm_topk_prob, Optional<TensorView> routing_replay_out, TensorView gate_up_lora_delta,
+    TensorView activation_lora_input) {
+  if (quantization_type != Fp8QuantizationType::DeepSeekFp8) {
+    TVM_FFI_LOG_AND_THROW(NotImplementedError)
+        << "sgl_trtllm_fp8_block_scale_moe_lora_begin currently supports DeepSeekFp8 only.";
+  }
+  auto activation_type = validateAndCastActivationType(act_type);
+  if (activation_type != ActivationType::Swiglu) {
+    TVM_FFI_LOG_AND_THROW(NotImplementedError)
+        << "DeepSeekFp8 split path only supports ActivationType::Swiglu.";
+  }
+
+  auto const num_tokens = hidden_states.size(0);
+  auto const hidden_size = hidden_states.size(1);
+
+  auto supported_tile_nums = Fp8BlockScaleLauncher::getSupportedTileNums(quantization_type);
+  std::unordered_map<int32_t, std::unique_ptr<Fp8BlockScaleLauncher>> launchers_map;
+  for (int32_t curr_tile_N : supported_tile_nums) {
+    auto args = std::make_unique<tensorrt_llm::kernels::trtllmgen_moe::MoE::MoERunnerArgs>();
+    args->num_tokens = num_tokens;
+    args->num_experts = num_experts;
+    args->hidden_size = hidden_size;
+    args->hidden_size_output = args->hidden_size;
+    args->top_k = top_k;
+    args->n_group = n_group.value_or(0);
+    args->topk_group = topk_group.value_or(0);
+    args->local_expert_offset = local_expert_offset;
+    args->local_num_experts = local_num_experts;
+    args->intermediate_size = intermediate_size;
+    args->routed_scaling_factor = routed_scaling_factor.value_or(1.0);
+    args->do_finalize = false;  // custom finalize op runs separately
+    args->output = output.data_ptr();
+    args->output_scale = nullptr;
+
+    auto launcher = std::make_unique<Fp8BlockScaleLauncher>(
+        routing_logits, routing_bias, hidden_states, hidden_states_scale, gemm1_weights,
+        gemm1_weights_scale, gemm2_weights, gemm2_weights_scale, expert_indices, expert_weights,
+        quantization_type, Optional<TensorView>(gate_up_lora_delta),
+        Optional<TensorView>(activation_lora_input));
+    launcher->init(std::move(args), curr_tile_N, routing_method_type, use_shuffled_weight,
+                   weight_layout, activation_type, norm_topk_prob);
+    launcher->set_routing_replay_out(routing_replay_out);
+
+    launchers_map[curr_tile_N] = std::move(launcher);
+  }
+
+  auto const [tile_N, config] = resolveMoeTileAndConfig(config_index, supported_tile_nums,
+                                                        num_tokens, top_k, local_num_experts);
+  auto launcher_it = launchers_map.find(static_cast<int32_t>(tile_N));
+  FLASHINFER_CHECK(launcher_it != launchers_map.end(),
+                   "Internal error: missing FP8 block-scale MoE launcher for tile_N=", tile_N);
+  auto selected = std::move(launcher_it->second);
+
+  selected->runBeginGemm1Act(config, enable_pdl, false /* use_routing_scales_on_input */,
+                             true /* use_deep_seek_fp8 */);
+
+  std::lock_guard<std::mutex> lk(g_moe_split_mutex);
+  int64_t handle = g_moe_split_next_handle++;
+  g_moe_split_launchers[handle] = std::move(selected);
+  return handle;
+}
+
+Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora_gemm2(int64_t handle) {
+  std::unique_ptr<Fp8BlockScaleLauncher> launcher;
+  {
+    std::lock_guard<std::mutex> lk(g_moe_split_mutex);
+    auto it = g_moe_split_launchers.find(handle);
+    FLASHINFER_CHECK(it != g_moe_split_launchers.end(), "Invalid MoE split handle ", handle);
+    launcher = std::move(it->second);
+    g_moe_split_launchers.erase(it);
+  }
+  // launcher (and its non-returned workspace) is freed when it leaves scope here,
+  // after GEMM2; the returned tensors keep their storage alive for the finalize op.
+  return launcher->runGemm2Stage();
+}
+
 __global__ void sgl_trtllm_fp8_block_scale_moe_lora_finalize_kernel(
     cutlass::bfloat16_t const* __restrict__ gemm2_output,
     cutlass::bfloat16_t const* __restrict__ expert_weights,
@@ -2568,6 +2740,10 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora,
                               sgl_trtllm_fp8_block_scale_moe_lora);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_finalize,
                               sgl_trtllm_fp8_block_scale_moe_lora_finalize);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_begin,
+                              sgl_trtllm_fp8_block_scale_moe_lora_begin);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_gemm2,
+                              sgl_trtllm_fp8_block_scale_moe_lora_gemm2);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp4_block_scale_moe, trtllm_fp4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_mxint4_block_scale_moe, trtllm_mxint4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_get_valid_moe_configs, trtllm_get_valid_moe_configs);
