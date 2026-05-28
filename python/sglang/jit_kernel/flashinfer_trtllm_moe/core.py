@@ -309,12 +309,18 @@ def trtllm_fp8_block_scale_routed_moe_lora_begin(
     enable_pdl: Optional[bool] = None,
     fp8_quantization_type=None,
     activation_type: Optional[int] = None,
+    use_persistent_workspace: bool = False,
 ) -> int:
     """Two-stream split stage 1: routing + GEMM1 + activation.
 
     Runs through the activation stage (writes ``activation_lora_input`` and
     consumes ``gate_up_lora_delta``) and parks the launcher in a C++ handle map.
     Returns an int handle to pass to ``trtllm_fp8_block_scale_routed_moe_lora_gemm2``.
+
+    Set ``use_persistent_workspace=True`` during cuda-graph capture warmup +
+    capture so the trtllm workspace comes from a persistent global cache (static
+    addresses the captured graph can reference on replay). For graph-off / eager
+    serving leave it False so the workspace is per-call ``alloc_tensor``.
     """
     from flashinfer.fused_moe.core import ActivationType, Fp8QuantizationType
     from flashinfer.utils import device_support_pdl
@@ -363,6 +369,7 @@ def trtllm_fp8_block_scale_routed_moe_lora_begin(
         None,
         gate_up_lora_delta,
         activation_lora_input,
+        use_persistent_workspace,
     )
 
 
