@@ -2336,17 +2336,24 @@ int64_t sgl_trtllm_fp8_block_scale_moe_lora_begin(
 }
 
 Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora_gemm2(int64_t handle) {
-  std::unique_ptr<Fp8BlockScaleLauncher> launcher;
+  // Keep the launcher alive in the map: GEMM2 reads workspace (activation_output)
+  // asynchronously, so its workspace must outlive the kernel. The launcher is freed
+  // only by the release op (called after finalize), matching the monolithic op's
+  // free-at-end lifetime. Freeing here would be a use-after-free race on the async
+  // GEMM2 (only masked by CUDA_LAUNCH_BLOCKING).
+  Fp8BlockScaleLauncher* launcher = nullptr;
   {
     std::lock_guard<std::mutex> lk(g_moe_split_mutex);
     auto it = g_moe_split_launchers.find(handle);
     FLASHINFER_CHECK(it != g_moe_split_launchers.end(), "Invalid MoE split handle ", handle);
-    launcher = std::move(it->second);
-    g_moe_split_launchers.erase(it);
+    launcher = it->second.get();
   }
-  // launcher (and its non-returned workspace) is freed when it leaves scope here,
-  // after GEMM2; the returned tensors keep their storage alive for the finalize op.
   return launcher->runGemm2Stage();
+}
+
+void sgl_trtllm_fp8_block_scale_moe_lora_release(int64_t handle) {
+  std::lock_guard<std::mutex> lk(g_moe_split_mutex);
+  g_moe_split_launchers.erase(handle);
 }
 
 __global__ void sgl_trtllm_fp8_block_scale_moe_lora_finalize_kernel(
@@ -2744,6 +2751,8 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_begin,
                               sgl_trtllm_fp8_block_scale_moe_lora_begin);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_gemm2,
                               sgl_trtllm_fp8_block_scale_moe_lora_gemm2);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(sgl_trtllm_fp8_block_scale_moe_lora_release,
+                              sgl_trtllm_fp8_block_scale_moe_lora_release);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp4_block_scale_moe, trtllm_fp4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_mxint4_block_scale_moe, trtllm_mxint4_block_scale_moe);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_get_valid_moe_configs, trtllm_get_valid_moe_configs);

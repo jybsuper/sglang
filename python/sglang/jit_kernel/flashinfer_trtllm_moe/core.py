@@ -371,10 +371,18 @@ def trtllm_fp8_block_scale_routed_moe_lora_gemm2(
 ) -> List[torch.Tensor]:
     """Two-stream split stage 2: GEMM2 on the parked launcher.
 
-    Returns ``[gemm2_output, expert_weights, expanded_idx_to_permuted_idx]`` and
-    frees the launcher referenced by ``handle``.
+    Returns ``[gemm2_output, expert_weights, expanded_idx_to_permuted_idx]``. The
+    launcher is kept alive (its workspace backs the returned tensors and the async
+    GEMM2); call ``..._release(handle)`` after the finalize op to free it.
     """
     return get_sgl_trtllm_moe_sm100_raw_module().sgl_trtllm_fp8_block_scale_moe_lora_gemm2(
+        handle
+    )
+
+
+def trtllm_fp8_block_scale_routed_moe_lora_release(handle: int) -> None:
+    """Free the parked launcher (and its workspace) for ``handle``. Call after finalize."""
+    get_sgl_trtllm_moe_sm100_raw_module().sgl_trtllm_fp8_block_scale_moe_lora_release(
         handle
     )
 
