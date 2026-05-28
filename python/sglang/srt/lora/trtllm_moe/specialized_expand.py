@@ -3,12 +3,13 @@
 The kernel here was originally a chunk in ``lora/triton_ops/virtual_experts.py``.
 It is rank-specialized: the ``R`` dimension (LoRA rank) is a triton
 ``constexpr``, so each rank value used at runtime gets its own JIT-compiled
-specialization (R=16 and R=32 are both supported up to the ``R <= 32`` assert,
+specialization (R=16, R=32, R=64 are all supported up to the ``R <= 64`` assert,
 with no perf interaction between them — each gets its own kernel).
 
 Called from :mod:`sglang.srt.lora.triton_ops.virtual_experts` when
-``use_direct_expand_add=True`` (the default for the trtllm-lora path); the
-generic ``invoke_fused_moe_kernel`` is used when that flag is False.
+``use_direct_expand_add=True`` (the trtllm-lora path uses this when
+``max_lora_rank <= 64``); the generic ``invoke_fused_moe_kernel`` is used
+when that flag is False (incl. ranks above 64).
 """
 from typing import Any
 
@@ -136,15 +137,15 @@ def _invoke_moe_lora_expand_add(
 ) -> None:
     """Launch the rank-specialized LoRA-B expand kernel.
 
-    ``R`` (= ``weight.shape[2]``) up to 32 is supported. ``BLOCK_SIZE_R`` is
+    ``R`` (= ``weight.shape[2]``) up to 64 is supported. ``BLOCK_SIZE_R`` is
     set to ``next_power_of_2(R)`` so each rank value pairs with the smallest
-    tile that covers it — R=16 → BLOCK_SIZE_R=16, R=32 → BLOCK_SIZE_R=32.
+    tile that covers it (R=16 → BSR=16, R=32 → BSR=32, R=64 → BSR=64).
     Triton compiles a separate specialization per (R, BLOCK_SIZE_R) combo
     so different ranks don't interfere with each other's perf.
     """
     N = weight.shape[1]
     R = weight.shape[2]
-    assert R <= 32, f"direct LoRA expand/add expects small rank, got {R}"
+    assert R <= 64, f"direct LoRA expand/add expects rank <= 64, got {R}"
 
     block_size_m = config["BLOCK_SIZE_M"]
     block_size_n = 128 if N % 128 == 0 else config["BLOCK_SIZE_N"]

@@ -108,7 +108,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
             experts_shared_outer_loras_b=False,
             routing_cache=fused_lora_routing_cache,
             fuse_add_to_output=False,
-            use_direct_expand_add=True,
+            use_direct_expand_add=lora_info.max_lora_rank <= 64,
         )
 
     # O1 fork — gate_up shrink/expand on side stream concurrent with the
@@ -194,6 +194,6 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         routing_cache=fused_lora_routing_cache,
         fuse_add_to_output=False,
         fuse_sum_all_reduce=True,
-        use_direct_expand_add=True,
+        use_direct_expand_add=lora_info.max_lora_rank <= 64,
     )
     return StandardCombineInput(hidden_states=output)
