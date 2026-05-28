@@ -884,17 +884,23 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     use_virtual_lora_store = bool(
         lora_info.lora_use_virtual_experts and lora_info.max_lora_rank > 0
     )
+    two_stream = use_virtual_lora_store and _two_stream_active(hidden_states)
+    side_stream = _get_lora_side_stream() if two_stream else None
+
     if use_virtual_lora_store:
         hooks = None
-        token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
         fused_lora_routing_cache: dict = {}
+        if not two_stream:
+            # No side stream to host this; compute on main right here.
+            token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
+        else:
+            # Deferred: side-stream block below computes it (a closure cell so
+            # _run_gate_up_lora picks up the assigned value at call time).
+            token_lora_mapping = None
     else:
         hooks = build_lora_hooks(hidden_states, lora_info, topk_ids)
         token_lora_mapping = None
         fused_lora_routing_cache = {}
-
-    two_stream = use_virtual_lora_store and _two_stream_active(hidden_states)
-    side_stream = _get_lora_side_stream() if two_stream else None
 
     gate_up_delta_shape = (
         hidden_states.shape[0],
@@ -924,13 +930,24 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             use_direct_expand_add=True,
         )
 
+    packed_topk_ids = None
     if two_stream:
-        # Fork the LoRA side stream off the pre-MoE state; gate_up shrink/expand
-        # needs only hidden_states + token_lora_mapping, so the base FP8 quant
-        # below runs on the main stream concurrently.
+        # Fork the LoRA side stream off the pre-MoE state and pile every
+        # LoRA-related kernel that doesn't require trtllm-op output onto it
+        # while the main stream is busy with per_token_group_quant_fp8 below:
+        #   - _compute_token_lora_mapping (small, was on main pre-fork)
+        #   - _run_gate_up_lora (LoRA A/B for gate_up — original O1 work)
+        #   - _pack_topk_for_flashinfer_routed (small, was on main post-fork)
+        # All three together still fit inside the quant window (~50 µs), so
+        # they're effectively free vs. the previous gate_up-only side stream.
         side_stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(side_stream):
+            token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
             _run_gate_up_lora()
+            packed_topk_ids = _pack_topk_for_flashinfer_routed(
+                topk_ids=topk_ids,
+                topk_weights=topk_weights,
+            )
 
     a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
     a_sf_t = a_sf.t().contiguous()
@@ -947,10 +964,11 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         device=hidden_states.device,
     )
 
-    packed_topk_ids = _pack_topk_for_flashinfer_routed(
-        topk_ids=topk_ids,
-        topk_weights=topk_weights,
-    )
+    if packed_topk_ids is None:
+        packed_topk_ids = _pack_topk_for_flashinfer_routed(
+            topk_ids=topk_ids,
+            topk_weights=topk_weights,
+        )
 
     direct_down_output = None
     if use_virtual_lora_store:
