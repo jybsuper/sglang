@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -804,33 +803,6 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
     return StandardCombineInput(hidden_states=output)
 
 
-# --- Two-stream LoRA overlap (decode-only) ---------------------------------
-# Run the LoRA shrink/expand on a dedicated CUDA stream so it overlaps the base
-# trtllm MoE path on the main stream. Gated to decode (small token count): in
-# prefill the kernels already saturate the GPU and the extra stream sync/merge
-# only adds overhead. Master switch: env SGLANG_LORA_TWO_STREAM=1.
-_LORA_SIDE_STREAM = None
-
-
-def _get_lora_side_stream():
-    global _LORA_SIDE_STREAM
-    if _LORA_SIDE_STREAM is None:
-        _LORA_SIDE_STREAM = torch.cuda.Stream()
-    return _LORA_SIDE_STREAM
-
-
-def _two_stream_active(hidden_states) -> bool:
-    if os.environ.get("SGLANG_LORA_TWO_STREAM") != "1":
-        return False
-    try:
-        max_tok = int(os.environ.get("SGLANG_TWO_STREAM_MAX_TOKENS", "256"))
-    except ValueError:
-        max_tok = 256
-    # decode proxy: decode token count == batch size (<= cuda_graph_max_bs);
-    # prefill chunks are >= input_len (thousands) and stay on the serial path.
-    return hidden_states.shape[0] <= max_tok
-
-
 def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     dispatch_output: StandardDispatchOutput,
     quant_info: FlashInferTrtllmFp8MoeQuantInfo,
@@ -851,6 +823,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         build_lora_hooks,
     )
     from sglang.srt.lora.triton_ops import merged_experts_fused_moe_lora_add
+    from sglang.srt.lora.two_stream.moe_overlap import maybe_fork_lora_overlap, maybe_join
     from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
 
     assert runner_config.activation == "silu" and runner_config.is_gated, (
@@ -893,9 +866,6 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         token_lora_mapping = None
         fused_lora_routing_cache = {}
 
-    two_stream = use_virtual_lora_store and _two_stream_active(hidden_states)
-    side_stream = _get_lora_side_stream() if two_stream else None
-
     gate_up_delta_shape = (
         hidden_states.shape[0],
         runner_config.top_k,
@@ -924,18 +894,20 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             use_direct_expand_add=True,
         )
 
-    if two_stream:
-        # Fork the LoRA side stream off the pre-MoE state; gate_up shrink/expand
-        # needs only hidden_states + token_lora_mapping, so the base FP8 quant
-        # below runs on the main stream concurrently.
-        side_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(side_stream):
-            _run_gate_up_lora()
+    # O1 — fork gate_up LoRA onto the side stream concurrent with the base
+    # FP8 quant below. Returns None if two-stream isn't active (env gate /
+    # non-virtual-lora / prefill); the fallback gate_up call below runs on
+    # the main stream in that case. See lora/two_stream/moe_overlap.py.
+    side_stream = (
+        maybe_fork_lora_overlap(_run_gate_up_lora, hidden_states)
+        if use_virtual_lora_store
+        else None
+    )
 
     a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
     a_sf_t = a_sf.t().contiguous()
 
-    if not two_stream:
+    if side_stream is None:
         if use_virtual_lora_store:
             _run_gate_up_lora()
         elif hooks.after_gate_up is not None:
@@ -962,9 +934,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
                 device=hidden_states.device,
             )
 
-    if two_stream:
-        # Join: trtllm's activation consumes gate_up_delta produced on the side stream.
-        torch.cuda.current_stream().wait_stream(side_stream)
+    # O1 join: trtllm's activation consumes gate_up_delta produced on the side stream.
+    maybe_join(side_stream)
 
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,

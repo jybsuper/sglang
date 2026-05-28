@@ -1,35 +1,7 @@
-import os
 from typing import Dict, Optional, Union
 
 import torch
 import torch.nn.functional as F
-
-# --- O7/O8: two-stream attention LoRA overlap (decode-only) ----------------
-# Run the LoRA shrink (sgemm_lora_a_fwd) on a side stream concurrent with the
-# corresponding base attention GEMM (qkv_proj for O7, o_proj for O8) on the main
-# stream; join before the LoRA expand atomic-adds the delta into base_output.
-# Gated decode-only via the SGLANG_LORA_TWO_STREAM env var (same master switch
-# as O1's MoE gate_up overlap). QKV and o_proj share one side stream — they run
-# sequentially within an attention layer (qkv → attn → o_proj), so reusing a
-# single global stream is fine.
-_ATTN_LORA_SIDE_STREAM = None
-
-
-def _get_attn_lora_side_stream():
-    global _ATTN_LORA_SIDE_STREAM
-    if _ATTN_LORA_SIDE_STREAM is None:
-        _ATTN_LORA_SIDE_STREAM = torch.cuda.Stream()
-    return _ATTN_LORA_SIDE_STREAM
-
-
-def _attn_two_stream_active(x) -> bool:
-    if os.environ.get("SGLANG_LORA_TWO_STREAM") != "1":
-        return False
-    try:
-        max_tok = int(os.environ.get("SGLANG_TWO_STREAM_MAX_TOKENS", "256"))
-    except ValueError:
-        max_tok = 256
-    return x.shape[0] <= max_tok
 from torch import nn
 
 from sglang.srt.distributed import (
@@ -666,54 +638,12 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         return lora_output
 
     def forward(self, input_: torch.Tensor):
-        """Two-stream override: run the LoRA shrink on a side stream concurrent
-        with the base qkv_proj GEMM on the main stream; join before the LoRA
-        expand atomic-adds into base_output. Decode-only, gated on env var.
+        # O7 — side-stream LoRA shrink ‖ base qkv_proj GEMM (decode-only).
+        # Implementation in sglang/srt/lora/two_stream/attention.py; falls back
+        # to the base ColumnParallel forward when two-stream isn't active.
+        from sglang.srt.lora.two_stream.attention import qkv_proj_lora_forward
 
-        The shrink reads `input_` and the LoRA-A weights — same input as the
-        base GEMM, no write conflict. The expand needs the shrink intermediate
-        (from side) AND base_output (from main GEMM), so it runs after the join.
-        """
-        if not self.set_lora or not _attn_two_stream_active(input_):
-            return ColumnParallelLinearWithLoRA.forward(self, input_)
-
-        from sglang.srt.lora.triton_ops import qkv_lora_b_fwd, sgemm_lora_a_fwd
-
-        bias = self.base_layer.bias if not self.base_layer.skip_bias_add else None
-        side_stream = _get_attn_lora_side_stream()
-        # sgemm_info is host-side (LoRABatchInfo); compute once, share both calls.
-        sgemm_info = self.lora_backend._sgemm_info()
-
-        side_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(side_stream):
-            shrink_intermediate = sgemm_lora_a_fwd(
-                input_, self.A_buffer_qkv, sgemm_info, stack_num=3
-            )
-
-        # Base qkv_proj GEMM on main, concurrent with the side-stream shrink.
-        output_parallel = self.base_layer.quant_method.apply(
-            self.base_layer, input_, bias
-        )
-
-        # Join: expand reads both the side-produced shrink_intermediate and
-        # base_output, so wait for the side stream before launching it.
-        torch.cuda.current_stream().wait_stream(side_stream)
-        output_parallel = qkv_lora_b_fwd(
-            shrink_intermediate,
-            self.B_buffer_qkv,
-            sgemm_info,
-            self.output_offset,
-            self.max_qkv_out_dim,
-            output_parallel,
-            n_slices=3,
-        )
-
-        if self.base_layer.gather_output:
-            output = tensor_model_parallel_all_gather(output_parallel)
-        else:
-            output = output_parallel
-        output_bias = self.base_layer.bias if self.base_layer.skip_bias_add else None
-        return output, output_bias
+        return qkv_proj_lora_forward(self, input_)
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
@@ -785,84 +715,12 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return lora_output
 
     def forward(self, input_: torch.Tensor, skip_all_reduce=False, forward_batch=None):
-        if self.base_layer.input_is_parallel:
-            input_parallel = input_
-        else:
-            tp_rank = get_tensor_model_parallel_rank()
-            splitted_input = split_tensor_along_last_dim(
-                input_, num_partitions=self.base_layer.tp_size
-            )
-            input_parallel = splitted_input[tp_rank].contiguous()
+        # O8 — side-stream LoRA shrink ‖ base row-parallel GEMM (decode-only).
+        # Implementation in sglang/srt/lora/two_stream/attention.py; runs the
+        # original single-stream logic when two-stream isn't active.
+        from sglang.srt.lora.two_stream.attention import row_parallel_lora_forward
 
-        bias_ = (
-            None
-            if (self.base_layer.tp_rank > 0 or self.base_layer.skip_bias_add)
-            else self.base_layer.bias
-        )
-
-        # O8: side-stream LoRA shrink concurrent with the base row-parallel GEMM
-        # (e.g. o_proj). The shrink reads input_parallel — same input as the base
-        # GEMM, no write conflict — so it can fork off, run on the side stream,
-        # and rejoin before the all-reduce or expand consumes its result. Decode-
-        # only, gated by SGLANG_LORA_TWO_STREAM (same master switch as O1/O7).
-        two_stream = self.set_lora and _attn_two_stream_active(input_parallel)
-        lora_a_output = None
-        if two_stream:
-            side_stream = _get_attn_lora_side_stream()
-            side_stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(side_stream):
-                lora_a_output = self.lora_backend.run_lora_a_sgemm(
-                    input_parallel, self.A_buffer
-                )
-
-        output_parallel = self.base_layer.quant_method.apply(
-            self.base_layer, input_parallel, bias=bias_
-        )
-
-        if two_stream:
-            torch.cuda.current_stream().wait_stream(side_stream)
-
-        should_reduce = (
-            self.base_layer.reduce_results
-            and self.base_layer.tp_size > 1
-            and not skip_all_reduce
-        )
-
-        if self.set_lora and should_reduce:
-            if lora_a_output is None:
-                lora_a_output = self.lora_backend.run_lora_a_sgemm(
-                    input_parallel, self.A_buffer
-                )
-            output_ = tensor_model_parallel_all_reduce(output_parallel)
-            lora_a_output = tensor_model_parallel_all_reduce(lora_a_output)
-            output_ = self.lora_backend.run_lora_b_sgemm(
-                x=lora_a_output,
-                weights=self.B_buffer,
-                output_offset=self.output_offset,
-                output_offset_cpu=self.output_offset_cpu,
-                base_output=output_,
-            )
-        else:
-            if self.set_lora:
-                if lora_a_output is not None:
-                    # Two-stream branch already ran the shrink on the side stream;
-                    # finish the LoRA with just the expand against output_parallel.
-                    output_parallel = self.lora_backend.run_lora_b_sgemm(
-                        x=lora_a_output,
-                        weights=self.B_buffer,
-                        output_offset=self.output_offset,
-                        output_offset_cpu=self.output_offset_cpu,
-                        base_output=output_parallel,
-                    )
-                else:
-                    output_parallel = self.apply_lora(output_parallel, input_parallel)
-            if should_reduce:
-                output_ = tensor_model_parallel_all_reduce(output_parallel)
-            else:
-                output_ = output_parallel
-
-        output_bias = self.base_layer.bias if self.base_layer.skip_bias_add else None
-        return output_, output_bias
+        return row_parallel_lora_forward(self, input_, skip_all_reduce, forward_batch)
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         shard_size = self.base_layer.input_size_per_partition
