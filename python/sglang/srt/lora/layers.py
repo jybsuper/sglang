@@ -1252,5 +1252,5 @@ def get_lora_layer(
 # when the env var is unset (existing single-stream behavior unchanged); when
 # set, it monkey-patches the LoRA forwards above + the trtllm MoE LoRA dispatch
 # to use side-stream overlapped versions defined in that package.
-from sglang.srt.lora.two_stream import install_two_stream_overrides as _install_lora_two_stream  # noqa: E402
+from sglang.srt.lora.trtllm_moe import install_two_stream_overrides as _install_lora_two_stream  # noqa: E402
 _install_lora_two_stream()

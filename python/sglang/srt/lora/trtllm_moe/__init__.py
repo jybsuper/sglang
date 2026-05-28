@@ -102,7 +102,7 @@ def install_two_stream_overrides() -> None:
         QKVParallelLinearWithLoRA,
         RowParallelLinearWithLoRA,
     )
-    from sglang.srt.lora.two_stream.attention import (
+    from sglang.srt.lora.trtllm_moe.attention import (
         qkv_proj_lora_forward,
         row_parallel_lora_forward,
     )
@@ -113,7 +113,7 @@ def install_two_stream_overrides() -> None:
     RowParallelLinearWithLoRA.forward = row_parallel_lora_forward
 
     import sglang.srt.layers.moe.moe_runner.flashinfer_trtllm as ft
-    from sglang.srt.lora.two_stream.moe_overlap import (
+    from sglang.srt.lora.trtllm_moe.moe_overlap import (
         fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream,
     )
 

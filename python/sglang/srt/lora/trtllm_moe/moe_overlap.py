@@ -11,7 +11,7 @@ their behavior is byte-identical to the unpatched code path.
 """
 import torch
 
-from sglang.srt.lora.two_stream import (
+from sglang.srt.lora.trtllm_moe import (
     get_lora_side_stream,
     get_original_moe_lora_func,
     is_two_stream_active,

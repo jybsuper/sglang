@@ -2,7 +2,7 @@
 
 These are monkey-patched onto :class:`QKVParallelLinearWithLoRA` and
 :class:`RowParallelLinearWithLoRA` by
-:func:`sglang.srt.lora.two_stream.install_two_stream_overrides` when
+:func:`sglang.srt.lora.trtllm_moe.install_two_stream_overrides` when
 ``SGLANG_LORA_TWO_STREAM=1``. The saved-original forward methods are
 preserved and called for batches where two-stream isn't active.
 """
@@ -14,7 +14,7 @@ from sglang.srt.distributed import (
     tensor_model_parallel_all_gather,
     tensor_model_parallel_all_reduce,
 )
-from sglang.srt.lora.two_stream import (
+from sglang.srt.lora.trtllm_moe import (
     get_lora_side_stream,
     get_original_qkv_forward,
     get_original_row_forward,
