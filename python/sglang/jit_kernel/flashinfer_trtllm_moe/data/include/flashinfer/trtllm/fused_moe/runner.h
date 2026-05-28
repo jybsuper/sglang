@@ -429,17 +429,6 @@ class Runner {
   void run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
            cudaStream_t stream, int64_t configIndex, bool enable_pdl);
 
-  // Two-stream LoRA split: the four stages of run() exposed separately so a LoRA
-  // side stream can overlap gate_up LoRA with runGemm1 and down LoRA with runGemm2.
-  // The internal workspace must persist across all four calls (one launcher instance).
-  void runGemm1(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
-                cudaStream_t stream, int64_t configIndex, bool enable_pdl);
-  void runActivation(MoERunnerArgs const& args, MoEWorkspace const& workspace,
-                     cudaStream_t stream);
-  void runGemm2(MoERunnerArgs const& args, MoEWorkspace const& workspace, int device,
-                cudaStream_t stream, int64_t configIndex, bool enable_pdl);
-  void runFinalize(MoERunnerArgs const& args, MoEWorkspace const& workspace, cudaStream_t stream);
-
   [[nodiscard]] std::tuple<int32_t, int32_t> getWorkspaceSizeInBytes(MoERunnerArgs const& args,
                                                                      int64_t configIndex) const;
 
