@@ -637,14 +637,6 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
         return lora_output
 
-    def forward(self, input_: torch.Tensor):
-        # O7 — side-stream LoRA shrink ‖ base qkv_proj GEMM (decode-only).
-        # Implementation in sglang/srt/lora/two_stream/attention.py; falls back
-        # to the base ColumnParallel forward when two-stream isn't active.
-        from sglang.srt.lora.two_stream.attention import qkv_proj_lora_forward
-
-        return qkv_proj_lora_forward(self, input_)
-
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
 
@@ -715,12 +707,53 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return lora_output
 
     def forward(self, input_: torch.Tensor, skip_all_reduce=False, forward_batch=None):
-        # O8 — side-stream LoRA shrink ‖ base row-parallel GEMM (decode-only).
-        # Implementation in sglang/srt/lora/two_stream/attention.py; runs the
-        # original single-stream logic when two-stream isn't active.
-        from sglang.srt.lora.two_stream.attention import row_parallel_lora_forward
+        if self.base_layer.input_is_parallel:
+            input_parallel = input_
+        else:
+            tp_rank = get_tensor_model_parallel_rank()
+            splitted_input = split_tensor_along_last_dim(
+                input_, num_partitions=self.base_layer.tp_size
+            )
+            input_parallel = splitted_input[tp_rank].contiguous()
 
-        return row_parallel_lora_forward(self, input_, skip_all_reduce, forward_batch)
+        bias_ = (
+            None
+            if (self.base_layer.tp_rank > 0 or self.base_layer.skip_bias_add)
+            else self.base_layer.bias
+        )
+        output_parallel = self.base_layer.quant_method.apply(
+            self.base_layer, input_parallel, bias=bias_
+        )
+
+        should_reduce = (
+            self.base_layer.reduce_results
+            and self.base_layer.tp_size > 1
+            and not skip_all_reduce
+        )
+
+        if self.set_lora and should_reduce:
+            lora_a_output = self.lora_backend.run_lora_a_sgemm(
+                input_parallel, self.A_buffer
+            )
+            output_ = tensor_model_parallel_all_reduce(output_parallel)
+            lora_a_output = tensor_model_parallel_all_reduce(lora_a_output)
+            output_ = self.lora_backend.run_lora_b_sgemm(
+                x=lora_a_output,
+                weights=self.B_buffer,
+                output_offset=self.output_offset,
+                output_offset_cpu=self.output_offset_cpu,
+                base_output=output_,
+            )
+        else:
+            if self.set_lora:
+                output_parallel = self.apply_lora(output_parallel, input_parallel)
+            if should_reduce:
+                output_ = tensor_model_parallel_all_reduce(output_parallel)
+            else:
+                output_ = output_parallel
+
+        output_bias = self.base_layer.bias if self.base_layer.skip_bias_add else None
+        return output_, output_bias
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         shard_size = self.base_layer.input_size_per_partition
@@ -1212,3 +1245,12 @@ def get_lora_layer(
             ret = lora_layer_type(layer, lora_backend)
             return ret
     raise Exception(f"No corresponding LoRA layer supported for {type(layer)}.")
+
+
+# === Two-stream LoRA overlap (O1 + O7 + O8) — opt-in via SGLANG_LORA_TWO_STREAM=1 ===
+# All logic lives in `sglang/srt/lora/two_stream/`. The call below is a no-op
+# when the env var is unset (existing single-stream behavior unchanged); when
+# set, it monkey-patches the LoRA forwards above + the trtllm MoE LoRA dispatch
+# to use side-stream overlapped versions defined in that package.
+from sglang.srt.lora.two_stream import install_two_stream_overrides as _install_lora_two_stream  # noqa: E402
+_install_lora_two_stream()

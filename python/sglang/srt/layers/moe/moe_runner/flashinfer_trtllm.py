@@ -823,7 +823,6 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         build_lora_hooks,
     )
     from sglang.srt.lora.triton_ops import merged_experts_fused_moe_lora_add
-    from sglang.srt.lora.two_stream.moe_overlap import maybe_fork_lora_overlap, maybe_join
     from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
 
     assert runner_config.activation == "silu" and runner_config.is_gated, (
@@ -866,6 +865,9 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         token_lora_mapping = None
         fused_lora_routing_cache = {}
 
+    a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
+    a_sf_t = a_sf.t().contiguous()
+
     gate_up_delta_shape = (
         hidden_states.shape[0],
         runner_config.top_k,
@@ -876,8 +878,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
         if use_virtual_lora_store
         else hidden_states.new_zeros(gate_up_delta_shape)
     )
-
-    def _run_gate_up_lora():
+    if use_virtual_lora_store:
         merged_experts_fused_moe_lora_add(
             output=gate_up_delta,
             hidden_states=hidden_states,
@@ -893,25 +894,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             fuse_add_to_output=False,
             use_direct_expand_add=True,
         )
-
-    # O1 — fork gate_up LoRA onto the side stream concurrent with the base
-    # FP8 quant below. Returns None if two-stream isn't active (env gate /
-    # non-virtual-lora / prefill); the fallback gate_up call below runs on
-    # the main stream in that case. See lora/two_stream/moe_overlap.py.
-    side_stream = (
-        maybe_fork_lora_overlap(_run_gate_up_lora, hidden_states)
-        if use_virtual_lora_store
-        else None
-    )
-
-    a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
-    a_sf_t = a_sf.t().contiguous()
-
-    if side_stream is None:
-        if use_virtual_lora_store:
-            _run_gate_up_lora()
-        elif hooks.after_gate_up is not None:
-            hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
+    elif hooks.after_gate_up is not None:
+        hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
 
     activation_lora_input = torch.empty(
         (hidden_states.shape[0], runner_config.top_k, quant_info.intermediate_size),
@@ -933,9 +917,6 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
                 dtype=hidden_states.dtype,
                 device=hidden_states.device,
             )
-
-    # O1 join: trtllm's activation consumes gate_up_delta produced on the side stream.
-    maybe_join(side_stream)
 
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,

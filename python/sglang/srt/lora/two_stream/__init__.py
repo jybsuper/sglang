@@ -1,34 +1,27 @@
-"""Two-stream LoRA overlap helpers (O1, O7, O8).
+"""Two-stream LoRA overlap (O1 + O7 + O8) — installed as a monkey-patch.
 
-Side-stream overlap optimizations for SGLang LoRA serving on the
-``sgl_flashinfer_trtllm`` MoE backend. The optimizations run the LoRA
-shrink/expand on a dedicated CUDA stream concurrently with the base
-attention or MoE GEMMs on the main stream. Decode-only — prefill kernels
-already saturate the GPU, so the extra stream sync/merge would only add
-overhead.
+Activates when env ``SGLANG_LORA_TWO_STREAM=1``. Triggered exactly once via
+:func:`install_two_stream_overrides` (called at end of ``sglang/srt/lora/layers.py``).
 
-This package is the centralized landing for all two-stream code so the
-existing files (``lora/layers.py`` and
-``layers/moe/moe_runner/flashinfer_trtllm.py``) need only minimal injection
-points (env gate + one delegate per call site).
+When enabled, three call sites are redirected to side-stream-overlapped versions
+defined entirely in this package:
 
-Master switch: env ``SGLANG_LORA_TWO_STREAM=1``. Token-count threshold:
-``SGLANG_TWO_STREAM_MAX_TOKENS`` (default 256, matches typical decode bs).
+  * ``QKVParallelLinearWithLoRA.forward``  → :mod:`.attention.qkv_proj_lora_forward`
+  * ``RowParallelLinearWithLoRA.forward``  → :mod:`.attention.row_parallel_lora_forward`
+  * ``fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora`` →
+    :mod:`.moe_overlap.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream`
 
-Currently active overlaps:
+When disabled (env unset), ``install_two_stream_overrides`` is a no-op and all
+the original functions / methods in ``sglang/srt/lora/layers.py`` and
+``sglang/srt/layers/moe/moe_runner/flashinfer_trtllm.py`` run unchanged.
 
-  - **O1**: gate_up MoE LoRA shrink+expand on side stream, concurrent with
-    main-stream per-token-group FP8 quant (``flashinfer_trtllm.py``).
-  - **O7**: QKV-attention LoRA shrink on side stream, concurrent with the
-    base qkv_proj GEMM on main; rejoin before LoRA expand atomic-add.
-  - **O8**: o_proj (row-parallel) LoRA shrink on side stream, concurrent
-    with the base o_proj GEMM on main; rejoin before all-reduce/expand.
-
-A single global side stream serves all three sites — within one layer they
-run sequentially (qkv → attn → o_proj → moe_gate_up), so reuse is safe.
+Per-batch gating still happens inside the patched callables — they fall back
+to the saved-original implementation for non-decode batches (token count above
+``SGLANG_TWO_STREAM_MAX_TOKENS`` default 256), so prefill stays on the serial
+path even with the patch installed.
 """
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 
@@ -38,13 +31,7 @@ _MAX_TOKENS_DEFAULT = 256
 
 
 def is_two_stream_active(x: torch.Tensor) -> bool:
-    """Whether side-stream LoRA overlap should fire for this batch.
-
-    Returns ``False`` unless ``SGLANG_LORA_TWO_STREAM=1`` AND the leading
-    dim of ``x`` (= token count for typical decode input shapes) is at or
-    below ``SGLANG_TWO_STREAM_MAX_TOKENS``. Prefill batches with thousands
-    of chunked tokens stay on the serial path.
-    """
+    """Per-batch gate. True iff env is on AND batch is decode-shaped."""
     if os.environ.get(_ENV_KEY) != "1":
         return False
     try:
@@ -58,12 +45,11 @@ _LORA_SIDE_STREAM: Optional[torch.cuda.Stream] = None
 
 
 def get_lora_side_stream() -> torch.cuda.Stream:
-    """Lazily allocate and return the shared LoRA side stream.
+    """Lazily allocate a single shared LoRA side stream.
 
-    Reused across O1/O7/O8 sites within a layer — their overlap windows
-    are sequential (qkv → attn → o_proj → moe_gate_up), so one stream is
-    enough and avoids the per-site allocation + capture-graph node overhead
-    of separate streams.
+    Within one decode layer the three sites (qkv → attn → o_proj → moe_gate_up)
+    run sequentially, so one stream suffices and avoids extra graph-capture
+    nodes from per-site streams.
     """
     global _LORA_SIDE_STREAM
     if _LORA_SIDE_STREAM is None:
@@ -71,4 +57,79 @@ def get_lora_side_stream() -> torch.cuda.Stream:
     return _LORA_SIDE_STREAM
 
 
-__all__ = ["is_two_stream_active", "get_lora_side_stream"]
+# References to the original implementations, captured at install time so the
+# patched callables can defer to them for non-decode batches.
+_ORIGINAL_QKV_FORWARD: Optional[Callable] = None
+_ORIGINAL_ROW_FORWARD: Optional[Callable] = None
+_ORIGINAL_MOE_LORA_FUNC: Optional[Callable] = None
+_INSTALLED: bool = False
+
+
+def get_original_qkv_forward() -> Callable:
+    return _ORIGINAL_QKV_FORWARD
+
+
+def get_original_row_forward() -> Callable:
+    return _ORIGINAL_ROW_FORWARD
+
+
+def get_original_moe_lora_func() -> Callable:
+    return _ORIGINAL_MOE_LORA_FUNC
+
+
+def install_two_stream_overrides() -> None:
+    """Install the side-stream overlapped overrides if ``SGLANG_LORA_TWO_STREAM=1``.
+
+    Idempotent: subsequent calls are a no-op. Patches:
+
+      1. ``QKVParallelLinearWithLoRA.forward`` (O7 — qkv LoRA shrink overlap)
+      2. ``RowParallelLinearWithLoRA.forward`` (O8 — o_proj LoRA shrink overlap)
+      3. ``flashinfer_trtllm.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora``
+         (O1 — MoE gate_up LoRA overlap)
+
+    The saved originals are exposed via :func:`get_original_qkv_forward`,
+    :func:`get_original_row_forward`, :func:`get_original_moe_lora_func` so the
+    new versions can fall back when their per-batch gate says single-stream.
+    """
+    global _INSTALLED, _ORIGINAL_QKV_FORWARD, _ORIGINAL_ROW_FORWARD, _ORIGINAL_MOE_LORA_FUNC
+
+    if _INSTALLED:
+        return
+    if os.environ.get(_ENV_KEY) != "1":
+        return
+
+    from sglang.srt.lora.layers import (
+        QKVParallelLinearWithLoRA,
+        RowParallelLinearWithLoRA,
+    )
+    from sglang.srt.lora.two_stream.attention import (
+        qkv_proj_lora_forward,
+        row_parallel_lora_forward,
+    )
+
+    _ORIGINAL_QKV_FORWARD = QKVParallelLinearWithLoRA.forward
+    _ORIGINAL_ROW_FORWARD = RowParallelLinearWithLoRA.forward
+    QKVParallelLinearWithLoRA.forward = qkv_proj_lora_forward
+    RowParallelLinearWithLoRA.forward = row_parallel_lora_forward
+
+    import sglang.srt.layers.moe.moe_runner.flashinfer_trtllm as ft
+    from sglang.srt.lora.two_stream.moe_overlap import (
+        fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream,
+    )
+
+    _ORIGINAL_MOE_LORA_FUNC = ft.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora
+    ft.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora = (
+        fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream
+    )
+
+    _INSTALLED = True
+
+
+__all__ = [
+    "is_two_stream_active",
+    "get_lora_side_stream",
+    "get_original_qkv_forward",
+    "get_original_row_forward",
+    "get_original_moe_lora_func",
+    "install_two_stream_overrides",
+]
