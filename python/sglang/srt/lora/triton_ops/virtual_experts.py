@@ -737,9 +737,11 @@ def _merged_experts_fused_moe_lora_add_impl(
     )
 
     intermediate_flat = intermediate.view(-1, max_lora_rank)
-    if use_direct_expand_add:
+    # The rank-specialized direct expand-add doesn't support the shared-outer
+    # LoRA-B layout; fall back to the generic kernel for that case instead of
+    # asserting, so adapters with experts_shared_outer_loras still work.
+    if use_direct_expand_add and not experts_shared_outer_loras_b:
         assert not fuse_add_to_output
-        assert not experts_shared_outer_loras_b
         _invoke_moe_lora_expand_add(
             intermediate_flat,
             lora_b_virtual,
