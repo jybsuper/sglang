@@ -57,6 +57,25 @@ def get_lora_side_stream() -> torch.cuda.Stream:
     return _LORA_SIDE_STREAM
 
 
+def init_lora_two_stream_resources(device: Optional[torch.device] = None) -> None:
+    """Eagerly create the side stream before cuda-graph capture begins.
+
+    ``torch.cuda.Stream()`` is a driver call that must not run inside a
+    cuda-graph capture region. Since :func:`get_lora_side_stream` is otherwise
+    lazy, the first eligible decode forward would create it — which can fall
+    inside capture if warmup didn't happen to exercise a two-stream batch.
+    Calling this from a pre-capture hook pins creation to init/warmup on the
+    correct device. No-op unless ``SGLANG_LORA_TWO_STREAM=1``.
+    """
+    if os.environ.get(_ENV_KEY) != "1":
+        return
+    if device is not None:
+        with torch.cuda.device(device):
+            get_lora_side_stream()
+    else:
+        get_lora_side_stream()
+
+
 # References to the original implementations, captured at install time so the
 # patched callables can defer to them for non-decode batches.
 _ORIGINAL_QKV_FORWARD: Optional[Callable] = None
@@ -128,6 +147,7 @@ def install_two_stream_overrides() -> None:
 __all__ = [
     "is_two_stream_active",
     "get_lora_side_stream",
+    "init_lora_two_stream_resources",
     "get_original_qkv_forward",
     "get_original_row_forward",
     "get_original_moe_lora_func",
