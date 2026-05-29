@@ -11,6 +11,7 @@ When ``SGLANG_LORA_TWO_STREAM=1`` is set, this is the function the
 version in :mod:`sglang.srt.lora.trtllm_moe.moe_overlap`. Otherwise it runs as
 the active path.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -102,6 +103,13 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     a_q, a_sf = per_token_group_quant_fp8(hidden_states, quant_info.weight_block_k)
     a_sf_t = a_sf.t().contiguous()
 
+    # Under MoE EP the LoRA path only writes deltas for experts this rank owns
+    # (see merged_experts_fused_moe_lora_add); non-owned [token,k] slots are left
+    # unwritten. That is safe even though the trtllm FP8 activation kernel reads
+    # gate_up_delta for those slots: the per-token FP8 amax it derives is reduced
+    # across the hidden dim per token lane, so a non-owned slot's garbage only
+    # affects its own (discarded) output, never an owned token's scale. So we
+    # keep the cheaper new_empty rather than zeroing every step.
     gate_up_delta_shape = (
         hidden_states.shape[0],
         runner_config.top_k,
@@ -127,6 +135,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             routing_cache=fused_lora_routing_cache,
             fuse_add_to_output=False,
             use_direct_expand_add=lora_info.max_lora_rank <= 64,
+            local_expert_offset=quant_info.local_expert_offset,
+            local_num_experts=quant_info.local_num_experts,
         )
     elif hooks.after_gate_up is not None:
         hooks.after_gate_up(hidden_states, gate_up_delta, topk_weights, topk_ids)
@@ -144,7 +154,9 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
 
     direct_down_output = None
     if use_virtual_lora_store:
-        with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
+        with use_symmetric_memory(
+            get_tp_group(), disabled=not is_allocation_symmetric()
+        ):
             direct_down_output = torch.empty(
                 hidden_states.shape[0],
                 hidden_states.shape[1],
@@ -208,6 +220,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
             fuse_add_to_output=False,
             fuse_sum_all_reduce=True,
             use_direct_expand_add=lora_info.max_lora_rank <= 64,
+            local_expert_offset=quant_info.local_expert_offset,
+            local_num_experts=quant_info.local_num_experts,
         )
         return StandardCombineInput(hidden_states=output)
 

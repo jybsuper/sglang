@@ -9,6 +9,7 @@ Batches that don't qualify for two-stream (prefill / non-virtual-lora /
 batch without active LoRA) fall through to the saved-original function so
 their behavior is byte-identical to the unpatched code path.
 """
+
 import torch
 
 from sglang.srt.lora.trtllm_moe import (
@@ -86,6 +87,10 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
 
     side_stream = get_lora_side_stream()
 
+    # See lora_dispatch.py: non-owned gate_up_delta slots are left unwritten under
+    # EP, which is safe because the trtllm FP8 activation kernel's per-token amax
+    # is reduced per token lane, so a non-owned slot's garbage only affects its
+    # own discarded output. Keep new_empty (no per-step zeroing).
     gate_up_delta_shape = (
         hidden_states.shape[0],
         runner_config.top_k,
@@ -108,6 +113,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
             routing_cache=fused_lora_routing_cache,
             fuse_add_to_output=False,
             use_direct_expand_add=lora_info.max_lora_rank <= 64,
+            local_expert_offset=quant_info.local_expert_offset,
+            local_num_experts=quant_info.local_num_experts,
         )
 
     # O1 fork — gate_up shrink/expand on side stream concurrent with the
@@ -194,5 +201,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         fuse_add_to_output=False,
         fuse_sum_all_reduce=True,
         use_direct_expand_add=lora_info.max_lora_rank <= 64,
+        local_expert_offset=quant_info.local_expert_offset,
+        local_num_experts=quant_info.local_num_experts,
     )
     return StandardCombineInput(hidden_states=output)
