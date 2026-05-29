@@ -55,10 +55,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
     from sglang.srt.layers.moe.topk import TopKOutputChecker
     from sglang.srt.layers.moe.utils import RoutingMethodType
-    from sglang.srt.lora.lora_moe_runners import (
-        _compute_token_lora_mapping,
-        build_lora_hooks,
-    )
+    from sglang.srt.lora.lora_moe_runners import build_lora_hooks
     from sglang.srt.lora.triton_ops import merged_experts_fused_moe_lora_add
     from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
 
@@ -95,7 +92,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora(
     )
     if use_virtual_lora_store:
         hooks = None
-        token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
+        token_lora_mapping = lora_info.token_lora_mapping
         fused_lora_routing_cache: dict = {}
     else:
         hooks = build_lora_hooks(hidden_states, lora_info, topk_ids)

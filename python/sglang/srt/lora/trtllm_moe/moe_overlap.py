@@ -60,7 +60,6 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
     from sglang.srt.layers.moe.topk import TopKOutputChecker
     from sglang.srt.layers.moe.utils import RoutingMethodType
     from sglang.srt.layers.quantization.fp8_kernel import per_token_group_quant_fp8
-    from sglang.srt.lora.lora_moe_runners import _compute_token_lora_mapping
     from sglang.srt.lora.triton_ops import merged_experts_fused_moe_lora_add
     from sglang.srt.utils.common import next_power_of_2
 
@@ -82,7 +81,7 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
 
     topk_ids = topk_output.topk_ids
     topk_weights = topk_output.topk_weights
-    token_lora_mapping = _compute_token_lora_mapping(hidden_states, lora_info)
+    token_lora_mapping = lora_info.token_lora_mapping
     fused_lora_routing_cache: dict = {}
 
     side_stream = get_lora_side_stream()
