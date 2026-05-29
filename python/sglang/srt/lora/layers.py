@@ -1199,7 +1199,7 @@ def get_lora_layer(
 
 
 # === Two-stream LoRA overlap (O1 + O7 + O8) — opt-in via SGLANG_LORA_TWO_STREAM=1 ===
-# All logic lives in `sglang/srt/lora/two_stream/`. The call below is a no-op
+# All logic lives in `sglang/srt/lora/trtllm_moe/`. The call below is a no-op
 # when the env var is unset (existing single-stream behavior unchanged); when
 # set, it monkey-patches the LoRA forwards above + the trtllm MoE LoRA dispatch
 # to use side-stream overlapped versions defined in that package.
