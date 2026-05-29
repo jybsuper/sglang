@@ -1,13 +1,14 @@
-"""Two-stream LoRA overlap (O1 + O7 + O8) — installed as a monkey-patch.
+"""Two-stream LoRA overlap (O1 + O7 + O8 + O9) — installed as a monkey-patch.
 
 Activates when env ``SGLANG_LORA_TWO_STREAM=1``. Triggered exactly once via
 :func:`install_two_stream_overrides` (called at end of ``sglang/srt/lora/layers.py``).
 
-When enabled, three call sites are redirected to side-stream-overlapped versions
+When enabled, these call sites are redirected to side-stream-overlapped versions
 defined entirely in this package:
 
   * ``QKVParallelLinearWithLoRA.forward``  → :mod:`.attention.qkv_proj_lora_forward`
   * ``RowParallelLinearWithLoRA.forward``  → :mod:`.attention.row_parallel_lora_forward`
+  * ``MergedColumnParallelLinearWithLoRA.forward`` → :mod:`.merged_column.merged_column_lora_forward`
   * ``fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora`` →
     :mod:`.moe_overlap.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream`
 
@@ -80,6 +81,7 @@ def init_lora_two_stream_resources(device: Optional[torch.device] = None) -> Non
 # patched callables can defer to them for non-decode batches.
 _ORIGINAL_QKV_FORWARD: Optional[Callable] = None
 _ORIGINAL_ROW_FORWARD: Optional[Callable] = None
+_ORIGINAL_MERGED_FORWARD: Optional[Callable] = None
 _ORIGINAL_MOE_LORA_FUNC: Optional[Callable] = None
 _INSTALLED: bool = False
 
@@ -90,6 +92,10 @@ def get_original_qkv_forward() -> Callable:
 
 def get_original_row_forward() -> Callable:
     return _ORIGINAL_ROW_FORWARD
+
+
+def get_original_merged_column_forward() -> Callable:
+    return _ORIGINAL_MERGED_FORWARD
 
 
 def get_original_moe_lora_func() -> Callable:
@@ -103,14 +109,16 @@ def install_two_stream_overrides() -> None:
 
       1. ``QKVParallelLinearWithLoRA.forward`` (O7 — qkv LoRA shrink overlap)
       2. ``RowParallelLinearWithLoRA.forward`` (O8 — o_proj LoRA shrink overlap)
-      3. ``flashinfer_trtllm.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora``
+      3. ``MergedColumnParallelLinearWithLoRA.forward`` (O9 — merged-column LoRA
+         shrink overlap: dense gate_up + mamba in_proj_qkvz)
+      4. ``flashinfer_trtllm.fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora``
          (O1 — MoE gate_up LoRA overlap)
 
     The saved originals are exposed via :func:`get_original_qkv_forward`,
     :func:`get_original_row_forward`, :func:`get_original_moe_lora_func` so the
     new versions can fall back when their per-batch gate says single-stream.
     """
-    global _INSTALLED, _ORIGINAL_QKV_FORWARD, _ORIGINAL_ROW_FORWARD, _ORIGINAL_MOE_LORA_FUNC
+    global _INSTALLED, _ORIGINAL_QKV_FORWARD, _ORIGINAL_ROW_FORWARD, _ORIGINAL_MERGED_FORWARD, _ORIGINAL_MOE_LORA_FUNC
 
     if _INSTALLED:
         return
@@ -118,6 +126,7 @@ def install_two_stream_overrides() -> None:
         return
 
     from sglang.srt.lora.layers import (
+        MergedColumnParallelLinearWithLoRA,
         QKVParallelLinearWithLoRA,
         RowParallelLinearWithLoRA,
     )
@@ -125,11 +134,14 @@ def install_two_stream_overrides() -> None:
         qkv_proj_lora_forward,
         row_parallel_lora_forward,
     )
+    from sglang.srt.lora.trtllm_moe.merged_column import merged_column_lora_forward
 
     _ORIGINAL_QKV_FORWARD = QKVParallelLinearWithLoRA.forward
     _ORIGINAL_ROW_FORWARD = RowParallelLinearWithLoRA.forward
+    _ORIGINAL_MERGED_FORWARD = MergedColumnParallelLinearWithLoRA.forward
     QKVParallelLinearWithLoRA.forward = qkv_proj_lora_forward
     RowParallelLinearWithLoRA.forward = row_parallel_lora_forward
+    MergedColumnParallelLinearWithLoRA.forward = merged_column_lora_forward
 
     import sglang.srt.layers.moe.moe_runner.flashinfer_trtllm as ft
     from sglang.srt.lora.trtllm_moe.moe_overlap import (
@@ -150,6 +162,7 @@ __all__ = [
     "init_lora_two_stream_resources",
     "get_original_qkv_forward",
     "get_original_row_forward",
+    "get_original_merged_column_forward",
     "get_original_moe_lora_func",
     "install_two_stream_overrides",
 ]
