@@ -666,6 +666,13 @@ class Envs:
     # during bring-up so the serial path is the A/B baseline; flip to True once validated.
     SGLANG_OPT_CUTLASS_LORA_TWO_STREAM = EnvBool(False)
 
+    # LoRA two-stream (attention/dense): overlap the q/k/v, o_proj, and dense merged-column
+    # LoRA-A shrink on a side CUDA stream with the base projection GEMM. Decode-only (gated by
+    # token count below). Ported from lora-opti O7/O8/O9; backend-agnostic. Default-off until
+    # validated; MAX_TOKENS is the decode-shape gate (batches above it stay on the serial path).
+    SGLANG_OPT_LORA_TWO_STREAM = EnvBool(False)
+    SGLANG_OPT_LORA_TWO_STREAM_MAX_TOKENS = EnvInt(256)
+
     # SWA radix cache
     SGLANG_OPT_CACHE_SWA_TRANSLATION = EnvBool(True)
     # TODO(DSV4): @ispobock this has bug on main branch when retract

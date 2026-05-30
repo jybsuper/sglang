@@ -1167,3 +1167,13 @@ def get_lora_layer(
             ret = lora_layer_type(layer, lora_backend)
             return ret
     raise Exception(f"No corresponding LoRA layer supported for {type(layer)}.")
+
+
+# Two-stream LoRA overlap (O7/O8/O9): install the side-stream overlapped forwards as a
+# class-level monkey-patch at import time. No-op unless SGLANG_OPT_LORA_TWO_STREAM=1. Placed
+# at module end so the patched classes (QKV/Row/MergedColumn WithLoRA) are already defined.
+from sglang.srt.lora.trtllm_moe import (  # noqa: E402
+    install_two_stream_overrides as _install_lora_two_stream,
+)
+
+_install_lora_two_stream()

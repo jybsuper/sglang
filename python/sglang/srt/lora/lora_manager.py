@@ -100,6 +100,13 @@ class LoRAManager:
             server_args=server_args,
         )
 
+        # Pre-create the LoRA two-stream side stream before any cuda-graph capture
+        # (torch.cuda.Stream() is a driver call that must not run inside capture).
+        # No-op unless SGLANG_OPT_LORA_TWO_STREAM=1.
+        from sglang.srt.lora.trtllm_moe import init_lora_two_stream_resources
+
+        init_lora_two_stream_resources(self.device)
+
         # Initialize mutable internal state of the LoRAManager.
         self.init_state(
             max_lora_rank=max_lora_rank,
