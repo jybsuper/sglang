@@ -203,17 +203,20 @@ class CutlassFp4LoraRunnerCore:
         # ---- LoRA w13 delta
         if two_stream:
             torch.cuda.current_stream().wait_event(gu_event)  # join GEMM1 (main) + gate_up (side)
-            gateup_flat.add_(gate_up_delta)
+            # delta is folded into the silu+mul kernel below (no separate add_ pass over gateup)
         elif hooks is not None and hooks.after_gate_up is not None:
             gateup_3d = gateup_flat.view(m_a, num_topk, N)
             hooks.after_gate_up(hidden_states, gateup_3d, topk_weights, topk_ids)
 
-        # ---- silu + mul
+        # ---- silu + mul (folds the two-stream gate_up delta during the load when present)
         # ``w13_swap_halves=True`` selects the ``[up | gate]`` convention
         # (silu(second) * first) for FlashInfer-CUTLASS NVFP4 W13 loaders.
         intermediate = torch.empty(total_tokens, N // 2, dtype=out_dtype, device=device)
         cutlass_fp4_lora_silu_and_mul(
-            gateup_flat, intermediate, swap_halves=quant_info.w13_swap_halves
+            gateup_flat,
+            intermediate,
+            swap_halves=quant_info.w13_swap_halves,
+            gate_up_delta=gate_up_delta,
         )
 
         # Two-stream: the down LoRA depends on `intermediate` (just produced), so compute its delta
@@ -252,10 +255,10 @@ class CutlassFp4LoraRunnerCore:
             params.to_gemm2_args(),
         )
 
-        # ---- LoRA w2 delta. Sorted-layout: unweighted delta into out_flat; combine weights once.
+        # ---- LoRA w2 delta: folded into the combine kernel below (no separate add_ pass).
+        # Sorted-layout: unweighted delta per row; combine applies the router weight once.
         if two_stream and down_delta is not None:
             torch.cuda.current_stream().wait_event(dn_event)  # join GEMM2 (main) + down (side)
-            out_flat.add_(down_delta)
         elif hooks is not None and hooks.after_down is not None:
             out_3d_sorted_view = out_flat.view(m_a, num_topk, K)
             hooks.after_down(intermediate, out_3d_sorted_view, local_weights, topk_ids)
@@ -273,5 +276,6 @@ class CutlassFp4LoraRunnerCore:
                 else local_weights.reshape(-1)
             ),
             num_topk,
+            down_delta=down_delta,
         )
         return StandardCombineInput(hidden_states=output)
