@@ -173,7 +173,10 @@ class CutlassFp4LoraRunnerCore:
                 hooks.after_gate_up(
                     hidden_states, gate_up_delta.view(m_a, num_topk, N), topk_weights, topk_ids
                 )
-            gate_up_delta.record_stream(side)
+            # No record_stream: gate_up_delta's Python ref lives to function end and the
+            # main-stream consumer (add_) waits on gu_event, so the side-stream write always
+            # precedes any allocator reuse. record_stream is also unsafe under cuda-graph
+            # capture; the validated lora-opti two-stream omits it for the same reason.
             gu_event = torch.cuda.Event()
             gu_event.record(side)
             _keep_event_alive_if_capturing(gu_event)
@@ -225,8 +228,8 @@ class CutlassFp4LoraRunnerCore:
                 hooks.after_down(
                     intermediate, down_delta.view(m_a, num_topk, K), local_weights, topk_ids
                 )
-            down_delta.record_stream(side)
-            intermediate.record_stream(side)
+            # No record_stream (see gate_up note): down_delta + intermediate are kept alive by
+            # their Python refs through the dn_event join, and the main-stream consumers wait on it.
             dn_event = torch.cuda.Event()
             dn_event.record(side)
             _keep_event_alive_if_capturing(dn_event)
