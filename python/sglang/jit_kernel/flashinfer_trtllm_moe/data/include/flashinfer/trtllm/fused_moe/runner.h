@@ -351,6 +351,15 @@ struct MoERunnerArgs {
   // instead of joining before the whole MoE op. nullptr = no wait (serial behavior).
   void* lora_ready_event = nullptr;
 
+  // GEMM1-only SM-partition overlap. When gemm1_stream (cudaStream_t) is set, routing +
+  // permute-GEMM1 run on it (a reduced-SM green-context stream, disjoint from the LoRA side
+  // stream) while activation + GEMM2 + finalize stay on the op's full-device stream. The
+  // runner records gemm1_done_event (cudaEvent_t) on gemm1_stream after permute-GEMM1 and the
+  // op stream waits it (plus lora_ready_event) before activation. nullptr = run all on the op
+  // stream (no partition).
+  void* gemm1_stream = nullptr;
+  void* gemm1_done_event = nullptr;
+
   // Output:
   void* output = nullptr;
   float* output_scale = nullptr;

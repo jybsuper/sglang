@@ -1252,7 +1252,13 @@ class Fp8BlockScaleLauncher : public FusedMoeLauncher {
     check_routing();
     prepare_routing();
 
-    cudaStream_t routing_stream = get_stream(hidden_states.device());
+    // GEMM1-only SM-partition: when gemm1_stream is set, run routing on it so routing +
+    // permute-GEMM1 stay on the same (reduced-SM) green stream, disjoint from the LoRA side
+    // stream. The caller pre-syncs gemm1_stream to the quant inputs.
+    cudaStream_t routing_stream =
+        args->gemm1_stream != nullptr
+            ? static_cast<cudaStream_t>(args->gemm1_stream)
+            : get_stream(hidden_states.device());
     tensorrt_llm::kernels::trtllmgen_moe::Routing::Runner routing_runner(tile_tokens_dim);
 
     // Check ndim==2 and size>0 because empty placeholder tensors may have non-null data_ptr
@@ -2016,7 +2022,7 @@ Array<Tensor> trtllm_fp8_block_scale_moe_impl(
     bool enable_pdl, Array<int64_t> config_index, Fp8QuantizationType quantization_type,
     int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out,
     Optional<TensorView> gate_up_lora_delta, Optional<TensorView> activation_lora_input,
-    int64_t lora_ready_event = 0) {
+    int64_t lora_ready_event = 0, int64_t gemm1_stream = 0, int64_t gemm1_done_event = 0) {
   auto activation_type = validateAndCastActivationType(act_type);
   // DeepSeekFp8 currently uses a TRTLLM runner that hardwires Swiglu activation semantics.
   // Fail for any other activation to avoid silently running incorrect activation behavior.
@@ -2109,6 +2115,8 @@ Array<Tensor> trtllm_fp8_block_scale_moe_impl(
     // GEMM1-LoRA overlap: cudaEvent_t handle (recorded on the LoRA side stream) the runner
     // waits on right before activation; 0 = no wait (serial path).
     args->lora_ready_event = reinterpret_cast<void*>(lora_ready_event);
+    args->gemm1_stream = reinterpret_cast<void*>(gemm1_stream);
+    args->gemm1_done_event = reinterpret_cast<void*>(gemm1_done_event);
 
     // Create and initialize launcher for this tile size
     auto launcher = std::make_unique<Fp8BlockScaleLauncher>(
@@ -2166,7 +2174,8 @@ Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora(
     int64_t routing_method_type, bool use_shuffled_weight, int64_t weight_layout, bool do_finalize,
     bool enable_pdl, Array<int64_t> config_index, Fp8QuantizationType quantization_type,
     int64_t act_type, bool norm_topk_prob, Optional<TensorView> routing_replay_out,
-    TensorView gate_up_lora_delta, TensorView activation_lora_input, int64_t lora_ready_event) {
+    TensorView gate_up_lora_delta, TensorView activation_lora_input, int64_t lora_ready_event,
+    int64_t gemm1_stream, int64_t gemm1_done_event) {
   if (quantization_type != Fp8QuantizationType::DeepSeekFp8) {
     TVM_FFI_LOG_AND_THROW(NotImplementedError)
         << "sgl_trtllm_fp8_block_scale_moe_lora currently supports DeepSeekFp8 only.";
@@ -2178,7 +2187,8 @@ Array<Tensor> sgl_trtllm_fp8_block_scale_moe_lora(
       local_num_experts, routed_scaling_factor, routing_method_type, use_shuffled_weight,
       weight_layout, do_finalize, enable_pdl, config_index, quantization_type, act_type,
       norm_topk_prob, routing_replay_out, Optional<TensorView>(gate_up_lora_delta),
-      Optional<TensorView>(activation_lora_input), lora_ready_event);
+      Optional<TensorView>(activation_lora_input), lora_ready_event, gemm1_stream,
+      gemm1_done_event);
 }
 
 __global__ void sgl_trtllm_fp8_block_scale_moe_lora_finalize_kernel(

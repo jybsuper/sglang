@@ -735,6 +735,13 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
 
   auto const& config = mPassingConfigs[configIndex];
 
+  // GEMM1-only SM-partition: run permute + GEMM1 on the (reduced-SM) gemm1_stream when
+  // provided, so it overlaps the disjoint LoRA side stream; the op's own stream keeps the full
+  // device for activation/GEMM2/finalize below. The caller pre-syncs gemm1_stream to the
+  // routing + quant inputs (routing is launched on gemm1_stream too).
+  cudaStream_t gemm1_run_stream =
+      args.gemm1_stream != nullptr ? static_cast<cudaStream_t>(args.gemm1_stream) : stream;
+
   mPermuteGemm1.run(
       args.hidden_states, hidden_states_scale_linear, args.gemm1_weights, args.gemm1_weights_scale,
       workspace.token_scales, /*perChannelScales*/ nullptr, args.output1_scales_scalar,
@@ -744,7 +751,14 @@ void Runner::run(MoERunnerArgs const& args, MoEWorkspace const& workspace, int d
       workspace.permuted_idx_to_token_idx, workspace.num_non_exiting_ctas,
       workspace.total_num_padded_tokens, workspace.cta_idx_xy_to_batch_idx,
       workspace.cta_idx_xy_to_mn_limit, workspace.bmm1_workspace, args.mUseRoutingScalesOnInput,
-      device, stream, config.gemm1Config, enable_pdl);
+      device, gemm1_run_stream, config.gemm1Config, enable_pdl);
+
+  // If permute-GEMM1 ran on a separate gemm1_stream, the op stream must wait for it (via
+  // gemm1_done_event) before activation reads workspace.gemm1_output.
+  if (args.gemm1_stream != nullptr && args.gemm1_done_event != nullptr) {
+    cudaEventRecord(static_cast<cudaEvent_t>(args.gemm1_done_event), gemm1_run_stream);
+    cudaStreamWaitEvent(stream, static_cast<cudaEvent_t>(args.gemm1_done_event), 0);
+  }
 
   // We do not fuse activation with FC1 for DeepSeek FP8 due to the weights shuffling constraint.
   void* gemm2_input = workspace.gemm1_output;
