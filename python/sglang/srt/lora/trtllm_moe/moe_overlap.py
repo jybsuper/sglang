@@ -9,9 +9,12 @@ Batches that don't qualify for two-stream (prefill / non-virtual-lora /
 batch without active LoRA) fall through to the saved-original function so
 their behavior is byte-identical to the unpatched code path.
 """
+import contextlib
+
 import torch
 
 from sglang.srt.lora.trtllm_moe import (
+    get_lora_base_stream,
     get_lora_side_stream,
     get_original_moe_lora_func,
     is_two_stream_active,
@@ -91,6 +94,12 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
     fused_lora_routing_cache: dict = {}
 
     side_stream = get_lora_side_stream()
+    # SM-partition (green-ctx) overlap: when SGLANG_LORA_GEMM1_OVERLAP runs with
+    # SGLANG_LORA_GREEN_SM=K, base_stream is the complementary (152-K SM) green stream and the
+    # whole trtllm MoE op runs on it, so its permute+GEMM1 use disjoint SMs from the K-SM LoRA
+    # side stream (no contention). None -> op runs on the caller's stream (full device).
+    base_stream = get_lora_base_stream()
+    main_stream = torch.cuda.current_stream()
 
     # EP-aware LoRA: under MoE EP each rank computes the delta only for its owned experts
     # (passed via local_expert_offset/local_num_experts below). gate_up_delta stays
@@ -127,6 +136,10 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
     # permute+GEMM1 overlap the side-stream LoRA shrink/expand instead of joining before the
     # whole op.
     lora_event = torch.cuda.Event()
+    # GEMM1-only SM-partition: when base_stream (green) is set, the trtllm op runs routing +
+    # permute-GEMM1 on it and signals this event when done; the op's main stream waits it (plus
+    # lora_event) before activation, which then runs on the full device.
+    gemm1_done_event = torch.cuda.Event() if base_stream is not None else None
 
     # O1 fork — gate_up shrink/expand on side stream concurrent with the main-stream
     # per-token-group FP8 quant + the trtllm op's permute+GEMM1 below.
@@ -168,7 +181,25 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
     # cuda-graph capture so the captured cross-stream wait isn't torn down before instantiation.
     if torch.cuda.is_current_stream_capturing():
         _LORA_OVERLAP_EVENTS.append(lora_event)
+        if gemm1_done_event is not None:
+            _LORA_OVERLAP_EVENTS.append(gemm1_done_event)
     lora_ready_handle = lora_event.cuda_event
+
+    # GEMM1-only SM-partition: the op runs on the main (full-device) stream, but it dispatches
+    # routing + permute-GEMM1 onto base_stream (the reduced-SM green stream, disjoint from the
+    # K-SM LoRA side stream) and waits gemm1_done + lora_event before activation -- so only the
+    # LoRA-overlapped phase pays the partition; activation/GEMM2/finalize get the full device.
+    # base_stream must first see the main-stream quant inputs. We pre-record gemm1_done on
+    # base_stream so its handle is valid for the runner to re-record after permute-GEMM1 (same
+    # stream -> the runner's record supersedes; the op stream waits that one before activation).
+    if base_stream is not None:
+        base_stream.wait_stream(main_stream)
+        gemm1_done_event.record(base_stream)
+        gemm1_stream_handle = base_stream.cuda_stream
+        gemm1_done_handle = gemm1_done_event.cuda_event
+    else:
+        gemm1_stream_handle = 0
+        gemm1_done_handle = 0
 
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,
@@ -182,6 +213,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         gate_up_lora_delta=gate_up_delta,
         activation_lora_input=activation_lora_input,
         lora_ready_event=lora_ready_handle,
+        gemm1_stream=gemm1_stream_handle,
+        gemm1_done_event=gemm1_done_handle,
         num_experts=quant_info.global_num_experts,
         top_k=runner_config.top_k,
         n_group=None,
@@ -207,6 +240,8 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         activation_type=quant_info.activation_type,
     )
 
+    # No post-op stream switch: the op ran activation/GEMM2/finalize on the main stream (it only
+    # offloaded routing+permute-GEMM1 to base_stream, joined back internally via gemm1_done).
     output = moe_result
     merged_experts_fused_moe_lora_add(
         output=output,

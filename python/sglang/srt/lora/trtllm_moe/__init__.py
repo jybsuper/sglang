@@ -42,20 +42,61 @@ def is_two_stream_active(x: torch.Tensor) -> bool:
     return x.shape[0] <= max_tok
 
 
+_GREEN_SM_KEY = "SGLANG_LORA_GREEN_SM"
 _LORA_SIDE_STREAM: Optional[torch.cuda.Stream] = None
+_LORA_BASE_STREAM: Optional[torch.cuda.Stream] = None
+_GREEN_RESOURCES = None  # keep CUdevResource alive; freeing it tears down the green context
+
+
+def _green_sm_count() -> Optional[int]:
+    v = os.environ.get(_GREEN_SM_KEY)
+    if not v:
+        return None
+    try:
+        k = int(v)
+    except ValueError:
+        return None
+    return k if k > 0 else None
+
+
+def _ensure_lora_streams() -> None:
+    """Create the LoRA side stream, and — when ``SGLANG_LORA_GREEN_SM=K`` is set — a disjoint
+    green-context split: K SMs for the LoRA side stream and the remaining SMs for the base MoE
+    stream, so the gate_up LoRA shrink/expand and the trtllm permute+GEMM1 run on disjoint SM
+    partitions (no contention) during the overlap. These are driver calls that must run
+    pre-cuda-graph-capture; :func:`init_lora_two_stream_resources` pins that to init/warmup.
+
+    Within one decode layer the side-stream sites (qkv → attn → o_proj → moe_gate_up) run
+    sequentially, so one side stream suffices and avoids extra graph-capture nodes.
+    """
+    global _LORA_SIDE_STREAM, _LORA_BASE_STREAM, _GREEN_RESOURCES
+    if _LORA_SIDE_STREAM is not None:
+        return
+    k = _green_sm_count()
+    if k is not None:
+        from flashinfer.green_ctx import split_device_green_ctx_by_sm_count
+
+        dev = torch.device("cuda", torch.cuda.current_device())
+        streams, resources = split_device_green_ctx_by_sm_count(dev, [k])
+        _GREEN_RESOURCES = resources
+        _LORA_SIDE_STREAM = streams[0]  # K SMs -> LoRA shrink/expand
+        _LORA_BASE_STREAM = streams[1]  # remaining SMs -> base trtllm MoE op
+    else:
+        _LORA_SIDE_STREAM = torch.cuda.Stream()
+        _LORA_BASE_STREAM = None
 
 
 def get_lora_side_stream() -> torch.cuda.Stream:
-    """Lazily allocate a single shared LoRA side stream.
-
-    Within one decode layer the three sites (qkv → attn → o_proj → moe_gate_up)
-    run sequentially, so one stream suffices and avoids extra graph-capture
-    nodes from per-site streams.
-    """
-    global _LORA_SIDE_STREAM
-    if _LORA_SIDE_STREAM is None:
-        _LORA_SIDE_STREAM = torch.cuda.Stream()
+    """LoRA side stream (a K-SM green-context stream when ``SGLANG_LORA_GREEN_SM`` is set)."""
+    _ensure_lora_streams()
     return _LORA_SIDE_STREAM
+
+
+def get_lora_base_stream() -> Optional[torch.cuda.Stream]:
+    """Complementary (remaining-SM) green-context stream for the base MoE op, or None when SM
+    partitioning is disabled (then the op runs on the caller's stream)."""
+    _ensure_lora_streams()
+    return _LORA_BASE_STREAM
 
 
 def init_lora_two_stream_resources(device: Optional[torch.device] = None) -> None:
@@ -159,6 +200,7 @@ def install_two_stream_overrides() -> None:
 __all__ = [
     "is_two_stream_active",
     "get_lora_side_stream",
+    "get_lora_base_stream",
     "init_lora_two_stream_resources",
     "get_original_qkv_forward",
     "get_original_row_forward",
