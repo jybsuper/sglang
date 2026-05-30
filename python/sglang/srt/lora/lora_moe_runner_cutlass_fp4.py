@@ -12,10 +12,34 @@ from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
 )
+from sglang.srt.environ import envs
 from sglang.srt.lora.triton_ops import (
     cutlass_fp4_lora_shuffle_mul_sum,
     cutlass_fp4_lora_silu_and_mul,
 )
+
+# Persistent side CUDA stream(s) for the two-stream LoRA overlap, one per device.
+_CUTLASS_LORA_SIDE_STREAM: dict[int, "torch.cuda.Stream"] = {}
+# Keep overlap events recorded during cuda-graph capture alive so the captured cross-stream waits
+# aren't torn down before graph instantiation (eager runs rely on CUDA's deferred destroy).
+_CUTLASS_LORA_OVERLAP_EVENTS: list = []
+
+
+def _cutlass_lora_side_stream(device: torch.device) -> "torch.cuda.Stream":
+    key = device.index if device.index is not None else 0
+    s = _CUTLASS_LORA_SIDE_STREAM.get(key)
+    if s is None:
+        s = torch.cuda.Stream(device=device)
+        _CUTLASS_LORA_SIDE_STREAM[key] = s
+    return s
+
+
+def _keep_event_alive_if_capturing(event) -> None:
+    from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
+
+    if get_is_capture_mode():
+        _CUTLASS_LORA_OVERLAP_EVENTS.append(event)
+
 
 if TYPE_CHECKING:
     from sglang.srt.layers.moe.token_dispatcher import (
@@ -125,7 +149,36 @@ class CutlassFp4LoraRunnerCore:
             params.blockscale_offsets,
         )
 
-        # ---- GEMM 1 (w13)
+        # Hand the LoRA hooks the c_map so their kernels read/write expert-sorted rows directly.
+        # Set it BEFORE GEMM1 so the (optional) side-stream gate_up LoRA can use the sorted layout.
+        if lora_info is not None:
+            lora_info.c_map = c_map
+            lora_info.sorted_layout = True
+
+        # Two-stream: the gate_up LoRA shrink+expand depends only on hidden_states (+ c_map), so
+        # compute its delta into a separate buffer on a side stream concurrent with GEMM1, then add
+        # after a cross-stream join. Env-gated; default-off serial path is byte-identical.
+        two_stream = (
+            envs.SGLANG_OPT_CUTLASS_LORA_TWO_STREAM.get()
+            and hooks is not None
+            and hooks.after_gate_up is not None
+        )
+        gate_up_delta = None
+        gu_event = None
+        if two_stream:
+            gate_up_delta = torch.zeros(total_tokens, N, dtype=out_dtype, device=device)
+            side = _cutlass_lora_side_stream(device)
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                hooks.after_gate_up(
+                    hidden_states, gate_up_delta.view(m_a, num_topk, N), topk_weights, topk_ids
+                )
+            gate_up_delta.record_stream(side)
+            gu_event = torch.cuda.Event()
+            gu_event.record(side)
+            _keep_event_alive_if_capturing(gu_event)
+
+        # ---- GEMM 1 (w13)  [main stream; overlaps the side-stream gate_up LoRA when two_stream]
         rep_a_fp4, rep_a_blockscale = scaled_fp4_experts_quant(
             hidden_states,
             quant_info.w13_input_scale_expanded,
@@ -144,14 +197,11 @@ class CutlassFp4LoraRunnerCore:
             params.to_gemm1_args(),
         )
 
-        # Hand the LoRA hooks the c_map so their kernels read/write expert-sorted
-        # rows directly, skipping the token-major round-trips.
-        if lora_info is not None:
-            lora_info.c_map = c_map
-            lora_info.sorted_layout = True
-
         # ---- LoRA w13 delta
-        if hooks is not None and hooks.after_gate_up is not None:
+        if two_stream:
+            torch.cuda.current_stream().wait_event(gu_event)  # join GEMM1 (main) + gate_up (side)
+            gateup_flat.add_(gate_up_delta)
+        elif hooks is not None and hooks.after_gate_up is not None:
             gateup_3d = gateup_flat.view(m_a, num_topk, N)
             hooks.after_gate_up(hidden_states, gateup_3d, topk_weights, topk_ids)
 
@@ -163,7 +213,25 @@ class CutlassFp4LoraRunnerCore:
             gateup_flat, intermediate, swap_halves=quant_info.w13_swap_halves
         )
 
-        # ---- GEMM 2 (w2)
+        # Two-stream: the down LoRA depends on `intermediate` (just produced), so compute its delta
+        # into a buffer on the side stream concurrent with GEMM2 below, then add after a join.
+        down_delta = None
+        dn_event = None
+        if two_stream and hooks.after_down is not None:
+            down_delta = torch.zeros(total_tokens, K, dtype=out_dtype, device=device)
+            side = _cutlass_lora_side_stream(device)
+            side.wait_stream(torch.cuda.current_stream())  # side waits for silu (intermediate)
+            with torch.cuda.stream(side):
+                hooks.after_down(
+                    intermediate, down_delta.view(m_a, num_topk, K), local_weights, topk_ids
+                )
+            down_delta.record_stream(side)
+            intermediate.record_stream(side)
+            dn_event = torch.cuda.Event()
+            dn_event.record(side)
+            _keep_event_alive_if_capturing(dn_event)
+
+        # ---- GEMM 2 (w2)  [main stream; overlaps the side-stream down LoRA when two_stream]
         int_fp4, int_blockscale = scaled_fp4_experts_quant(
             intermediate,
             quant_info.w2_input_scale_expanded,
@@ -181,9 +249,11 @@ class CutlassFp4LoraRunnerCore:
             params.to_gemm2_args(),
         )
 
-        # ---- LoRA w2 delta. Sorted-layout: hook writes unweighted delta into
-        # out_flat; router weighting happens once in the combine below.
-        if hooks is not None and hooks.after_down is not None:
+        # ---- LoRA w2 delta. Sorted-layout: unweighted delta into out_flat; combine weights once.
+        if two_stream and down_delta is not None:
+            torch.cuda.current_stream().wait_event(dn_event)  # join GEMM2 (main) + down (side)
+            out_flat.add_(down_delta)
+        elif hooks is not None and hooks.after_down is not None:
             out_3d_sorted_view = out_flat.view(m_a, num_topk, K)
             hooks.after_down(intermediate, out_3d_sorted_view, local_weights, topk_ids)
 

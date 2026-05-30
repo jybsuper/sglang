@@ -660,6 +660,12 @@ class Envs:
     SGLANG_FP8_PAGED_MQA_LOGITS_TORCH = EnvBool(False)
     SGLANG_TOPK_TRANSFORM_512_TORCH = EnvBool(False)
 
+    # LoRA MoE (cutlass NVFP4)
+    # Overlap the LoRA gate_up/down shrink+expand on a side CUDA stream with the cutlass base
+    # GEMMs (delta computed into a separate buffer, added after a cross-stream join). Default-off
+    # during bring-up so the serial path is the A/B baseline; flip to True once validated.
+    SGLANG_OPT_CUTLASS_LORA_TWO_STREAM = EnvBool(False)
+
     # SWA radix cache
     SGLANG_OPT_CACHE_SWA_TRANSLATION = EnvBool(True)
     # TODO(DSV4): @ispobock this has bug on main branch when retract
