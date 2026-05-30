@@ -9,9 +9,12 @@ Batches that don't qualify for two-stream (prefill / non-virtual-lora /
 batch without active LoRA) fall through to the saved-original function so
 their behavior is byte-identical to the unpatched code path.
 """
+import contextlib
+
 import torch
 
 from sglang.srt.lora.trtllm_moe import (
+    get_lora_base_stream,
     get_lora_side_stream,
     get_original_moe_lora_func,
     is_two_stream_active,
@@ -91,6 +94,12 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
     fused_lora_routing_cache: dict = {}
 
     side_stream = get_lora_side_stream()
+    # SM-partition (green-ctx) overlap: when SGLANG_LORA_GEMM1_OVERLAP runs with
+    # SGLANG_LORA_GREEN_SM=K, base_stream is the complementary (152-K SM) green stream and the
+    # whole trtllm MoE op runs on it, so its permute+GEMM1 use disjoint SMs from the K-SM LoRA
+    # side stream (no contention). None -> op runs on the caller's stream (full device).
+    base_stream = get_lora_base_stream()
+    main_stream = torch.cuda.current_stream()
 
     # EP-aware LoRA: under MoE EP each rank computes the delta only for its owned experts
     # (passed via local_expert_offset/local_num_experts below). gate_up_delta stays
@@ -170,6 +179,13 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         _LORA_OVERLAP_EVENTS.append(lora_event)
     lora_ready_handle = lora_event.cuda_event
 
+    # Run the base MoE op on the complementary green-context stream (disjoint SMs from the
+    # K-SM LoRA side stream) when SM-partitioning is on; else on the caller's full-device
+    # stream. The op still waits on lora_event right before its activation kernel.
+    if base_stream is not None:
+        base_stream.wait_stream(main_stream)
+        torch.cuda.set_stream(base_stream)
+
     moe_result = trtllm_fp8_block_scale_routed_moe_lora(
         topk_ids=packed_topk_ids,
         routing_bias=None,
@@ -206,6 +222,10 @@ def fused_experts_none_to_sgl_flashinfer_trtllm_fp8_lora_two_stream(
         fp8_quantization_type=Fp8QuantizationType.DeepSeekFp8,
         activation_type=quant_info.activation_type,
     )
+
+    if base_stream is not None:
+        torch.cuda.set_stream(main_stream)
+        main_stream.wait_stream(base_stream)
 
     output = moe_result
     merged_experts_fused_moe_lora_add(
