@@ -412,6 +412,29 @@ class Envs:
     SGLANG_FLASHINFER_WORKSPACE_SIZE = EnvInt(384 * 1024 * 1024)
     # Enable per-token NVFP4 activation scaling path for FlashInfer TRT-LLM MoE.
     SGLANG_FLASHINFER_NVFP4_PER_TOKEN_ACTIVATION = EnvBool(False)
+    # Enable the gate/up split in the rank-specialized direct LoRA-B expand kernel for a gated
+    # (SwiGLU) MoE gate_up LoRA: the up output half reads up-shrink [r:2r] from the intermediate
+    # instead of gate-shrink [0:r] (the in-kernel equivalent of cutlass's gated_a_input). Opt-in
+    # for the flashinfer-trtllm FP4 MoE LoRA path; default off preserves the un-split behavior.
+    SGLANG_ENABLE_LORA_GATED_SPLIT = EnvBool(False)
+    # Master gate for the trtllm-LoRA decode two-stream overlap: run the LoRA shrink/expand on a side
+    # stream concurrent with the base GEMM (attention qkv/o_proj, dense gate_up, MoE gate_up). Decode
+    # batches only (<= SGLANG_TWO_STREAM_MAX_TOKENS tokens). Opt-in; default off keeps single-stream.
+    SGLANG_LORA_TWO_STREAM = EnvBool(False)
+    # Token-count ceiling for the two-stream decode gate above; batches larger than this run single-stream.
+    SGLANG_TWO_STREAM_MAX_TOKENS = EnvInt(256)
+    # Skip the DEFENSIVE zero-init memset of the permuted-hidden buffer in the flashinfer-trtllm FP4
+    # MoE LoRA launcher (read C++-side via std::getenv in trtllm_fused_moe_kernel_launcher.cu, not the
+    # Python .get() path). Padding rows never reach a valid output (finalize gathers only real tokens;
+    # per-token NvFP4 scale is per-row), so skipping it is safe and reclaims the memset (a prefill/TTFT
+    # win, ~0 at decode). Default off keeps the memset until accuracy-validated.
+    SGLANG_OPT_FP4_LORA_SKIP_PERMUTE_MEMSET = EnvBool(False)
+    # Two-stream LoRA: also overlap the DOWN-proj LoRA (shrink/expand/all-reduce) with the trtllm
+    # FP4 op's down-GEMM, on top of the gate_up overlap (requires SGLANG_LORA_TWO_STREAM=1). The op
+    # records an act-ready event after its activation kernel; the side stream runs the down delta
+    # concurrently into a separate buffer; the main stream adds it after the op (all-reduce structure
+    # unchanged). Default off until perf-measured + accuracy-validated.
+    SGLANG_LORA_OVERLAP_DOWN = EnvBool(False)
     # Skip-softmax threshold scale factor for TRT-LLM attention (prefill and decode separately).
     # None = standard attention. See https://arxiv.org/abs/2512.12087
     SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR = EnvFloat(None)
