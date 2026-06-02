@@ -10,6 +10,7 @@ import triton
 import triton.language as tl
 
 from sglang.jit_kernel.moe_align import moe_align_block_size as jit_moe_align_block_size
+from sglang.srt.environ import envs
 
 
 @triton.jit
@@ -785,6 +786,14 @@ def _merged_experts_fused_moe_lora_add_impl(
     )
 
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
+    # "Reduce blocks" for the LoRA-B expand: the dense-MoE-tuned config picks a large
+    # BLOCK_SIZE_M, but in decode tokens scatter ~1-per-virtual-expert, so each padded
+    # M-block is mostly masked-out rows. Overriding BLOCK_SIZE_M here shrinks BOTH the
+    # moe_align padding (fewer padded tokens -> fewer real M-blocks) and the kernel grid.
+    # Applied before _get_routing so the alignment block size and the kernel agree.
+    expand_block_m = envs.SGLANG_LORA_EXPAND_BLOCK_M.get()
+    if expand_block_m:
+        b_stage_config = {**b_stage_config, "BLOCK_SIZE_M": expand_block_m}
     (
         sorted_token_ids,
         expert_ids,

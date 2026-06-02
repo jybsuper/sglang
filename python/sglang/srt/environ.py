@@ -435,6 +435,14 @@ class Envs:
     # concurrently into a separate buffer; the main stream adds it after the op (all-reduce structure
     # unchanged). Default off until perf-measured + accuracy-validated.
     SGLANG_LORA_OVERLAP_DOWN = EnvBool(False)
+    # Override BLOCK_SIZE_M for the rank-specialized direct LoRA-B expand stage (down-proj /
+    # gate_up). The dense-MoE-tuned config picks a large BLOCK_SIZE_M (e.g. 64), but in decode
+    # tokens scatter ~1-per-virtual-expert, so each padded M-block is mostly masked-out rows ->
+    # the expand wastes ~BLOCK_SIZE_M/tokens_per_expert of its M work and IO. Setting this applies
+    # to BOTH the moe_align padding granularity (fewer padded tokens -> fewer real M-blocks) and
+    # the kernel grid, "reducing blocks". 0 = keep the stage config's value (current behavior).
+    # Used to sweep {16,32,64} on the expand microbench; the winning value is baked as a heuristic.
+    SGLANG_LORA_EXPAND_BLOCK_M = EnvInt(0)
     # Skip-softmax threshold scale factor for TRT-LLM attention (prefill and decode separately).
     # None = standard attention. See https://arxiv.org/abs/2512.12087
     SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR = EnvFloat(None)
