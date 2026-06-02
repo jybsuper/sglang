@@ -166,7 +166,16 @@ def _invoke_moe_lora_expand_add(
     assert R <= 64, f"direct LoRA expand/add expects rank <= 64, got {R}"
 
     block_size_m = config["BLOCK_SIZE_M"]
-    block_size_n = 128 if N % 128 == 0 else config["BLOCK_SIZE_N"]
+    # BLOCK_SIZE_N override ("reduce blocks" in the N direction): with R tiny and N
+    # large (e.g. kimi down N=7168 -> 56 n-blocks at 128), a wider N tile cuts the
+    # n-block count and the block-launch overhead that dominates this thin-K GEMM.
+    # EXPAND_BLOCK_SIZE_N, when set, takes precedence; else keep the 128-when-aligned
+    # default. The override must still divide N (or be masked) — we require it here.
+    bn_override = config.get("EXPAND_BLOCK_SIZE_N")
+    if bn_override:
+        block_size_n = bn_override
+    else:
+        block_size_n = 128 if N % 128 == 0 else config["BLOCK_SIZE_N"]
     group_size_m = config.get("GROUP_SIZE_M", 1)
     block_size_r = triton.next_power_of_2(R)
 
@@ -214,5 +223,5 @@ def _invoke_moe_lora_expand_add(
         GROUP_SIZE_M=group_size_m,
         GATED_A_HALF=gated_a_half,
         num_warps=config.get("num_warps", 4),
-        num_stages=1,
+        num_stages=config.get("num_stages", 1),
     )
