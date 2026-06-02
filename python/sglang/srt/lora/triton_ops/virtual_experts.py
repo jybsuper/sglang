@@ -786,14 +786,22 @@ def _merged_experts_fused_moe_lora_add_impl(
     )
 
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
-    # "Reduce blocks" for the LoRA-B expand: the dense-MoE-tuned config picks a large
-    # BLOCK_SIZE_M, but in decode tokens scatter ~1-per-virtual-expert, so each padded
-    # M-block is mostly masked-out rows. Overriding BLOCK_SIZE_M here shrinks BOTH the
-    # moe_align padding (fewer padded tokens -> fewer real M-blocks) and the kernel grid.
-    # Applied before _get_routing so the alignment block size and the kernel agree.
+    # "Reduce blocks" for the LoRA-B expand. The dense-MoE-tuned config picks a large
+    # BLOCK_SIZE_M, but with topk=1 (down) / few tokens-per-virtual-expert, each padded
+    # M-block is mostly masked-out rows, and N/128 n-blocks pile up for large N. The
+    # microbench (CUDA-graph, rank16) shows BLOCK_SIZE_M=16 (the m16n8k16 MMA floor) plus
+    # a wider N tile beats the default at every batch size (decode 1.8-3.1x, prefill up
+    # to ~2.7x) with bit-identical output. Gated on SGLANG_LORA_EXPAND_BLOCK_M: setting it
+    # picks that BLOCK_SIZE_M (applied BEFORE _get_routing so moe_align padding and the
+    # kernel grid agree) and enables the wide-BLOCK_SIZE_N heuristic. Unset = unchanged.
     expand_block_m = envs.SGLANG_LORA_EXPAND_BLOCK_M.get()
     if expand_block_m:
         b_stage_config = {**b_stage_config, "BLOCK_SIZE_M": expand_block_m}
+        N_b = lora_b_virtual.shape[1]
+        if N_b >= 4096 and N_b % 512 == 0:
+            b_stage_config["EXPAND_BLOCK_SIZE_N"] = 512
+        elif N_b % 256 == 0:
+            b_stage_config["EXPAND_BLOCK_SIZE_N"] = 256
     (
         sorted_token_ids,
         expert_ids,
