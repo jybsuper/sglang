@@ -286,13 +286,18 @@ def _invoke_moe_lora_shrink_splitk(
     N = weight.shape[1]
     K = weight.shape[2]
     BLOCK_SIZE_M = config["BLOCK_SIZE_M"]
-    BLOCK_SIZE_N = min(config.get("BLOCK_SIZE_N", 64), max(16, N))
-    BLOCK_SIZE_K = config.get("BLOCK_SIZE_K", 64)
+    BLOCK_SIZE_N = triton.next_power_of_2(N)
+    BLOCK_SIZE_K = 256
     GROUP_SIZE_M = config.get("GROUP_SIZE_M", 1)
 
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], BLOCK_SIZE_M)
-    num_n_blocks = triton.cdiv(N, BLOCK_SIZE_N)
+    num_n_blocks = triton.cdiv(
+        N, BLOCK_SIZE_N
+    )  # == 1, BLOCK_SIZE_N == next_pow2(N) >= N
     base_grid = num_m_blocks * num_n_blocks
+    # Single source of truth shared with the caller's zero-intermediate decision:
+    # split-K accumulation REQUIRES a pre-zeroed output, so the predicted and
+    # launched SPLIT_K must never diverge.
     SPLIT_K = _get_moe_lora_shrink_split_k(weight, sorted_token_ids, config)
 
     grid = (SPLIT_K * base_grid,)
@@ -330,16 +335,29 @@ def _get_moe_lora_shrink_split_k(
     sorted_token_ids: torch.Tensor,
     config: dict[str, Any],
 ) -> int:
+    """Rank-tiered split-K occupancy fill (PR #26899).
+
+    The K reduction (e.g. 7168 / 256 = 28 iters) dominates this skinny-N grouped
+    GEMV, so splitting K stays useful well past full SM occupancy -- a plain
+    `1 if base_grid >= num_sm else ...` rule collapses SPLIT_K too early and
+    costs up to ~2x at the decode/prefill border. Skinnier ranks want more
+    splits (their output tile carries less work). The target / tiers were picked
+    from an offline per-M B200 sweep over E in {48,96,384}, N in {16,32,64};
+    this heuristic lands within ~5% of the per-shape tuned optimum across the
+    decode regime.
+
+    Block sizes must mirror _invoke_moe_lora_shrink_splitk (BLOCK_SIZE_N =
+    next_pow2(N) -> one N block; BLOCK_SIZE_K = 256).
+    """
     N = weight.shape[1]
     K = weight.shape[2]
     block_size_m = config["BLOCK_SIZE_M"]
-    block_size_n = min(config.get("BLOCK_SIZE_N", 64), max(16, N))
-    block_size_k = config.get("BLOCK_SIZE_K", 64)
+    block_size_k = 256
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], block_size_m)
-    num_n_blocks = triton.cdiv(N, block_size_n)
-    base_grid = num_m_blocks * num_n_blocks
+    base_grid = num_m_blocks  # num_n_blocks == 1: BLOCK_SIZE_N == next_pow2(N) >= N
+    target = 512 if N <= 16 else 384 if N <= 32 else 256
     max_split_k = max(1, K // block_size_k)
-    return min(max_split_k, max(1, 128 // base_grid)) if base_grid < 128 else 1
+    return max(1, min(triton.cdiv(target, base_grid), max_split_k, 8))
 
 
 # Rank-specialized LoRA-B expand kernel lives in lora/trtllm_moe/.
@@ -641,6 +659,23 @@ def _merged_experts_fused_moe_lora_add_impl(
             }
         return cfg
 
+    def _get_shrink_stage_config(weight: torch.Tensor, M: int) -> dict[str, Any]:
+        """Heuristic launch config for the LoRA A (shrink) stage.
+
+        Only BLOCK_SIZE_M / num_warps / num_stages are chosen here (a simple
+        decode/prefill rule). SPLIT_K is intentionally NOT set: the launcher
+        derives it from the post-alignment grid, see _invoke_moe_lora_shrink_splitk.
+        M is the number of input tokens; N (= weight.shape[1]) is the LoRA rank.
+        """
+        N = weight.shape[1]
+        if M < 512:  # decode / small batch: pin a small block, latency-bound
+            return {
+                "BLOCK_SIZE_M": 16,
+                "num_warps": 4 if (M <= 4 or N >= 32) else 2,
+                "num_stages": 3,
+            }
+        return {"BLOCK_SIZE_M": 32, "num_warps": 2, "num_stages": 2}  # prefill
+
     def _align_block_size(
         topk_ids: torch.Tensor,
         block_size: int,
@@ -773,14 +808,15 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_experts_a = lora_a.shape[1]
     num_experts_b = lora_b.shape[1]
 
-    a_stage_config = _get_stage_config(lora_a_virtual, input_top_k)
+    a_stage_config = _get_shrink_stage_config(
+        lora_a_virtual, token_lora_mapping.shape[0]
+    )
     if envs.SGLANG_OPT_LORA_SHRINK_TUNE.get():
-        # Tuned decode shrink config: skinny GEMM (M=tokens small, N=rank, K=in large).
+        # GB200 hand-tune knob (test-only) on top of PR #26899's heuristic config. The launcher
+        # pins BLOCK_SIZE_N (next_pow2(rank)) and BLOCK_SIZE_K (256), so only M/warps/stages apply.
         a_stage_config = {
             **a_stage_config,
             "BLOCK_SIZE_M": 16,
-            "BLOCK_SIZE_N": max_lora_rank,
-            "BLOCK_SIZE_K": 256,
             "num_warps": 4,
             "num_stages": 4,
         }
