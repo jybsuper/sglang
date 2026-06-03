@@ -19,16 +19,69 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.lora.triton_ops import (
     step_a_q_fwd,
     step_a_v_fwd,
     step_b_q_fwd,
     step_b_v_fwd,
 )
+from sglang.srt.lora.triton_ops.kv_b_lora_single_fused import (
+    fused_q_correction,
+    fused_v_correction,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.lora.utils import LoRABatchInfo
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
+
+
+# ---------------------------------------------------------------------------
+# Single-LoRA FUSED kv_b correction, gated by ``SGLANG_OPT_MLA_LORA_DENSE_GEMM``.
+# For the single-active-adapter case the multi-LoRA machinery in the 4 step
+# kernels (routing / rank-truncation / permutation / extra grid axis) and the
+# HBM round-trip for the rank-dim intermediate all disappear: each correction
+# collapses to ONE fused Triton kernel (step_a + step_b, rank intermediate kept
+# in SRAM) — see ``triton_ops/kv_b_lora_single_fused.py``. Micro-bench (cuda-graph
+# regime, real Kimi shapes): lora-v 14.4->6.2us (2.7x, == full-gemm floor),
+# lora-q 10.3->6.2us; bit-exact vs the 4 step kernels. Multi-LoRA falls back to
+# the Triton step kernels.
+# ---------------------------------------------------------------------------
+
+
+def _dense_path_active(batch_info: "LoRABatchInfo") -> bool:
+    """Whether the experimental dense kv_b LoRA correction applies.
+
+    Restricted to the single-active-adapter case (``num_segments == 1`` <=>
+    ``max_loras_per_batch == 1``) so we can gather the one slot's weights
+    graph-safely (length-1 ``index_select``, no ``.item()`` sync) and skip
+    per-segment routing. ``num_segments`` is a host-side int.
+
+    NOTE: we deliberately do NOT reject a non-None ``permutation``. The Triton
+    backend's sgemm routing (``compute_sgemm_routing``) ALWAYS builds a
+    permutation = ``argsort(weight_indices)``; for a single adapter the indices
+    are all-equal so it is the identity, and every token uses the same slot ->
+    the dense per-row math (read row r, apply the slot weight, write row r) is
+    independent of the permutation. Rejecting it (as an earlier version did)
+    meant dense never engaged in real single-adapter decode. Multi-adapter
+    (``num_segments > 1``) still falls back to the Triton kernels.
+
+    Assumes buffer rank == active adapter rank (the common single-adapter
+    deployment); mixed/zero-padded ranks would need a per-slot truncation that
+    costs a GPU sync, so those keep the kernel path.
+    """
+    if not envs.SGLANG_OPT_MLA_LORA_DENSE_GEMM.get():
+        return False
+    return (batch_info.num_segments or batch_info.bs) == 1
+
+
+def _slot_weights(A_buf, B_buf, batch_info):
+    """Gather the single active slot's ``(A, B, scaling)``. Graph-safe."""
+    slot = batch_info.weight_indices[:1]  # (1,)
+    A = A_buf.index_select(0, slot).squeeze(0)  # (rank, kv_lora_rank)
+    B = B_buf.index_select(0, slot).squeeze(0)  # (H*FULL_K, rank)
+    scaling = batch_info.scalings.index_select(0, slot)  # (1,) tensor
+    return A, B, scaling
 
 
 def is_kv_b_lora_active(attn_module: "DeepseekV2AttentionMLA") -> bool:
@@ -81,6 +134,10 @@ def apply_q_correction(
     A_buf, B_buf, batch_info = state
 
     full_K_per_head = attn_module.qk_nope_head_dim + attn_module.v_head_dim
+    if _dense_path_active(batch_info):
+        # single-LoRA fused kernel (step_a_q + step_b_q in one launch, rank intermediate in SRAM)
+        A, B, scaling = _slot_weights(A_buf, B_buf, batch_info)
+        return fused_q_correction(q_nope, B, A, scaling, q_nope_out)
     q_lora_a = step_a_q_fwd(q_nope, B_buf, batch_info, full_K_per_head)
     return step_b_q_fwd(q_lora_a, A_buf, batch_info, q_nope_out)
 
@@ -102,10 +159,24 @@ def apply_v_correction(
         return attn_bmm_flat
     A_buf, B_buf, batch_info = state
 
-    attn_lora_a = step_a_v_fwd(attn_output, A_buf, batch_info)
     base_view = attn_bmm_flat.view(
         -1, attn_module.num_local_heads, attn_module.v_head_dim
     )
+    if _dense_path_active(batch_info):
+        # single-LoRA fused kernel (step_a_v + step_b_v in one launch, rank intermediate in SRAM)
+        A, B, scaling = _slot_weights(A_buf, B_buf, batch_info)
+        fused_v_correction(
+            attn_output,
+            A,
+            B,
+            scaling,
+            base_view,
+            attn_module.qk_nope_head_dim,
+            attn_module.v_head_dim,
+        )
+        return attn_bmm_flat
+
+    attn_lora_a = step_a_v_fwd(attn_output, A_buf, batch_info)
     step_b_v_fwd(
         attn_lora_a,
         B_buf,
@@ -157,6 +228,10 @@ def kv_b_lora_q_prepare(attn_module, q_nope):
     A_buf, B_buf, batch_info, side_stream = st
     full_K_per_head = attn_module.qk_nope_head_dim + attn_module.v_head_dim
     side_stream.wait_stream(torch.cuda.current_stream())
+    if _dense_path_active(batch_info):
+        # fused single-LoRA kernel is monolithic (A and B steps fused) — it can't fork the A-step
+        # onto the side stream, so run it serially in apply via the None-handle fallback.
+        return None
     with torch.cuda.stream(side_stream):
         q_lora_a = step_a_q_fwd(q_nope, B_buf, batch_info, full_K_per_head)
     return q_lora_a, A_buf, batch_info, side_stream
@@ -171,6 +246,7 @@ def kv_b_lora_q_apply(attn_module, q_nope, q_nope_out, handle):
         torch.cuda.current_stream().wait_stream(side_stream)
         return step_b_q_fwd(q_lora_a, A_buf, batch_info, q_nope_out)
     if is_kv_b_lora_active(attn_module):
+        # serial path (also the dense/fused path: prepare returns None for single-LoRA)
         return apply_q_correction(attn_module, q_nope, q_nope_out)
     return q_nope_out
 
@@ -184,6 +260,9 @@ def kv_b_lora_v_prepare(attn_module, attn_output):
         return None
     A_buf, B_buf, batch_info, side_stream = st
     side_stream.wait_stream(torch.cuda.current_stream())
+    if _dense_path_active(batch_info):
+        # fused single-LoRA kernel is monolithic — run serially in apply (None-handle fallback).
+        return None
     with torch.cuda.stream(side_stream):
         attn_lora_a = step_a_v_fwd(attn_output, A_buf, batch_info)
     return attn_lora_a, B_buf, batch_info, side_stream
@@ -193,11 +272,11 @@ def kv_b_lora_v_apply(attn_module, attn_output, attn_bmm_flat, handle):
     """Finish the v-correction: two-stream (rejoin + B-step) when ``handle`` is
     set, else the serial correction, else a no-op."""
     if handle is not None:
-        attn_lora_a, B_buf, batch_info, side_stream = handle
-        torch.cuda.current_stream().wait_stream(side_stream)
         base_view = attn_bmm_flat.view(
             -1, attn_module.num_local_heads, attn_module.v_head_dim
         )
+        attn_lora_a, B_buf, batch_info, side_stream = handle
+        torch.cuda.current_stream().wait_stream(side_stream)
         step_b_v_fwd(
             attn_lora_a,
             B_buf,
