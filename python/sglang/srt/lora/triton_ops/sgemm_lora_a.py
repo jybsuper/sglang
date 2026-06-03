@@ -1,6 +1,7 @@
 import functools
 
 import torch
+import torch.nn.functional as F
 import triton
 import triton.language as tl
 
@@ -177,6 +178,12 @@ def sgemm_lora_a_fwd(
     K = weights.shape[-1]
     assert x.shape[-1] == K
 
+    single_adapter = batch_info.single_adapter
+    if single_adapter is not None:
+        idx, rank = single_adapter
+        if rank == R // stack_num:
+            return F.linear(x, weights[idx])
+
     # Block shapes
     BLOCK_S = 16
     BLOCK_K = 256
@@ -190,9 +197,6 @@ def sgemm_lora_a_fwd(
         num_k_tiles = triton.cdiv(K, BLOCK_K)
         base_grid = batch_info.bs * num_s_tiles
         num_sms = _num_sms(x.device.index)
-        # Require K >= 4096 (>= 16 K-tiles): split-K has a ~5us floor (buffer
-        # zeroing + atomics + launch), so at K=2048 the non-split path is
-        # already below that floor and split-K regresses at higher batch.
         if base_grid < num_sms and num_k_tiles >= 16:
             split_k = max(1, min(2 * num_sms // base_grid, num_k_tiles, 16))
 
