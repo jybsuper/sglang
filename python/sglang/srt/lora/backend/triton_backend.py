@@ -95,6 +95,7 @@ class TritonLoRABackend(BaseLoRABackend):
         max_qkv_out_dim: int,
         base_output: torch.Tensor = None,
         n_slices: int = 3,
+        output_offset_cpu: torch.Tensor = None,
         *args,
         **kwargs,
     ) -> torch.Tensor:
@@ -114,6 +115,7 @@ class TritonLoRABackend(BaseLoRABackend):
             max_qkv_out_dim,
             base_output,
             n_slices=n_slices,
+            output_offset_cpu=output_offset_cpu,
         )
         return lora_output
 
