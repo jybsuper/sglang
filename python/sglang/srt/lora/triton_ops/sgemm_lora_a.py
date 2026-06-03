@@ -5,7 +5,10 @@ import triton
 import triton.language as tl
 
 from sglang.srt.environ import envs
-from sglang.srt.lora.triton_ops.kernel_utils import _resolve_token_positions
+from sglang.srt.lora.triton_ops.kernel_utils import (
+    _resolve_token_positions,
+    get_pdl_launch_metadata,
+)
 from sglang.srt.lora.utils import LoRABatchInfo
 
 
@@ -39,6 +42,7 @@ def _sgemm_lora_a_kernel(
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
     SPLIT_K: tl.constexpr = 1,
+    ENABLE_PDL: tl.constexpr = False,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA A matrix.
@@ -100,6 +104,11 @@ def _sgemm_lora_a_kernel(
         k_offset[:, None] * w_stride_2 + n_offset[None, :] * w_stride_1
     )
 
+    # GDC wait: ensure the prior kernel (producer of x) has fully completed
+    # before consuming its output.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_wait()
+
     # Iterate to compute the block in output matrix
     partial_sum = tl.zeros((BLOCK_S, BLOCK_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_K * SPLIT_K)):
@@ -118,6 +127,10 @@ def _sgemm_lora_a_kernel(
 
         x_ptrs += BLOCK_K * SPLIT_K * x_stride_1
         w_ptrs += BLOCK_K * SPLIT_K * w_stride_2
+
+    # All input reads are done; hint the runtime to launch the dependent kernel.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_launch_dependents()
 
     # Store result to output matrix
     output_mask = (s_offset[:, None] < seg_len) & (n_offset[None, :] < N)
@@ -208,6 +221,7 @@ def sgemm_lora_a_fwd(
         batch_info.bs,
     )
 
+    enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
     _sgemm_lora_a_kernel[grid](
         x,
         weights,
@@ -232,7 +246,9 @@ def sgemm_lora_a_fwd(
         BLOCK_R,
         BLOCK_K,
         split_k,
+        ENABLE_PDL=enable_pdl,
         **launch_kwargs,
+        **pdl_kwargs,
     )
     # split_k>1 returns the fp32 accumulator directly; the LoRA-B expand casts x to the weight dtype
     # on-load (fused), dropping the standalone fp32->bf16 copy kernel. split_k==1 already returns x.dtype.

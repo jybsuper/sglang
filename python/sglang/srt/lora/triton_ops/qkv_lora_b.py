@@ -2,7 +2,10 @@ import torch
 import triton
 import triton.language as tl
 
-from sglang.srt.lora.triton_ops.kernel_utils import _resolve_token_positions
+from sglang.srt.lora.triton_ops.kernel_utils import (
+    _resolve_token_positions,
+    get_pdl_launch_metadata,
+)
 from sglang.srt.lora.utils import LoRABatchInfo
 
 
@@ -38,6 +41,7 @@ def _qkv_lora_b_kernel(
     BLOCK_K: tl.constexpr,
     # For fused output scaling
     scalings,
+    ENABLE_PDL: tl.constexpr = False,
 ):
     """
     This kernel packs 3 sgemms (q/k/v) into a single kernel. The multiplication
@@ -110,6 +114,11 @@ def _qkv_lora_b_kernel(
         k_offset[:, None] * w_stride_2 + n_offset[None, :] * w_stride_1
     )
 
+    # GDC wait: ensure the prior kernel (producer of x) has fully completed
+    # before consuming its output.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_wait()
+
     n_mask = n_offset[None, :] < n_size
     x_tile = tl.load(
         x_ptrs,
@@ -123,6 +132,10 @@ def _qkv_lora_b_kernel(
     )
     # cast fused: the split-K shrink returns fp32, plain path bf16 (no-op)
     partial_sum = tl.dot(x_tile.to(w_tile.dtype), w_tile)
+
+    # All input reads are done; hint the runtime to launch the dependent kernel.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_launch_dependents()
 
     # Store result to output matrix (cast to the OUTPUT dtype: x may be the fp32
     # split-K shrink accumulator while base_output is bf16)
@@ -186,6 +199,7 @@ def qkv_lora_b_fwd(
         output = base_output
 
     sorted_by_adapter = batch_info.permutation is not None
+    enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
     _qkv_lora_b_kernel[grid_b](
         x,
         qkv_lora_b,
@@ -210,6 +224,8 @@ def qkv_lora_b_fwd(
         BLOCK_OUT,
         BLOCK_R,
         batch_info.scalings,
+        ENABLE_PDL=enable_pdl,
+        **pdl_kwargs,
     )
 
     return output

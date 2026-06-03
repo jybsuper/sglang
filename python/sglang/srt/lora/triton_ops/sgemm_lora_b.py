@@ -2,7 +2,10 @@ import torch
 import triton
 import triton.language as tl
 
-from sglang.srt.lora.triton_ops.kernel_utils import _resolve_token_positions
+from sglang.srt.lora.triton_ops.kernel_utils import (
+    _resolve_token_positions,
+    get_pdl_launch_metadata,
+)
 from sglang.srt.lora.utils import LoRABatchInfo
 
 
@@ -36,6 +39,7 @@ def _sgemm_lora_b_kernel(
     BLOCK_K: tl.constexpr,
     # For fused output scaling
     scalings,
+    ENABLE_PDL: tl.constexpr = False,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA B matrix
@@ -81,6 +85,11 @@ def _sgemm_lora_b_kernel(
         k_offset[:, None] * w_stride_2 + n_offset[None, :] * w_stride_1
     )
 
+    # GDC wait: ensure the prior kernel (producer of x) has fully completed
+    # before consuming its output.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_wait()
+
     n_mask = n_offset[None, :] < N
     output_ptr = output + (
         s_physical[:, None] * output_stride_0 + n_offset[None, :] * output_stride_1
@@ -100,6 +109,10 @@ def _sgemm_lora_b_kernel(
 
     # cast fused: the split-K shrink returns fp32, plain path bf16 (no-op)
     partial_sum = tl.dot(x_tile.to(w_tile.dtype), w_tile) * scaling
+
+    # All input reads are done; hint the runtime to launch the dependent kernel.
+    if ENABLE_PDL:
+        tl.extra.cuda.gdc_launch_dependents()
 
     # Store result to output matrix (cast to the OUTPUT dtype: x may be the fp32
     # split-K shrink accumulator while base_output is bf16)
@@ -145,6 +158,7 @@ def sgemm_lora_b_fwd(
         output = base_output
 
     sorted_by_adapter = batch_info.permutation is not None
+    enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
     _sgemm_lora_b_kernel[grid](
         x,
         weights,
@@ -168,5 +182,7 @@ def sgemm_lora_b_fwd(
         BLOCK_N,
         BLOCK_R,
         batch_info.scalings,
+        ENABLE_PDL=enable_pdl,
+        **pdl_kwargs,
     )
     return output
