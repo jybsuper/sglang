@@ -175,6 +175,8 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         max_loras: int,
         compute_dtype: torch.dtype,
         moe_layer,
+        num_moe_layers: int = 0,
+        max_lora_rank: int = 0,
     ):
         """Phase 1 of LoRA CUDA graph init: MoE intermediate buffers.
 
@@ -185,6 +187,14 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         This is backend-agnostic because MoE LoRA always uses the same
         fused Triton kernel (TritonRunnerCoreWithLoRA) regardless of which
         dense LoRA backend is selected.
+
+        When SGLANG_OPT_LORA_MOE_PREZERO=1 (and ``num_moe_layers``/
+        ``max_lora_rank`` are given), also allocates the dsv3-style bump
+        buffer for the split-K shrink intermediates: zeroed once per forward
+        (LoRAManager.prepare_lora_batch), bump-sliced per MoE layer's
+        gate_up-A / down-A GEMM — unlike the shared caches above, those
+        slices must be distinct per layer because each is an atomic_add
+        accumulation target.
         """
         base = moe_layer.base_layer
         top_k = base.top_k
@@ -252,6 +262,34 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
                 (max_bs,), -1, dtype=torch.int32, device=device
             ),
         }
+
+        from sglang.srt.environ import envs
+
+        if (
+            envs.SGLANG_OPT_LORA_MOE_PREZERO.get()
+            and num_moe_layers > 0
+            and max_lora_rank > 0
+        ):
+            from sglang.srt.lora.moe_lora_zero_buffer import (
+                set_moe_lora_zero_buffer,
+            )
+
+            # 2 shrink GEMMs (gate_up-A, down-A) per MoE layer, each up to
+            # max_bs decode tokens x top_k x the A-stage output rank. For the
+            # gated gate_up the A output carries gate+up = 2*r rows (the down
+            # A is 1*r), so size the per-slice budget with 2*max_lora_rank --
+            # observed live: with 1*r the bs>32 gate_up slice (M*top_k*2r)
+            # exceeded the budget and silently fell back to per-call zeros.
+            # ~tens of MB; prefill-sized batches still fall back by design.
+            max_slice_numel = max_bs * top_k * (2 * max_lora_rank)
+            set_moe_lora_zero_buffer(
+                torch.zeros(
+                    (num_moe_layers * 2 * max_slice_numel,),
+                    dtype=dtype,
+                    device=device,
+                ),
+                max_slice_numel=max_slice_numel,
+            )
 
     def _add_moe_lora_info(
         self, forward_batch: ForwardBatch, batch_info: LoRABatchInfo

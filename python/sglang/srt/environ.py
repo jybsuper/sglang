@@ -458,6 +458,15 @@ class Envs:
     # Correctness-neutral (acc at the atomic-add noise floor, coherent). On GB200 this hand-tune currently
     # beats PR #26899's B200-tuned auto-configs; for the auto-tuned path, re-run that PR's tuner on GB200.
     SGLANG_OPT_LORA_SHRINK_TUNE = EnvBool(False)
+    # Replace the per-call MoE LoRA shrink-intermediate torch.zeros (2 fills per MoE layer per
+    # step; split-K shrink accumulates with atomic_add so its intermediate must be pre-zeroed)
+    # with a dsv3-style bump allocator: one persistent buffer (num_moe_layers x 2 x max_bs x
+    # top_k x max_lora_rank, allocated pre-memory-profiling) is zeroed ONCE per forward in
+    # prepare_lora_batch (outside any cuda graph), and each gate_up-A / down-A GEMM bump-takes
+    # a fresh slice. Batches that outgrow the buffer (prefill) fall back to per-call zeros.
+    # Earlier stream-overlap variants were bench-rejected: per-call cross-stream fork/join
+    # around the shrink cost 6-11% decode throughput.
+    SGLANG_OPT_LORA_MOE_PREZERO = EnvBool(False)
     # Skip-softmax threshold scale factor for TRT-LLM attention (prefill and decode separately).
     # None = standard attention. See https://arxiv.org/abs/2512.12087
     SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR = EnvFloat(None)

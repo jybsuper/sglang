@@ -11,7 +11,7 @@ import triton.language as tl
 
 from sglang.jit_kernel.moe_align import moe_align_block_size as jit_moe_align_block_size
 from sglang.srt.environ import envs
-
+from sglang.srt.lora.moe_lora_zero_buffer import take_zeroed_slice
 
 @triton.jit
 def _fused_virtual_topk_ids_kernel(
@@ -759,29 +759,45 @@ def _merged_experts_fused_moe_lora_add_impl(
         topk_ids.shape[1],
         max_lora_rank,
     ]
-    intermediate_split_k = _get_moe_lora_shrink_split_k(
-        lora_a_virtual, sorted_token_ids, a_stage_config
+    # NOTE: an earlier variant zero-filled per call on a dedicated stream
+    # concurrent with the routing kernels (forked before _get_routing, joined
+    # before the shrink) and was bench-rejected: the per-call cross-stream
+    # fork/join (2 per MoE layer per step) cost 6-11% decode throughput on
+    # Qwen3.5-35B (bs 16-64) -- far more than the ~2us fill it hid. The
+    # bump-allocator slice below has no such sync (zeroed once per forward on
+    # the main stream, before any consumer).
+    intermediate: torch.Tensor | None = None
+    slice_flat = take_zeroed_slice(
+        intermediate_shape[0] * intermediate_shape[1] * intermediate_shape[2],
+        hidden_states.dtype,
+        hidden_states.device,
     )
-    # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert expand skips
-    # non-owned blocks (never reads them), but a shared-outer expand routes by lora id
-    # and would read them into the real (all-reduced) output -> must zero. split_k > 1
-    # also needs a zeroed buffer for its accumulation.
-    zero_intermediate = intermediate_split_k > 1 or (
-        ep_local and experts_shared_outer_loras_b
-    )
-    intermediate = (
-        torch.zeros(
-            intermediate_shape,
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
+    if slice_flat is not None:
+        intermediate = slice_flat.view(intermediate_shape)
+    if intermediate is None:
+        intermediate_split_k = _get_moe_lora_shrink_split_k(
+            lora_a_virtual, sorted_token_ids, a_stage_config
         )
-        if zero_intermediate
-        else torch.empty(
-            intermediate_shape,
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
+        # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert expand skips
+        # non-owned blocks (never reads them), but a shared-outer expand routes by lora id
+        # and would read them into the real (all-reduced) output -> must zero. split_k > 1
+        # also needs a zeroed buffer for its accumulation.
+        zero_intermediate = intermediate_split_k > 1 or (
+            ep_local and experts_shared_outer_loras_b
         )
-    )
+        intermediate = (
+            torch.zeros(
+                intermediate_shape,
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+            if zero_intermediate
+            else torch.empty(
+                intermediate_shape,
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+        )
 
     _invoke_moe_lora_shrink_splitk(
         hidden_states,
