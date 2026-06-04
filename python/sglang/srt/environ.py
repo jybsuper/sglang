@@ -402,6 +402,15 @@ class Envs:
     SGLANG_NPU_FORWARD_NATIVE_GEMMA_RMS_NORM = EnvBool(False)
     # Delay all-gather after qlora for better performance for Deepseek v3.2
     SGLANG_USE_AG_AFTER_QLORA = EnvBool(False)
+    # Fix: gated gate_up MoE-LoRA must contract the up-shrink columns [R:2R] for the up
+    # output half (gate_A's [0:R] for the gate half). The shrink stacks gate_A/up_A so the
+    # intermediate is 2*R wide; the rank-specialized direct expand previously hardcoded the
+    # split off and read [0:R] for BOTH halves, dropping up_A (wrong up-projection delta
+    # whenever gate_A != up_A; >100% rel error vs PEFT on the real Qwen3.5 adapter). Default
+    # True (correct). Set False to reproduce the pre-fix behavior for A/B bisection.
+    SGLANG_ENABLE_LORA_MOE_GATEUP_GATED_SPLIT = EnvBool(True)
+    # Split-K for the dense LoRA-A (shrink) GEMM.
+    SGLANG_ENABLE_LORA_SHRINK_SPLIT_K = EnvBool(False)
     # Quantize x to int8 in the dispatch operator
     DEEP_NORMAL_MODE_USE_INT8_QUANT = EnvBool(False) # This argument is deprecated
     SGLANG_NPU_FUSED_MOE_MODE = EnvInt(1)
@@ -425,8 +434,102 @@ class Envs:
     SGLANG_FLASHINFER_USE_PAGED = EnvBool(False)
     # Default to the pick from flashinfer
     SGLANG_FLASHINFER_WORKSPACE_SIZE = EnvInt(384 * 1024 * 1024)
-    # Enable per-token NVFP4 activation scaling path for FlashInfer TRT-LLM MoE.
+    # NVFP4 per-token activation scaling for the flashinfer-trtllm MoE. Default OFF (per-tensor,
+    # faster — main's behavior). Set =1 when serving NVFP4 LoRA on the sgl_flashinfer_trtllm
+    # backend: the decomposed LoRA scale composition needs w13/w2 input_scale==1 (see
+    # lora/trtllm_moe/lora_dispatch.py path-3 comment). Leaving it OFF for no-lora avoids the
+    # ~9-13% per-token overhead on the no-lora base.
     SGLANG_FLASHINFER_NVFP4_PER_TOKEN_ACTIVATION = EnvBool(False)
+    # Fuse the gate_up permute + NvFP4 per-token quant into one kernel on the NvFP4 MoE-LoRA decode
+    # path: read UN-permuted hidden and scatter-write fp4 + block-sf + per-token-sf to the permuted
+    # positions, de-padding (only num_tokens*top_k rows) and dropping the bf16 permuted round-trip.
+    # Bitwise-identical to the plain permuteKernel + nvfp4QuantAndPerTokenScale chain; only takes
+    # effect for the decode (SWIZZLED_8x4 / tile<128) path — prefill keeps the plain chain.
+    SGLANG_OPT_FUSED_PERMUTE_QUANT = EnvBool(False)
+    # Token-count ceiling for the trtllm-LoRA decode two-stream overlap (now ALWAYS-ON): decode batches
+    # with <= this many tokens run two-stream; larger batches run single-stream. NOTE: the LoRA
+    # two-stream (attention + gate_up) overlap and the permute-memset skip are now unconditional
+    # (their env gates were removed — proven useful). The down-proj overlap is DISABLED (load-triggered
+    # cuda-graph/NCCL race → decode garbage; see moe_overlap.py `_overlap_down`).
+    SGLANG_TWO_STREAM_MAX_TOKENS = EnvInt(256)
+    # Allocate the two-stream LoRA-A shrink OUTPUT buffer on the MAIN (consumer) stream instead of
+    # inside the side-stream context. A buffer allocated under `with torch.cuda.stream(side)` is tagged
+    # to the side stream, so the caching allocator can free/reuse it on the side stream's schedule —
+    # before the MAIN stream's LoRA-B expand (the real last consumer) finishes. Under cuda-graph replay
+    # (record_stream is a no-op during capture) that's a premature-reuse WAR → qwen3.5 mamba decode
+    # garbage with a single shared side stream. Set =1 to allocate the output on the consumer stream
+    # (as the MoE O1 path already does for gate_up_delta), making a single shared side stream graph-safe.
+    SGLANG_OPT_LORA_OVERLAP_MAIN_ALLOC = EnvBool(False)
+    # WIP (unstaged, test-only): tuned triton a_stage_config for the MoE LoRA shrink GEMM. Default off.
+    # Correctness-neutral (acc at the atomic-add noise floor, coherent). On GB200 this hand-tune currently
+    # beats PR #26899's B200-tuned auto-configs; for the auto-tuned path, re-run that PR's tuner on GB200.
+    SGLANG_OPT_LORA_SHRINK_TUNE = EnvBool(False)
+    # Use the vectorized activationKernelOpt (128-bit gate/up + 64-bit delta/store, 4 pairs/thread)
+    # instead of the scalar activationKernel in the FP4 MoE LoRA path. Bitwise-identical output,
+    # ~3.25x faster on the EP8 bs64 Kimi decode activation (13.9->4.3us, B200). Read C++-side via
+    # getenv in trtllm_fused_moe_kernel_launcher.cu (FP4BlockScaleLoraLauncher::run), since the JIT
+    # kernel has no Python->C++ config channel. Default OFF for A/B bisection; set =1 to enable.
+    SGLANG_OPT_FUSED_MOE_ACTIVATION_VEC = EnvBool(False)
+    # Use the fused LoRA-local align kernel (moe_lora_merged_align) on the
+    # --lora-use-virtual-experts decode routing prep: one kernel computes the
+    # virtual expert id inline + EP-skips dropped slots + compacts to local
+    # experts + scatters in a single block, replacing the 3-kernel
+    # (_fused_virtual_topk_ids + moe_align + count_and_sort) pipeline. Only
+    # engaged for the supported per-expert single-adapter EP path; other cases
+    # fall back to the original path. Default off.
+    SGLANG_OPT_LORA_FUSED_MERGED_ALIGN = EnvBool(False)
+    # Aggressive fusion: compute the SwiGLU+LoRA activation AND the down-GEMM NVFP4 per-token quant
+    # in a single kernel, so the bf16 activation is never materialized to HBM (eliminates its write
+    # + quant#2's two reads, ~1.5x over the separate pair on EP8 bs64 Kimi decode). Takes priority
+    # over _VEC. Read C++-side via getenv in FP4BlockScaleLoraLauncher::run. Default OFF (A/B bisect).
+    SGLANG_OPT_FUSED_MOE_ACTIVATION_QUANT_FUSE = EnvBool(False)
+    # Overlap the MoE down-proj LoRA shrink (gemm A) + routing prep with the trtllm MoE
+    # finalize kernel: the op records a CUDA event right after GEMM2 (base down GEMM); the
+    # LoRA side stream waits on it and runs the shrink concurrent with finalize. The
+    # expand-add (gemm B) is NOT overlapped -- it writes the same output buffer finalize
+    # writes -- and stays on the main stream post-finalize with serial-path kernels and
+    # numerics. More conservative than the removed act_ready_event down-overlap (fork point
+    # is after GEMM2, not after activation). Default off.
+    SGLANG_OPT_LORA_DOWN_FINALIZE_OVERLAP = EnvBool(False)
+    # Overlap the MoE shared-expert add with the down-LoRA shrink (Qwen FP8 trtllm-lora dual-stream
+    # decode path). Instead of `final_hidden_states += shared_output` running on the main stream AFTER
+    # the whole alt-stream MoE+LoRA chain joins, the LoRA dispatch enqueues the add on the main stream
+    # right after the base-MoE finalize writes the output buffer — concurrent with the down-LoRA shrink
+    # (which only writes its own intermediate). The down-LoRA expand (atomic_add into the same output
+    # buffer) waits on the add via an event, so the two writers never run concurrently. See
+    # lora/trtllm_moe/shared_add_overlap.py. Default off.
+    SGLANG_OPT_LORA_SHARED_ADD_OVERLAP = EnvBool(False)
+    # Opt in to the single-adapter cuBLAS (F.linear) LoRA-A shrink fast path in sgemm_lora_a_fwd.
+    # Only takes effect when batch_info.single_adapter is set (eager, uniform 1-adapter batch); under
+    # CUDA graph single_adapter is None so this is a no-op. Default OFF (A/B bisect).
+    SGLANG_OPT_LORA_CUBLAS = EnvBool(False)
+    # Per-path opt-in for the cuBLAS LoRA fast paths. Each ORs with the master SGLANG_OPT_LORA_CUBLAS
+    # above, so the master still enables all paths; these allow isolating one path at a time (A/B
+    # bisect of the CUDA-graph decode correctness issue). Default OFF.
+    SGLANG_OPT_LORA_CUBLAS_A = EnvBool(False)  # sgemm_lora_a (LoRA-A shrink)
+    SGLANG_OPT_LORA_CUBLAS_B = EnvBool(False)  # sgemm_lora_b (generic LoRA-B: o_proj, down_proj)
+    SGLANG_OPT_LORA_CUBLAS_GATE_UP = EnvBool(False)  # gate_up_lora_b
+    SGLANG_OPT_LORA_CUBLAS_QKV = EnvBool(False)  # qkv_lora_b
+    SGLANG_OPT_LORA_CUBLAS_KV_B = EnvBool(False)  # kv_b_lora_absorbed (MLA absorbed)
+    # qkv_lora_b: replace the bf16 tl.atomic_add writeback with load+add+store (mirrors
+    # gate_up_lora_b). The expand-add output tiles are disjoint across all programs in a
+    # launch (distinct s-rows / n-cols / slice / segment), so each output element is
+    # read-modify-written by exactly one program; the atomic was only serializing that
+    # (now-unnecessary) intra-kernel RMW. base_output is a same-stream data dependency
+    # (base_layer.forward before apply_lora), not a concurrent cross-stream write, so the
+    # plain RMW is race-free. Measured ~4x faster on decode (bf16 narrow-tile atomic was
+    # ~70% of the kernel: it issues L2 atomic sectors at roofline-min DRAM traffic).
+    # Default OFF for A/B bisect.
+    SGLANG_OPT_LORA_QKV_B_STORE = EnvBool(False)
+    # Fuse the FlashInfer routed-MoE topk pack ((id << 16) | bf16_bits(weight)) into the top-k
+    # gating softmax via the JIT topk_softmax_pack kernel (a port of the AOT topkGatingSoftmax
+    # fast path with a third output), removing the per-MoE-layer _pack_topk_kernel launch from
+    # the decode critical path. Engages only on the plain CUDA softmax routing path (no EPLB,
+    # no fused shared experts, no bias, pow-2 experts <= 512); the packed tensor rides on
+    # StandardTopKOutput.packed_topk_ids and is consumed by the sgl_flashinfer_trtllm FP8 LoRA
+    # dispatch, which otherwise falls back to the separate pack. Intended for Qwen3.5 FP8 LoRA
+    # serving; default off keeps the separate pack.
+    SGLANG_OPT_LORA_FUSED_TOPK_PACK = EnvBool(False)
     # Skip-softmax threshold scale factor for TRT-LLM attention (prefill and decode separately).
     # None = standard attention. See https://arxiv.org/abs/2512.12087
     SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR = EnvFloat(None)
@@ -708,6 +811,13 @@ class Envs:
     SGLANG_OPT_USE_FUSED_HASH_TOPK = EnvBool(True)
     SGLANG_OPT_USE_JIT_KERNEL_FUSED_TOPK = EnvBool(True)
     SGLANG_OPT_USE_TOPK_V2 = EnvBool(True)
+    SGLANG_OPT_USE_JIT_KERNEL_KIMI_GATE = EnvBool(False)
+    # When the JIT kimi gate is used, feed bf16/fp16 router logits / correction bias
+    # straight in (widened to fp32 in-register) instead of upcasting on the host,
+    # dropping two elementwise cast kernels. Toggle off to A/B bisect against the
+    # old host-upcast path; bitwise-identical, so on by default.
+    SGLANG_OPT_KIMI_GATE_BF16_INPUT = EnvBool(True)
+    SGLANG_OPT_USE_JIT_KERNEL_MOE_ALIGN = EnvBool(False)
 
     # GEMM / kernel fusion
     SGLANG_OPT_FP8_WO_A_GEMM = EnvBool(True)
