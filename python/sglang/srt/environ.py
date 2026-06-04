@@ -458,6 +458,14 @@ class Envs:
     # Correctness-neutral (acc at the atomic-add noise floor, coherent). On GB200 this hand-tune currently
     # beats PR #26899's B200-tuned auto-configs; for the auto-tuned path, re-run that PR's tuner on GB200.
     SGLANG_OPT_LORA_SHRINK_TUNE = EnvBool(False)
+    # Overlap the MoE down-proj LoRA shrink (gemm A) + routing prep with the trtllm MoE
+    # finalize kernel: the op records a CUDA event right after GEMM2 (base down GEMM); the
+    # LoRA side stream waits on it and runs the shrink concurrent with finalize. The
+    # expand-add (gemm B) is NOT overlapped -- it writes the same output buffer finalize
+    # writes -- and stays on the main stream post-finalize with serial-path kernels and
+    # numerics. More conservative than the removed act_ready_event down-overlap (fork point
+    # is after GEMM2, not after activation). Default off.
+    SGLANG_OPT_LORA_DOWN_FINALIZE_OVERLAP = EnvBool(False)
     # Skip-softmax threshold scale factor for TRT-LLM attention (prefill and decode separately).
     # None = standard attention. See https://arxiv.org/abs/2512.12087
     SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR = EnvFloat(None)
