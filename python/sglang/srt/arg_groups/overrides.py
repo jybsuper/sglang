@@ -2020,10 +2020,7 @@ def _moe_runner_backend_quant_constraints(view: Any) -> dict:
 
 @register_post_process
 def _moe_runner_fusion_disable(view: Any) -> dict:
-    """FlashInfer CuteDSL / TRT-LLM / TRT-LLM-routed MoE runners require the
-    shared-experts fusion disabled; declared at the legacy write slots in
-    _handle_moe_kernel_config (before the deprecated cutlass env override, so
-    the runner value observed is the pre-override one)."""
+    """Disable shared-expert fusion for incompatible base runners or LoRA engines."""
     runner = view.moe_runner_backend
     if runner == "flashinfer_cutedsl":
         logger.warning(
@@ -2038,6 +2035,11 @@ def _moe_runner_fusion_disable(view: Any) -> dict:
     if runner == "flashinfer_trtllm_routed":
         logger.warning(
             "FlashInfer TRTLLM routed MoE is enabled. --disable-shared-experts-fusion is automatically set."
+        )
+        return {"disable_shared_experts_fusion": True}
+    if getattr(view, "lora_execution_engine", "legacy") == "sgl_lora":
+        logger.warning(
+            "sgl_lora execution is enabled. --disable-shared-experts-fusion is automatically set."
         )
         return {"disable_shared_experts_fusion": True}
     return {}

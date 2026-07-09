@@ -914,6 +914,9 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self,
         base_layer: FusedMoE,
         lora_backend: BaseLoRABackend,
+        *,
+        lora_execution_engine: str = "legacy",
+        enable_lora_two_stream: bool = False,
     ):
         # initializes FusedMoE with its own moe_runner for base path
         super().__init__(base_layer, lora_backend)
@@ -938,6 +941,8 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self._uses_interleaved_gate_up = (
             getattr(base_layer.moe_runner_config, "gemm1_alpha", None) is not None
         )
+        self._lora_execution_engine = lora_execution_engine
+        self._sgl_lora_two_stream = enable_lora_two_stream
 
         # Initialize triton_lora moe runner for batches with lora enabled
         from sglang.srt.layers.moe import MoeRunnerBackend
@@ -969,6 +974,13 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
 
         # ===== TO BE REFACTORED ====
         self._lora_runner_backend = runner_backend
+        if self._lora_execution_engine == "sgl_lora":
+            from sglang.srt.lora.sgl_lora.lora_layer import (
+                init_sgl_lora_moe,
+            )
+
+            init_sgl_lora_moe(self, base_layer)
+            return
         if runner_backend.is_experimental_sgl_trtllm():
             from sglang.srt.lora.trtllm_lora_temp.lora_layer import (
                 init_experimental_sgl_trtllm_lora,
@@ -1113,8 +1125,13 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         # Use pre-computed quant info (doesn't change so not sure why we need to pass it in every time)
         quant_info = self._quant_info
 
-        # ===== TO BE REFACTORED ====
-        if self._lora_runner_backend.is_experimental_sgl_trtllm():
+        if self._lora_execution_engine == "sgl_lora":
+            from sglang.srt.lora.sgl_lora.lora_layer import (
+                dispatch_sgl_lora_moe,
+            )
+
+            combine_input = dispatch_sgl_lora_moe(dispatch_output, self, lora_info)
+        elif self._lora_runner_backend.is_experimental_sgl_trtllm():
             from sglang.srt.lora.trtllm_lora_temp.lora_layer import (
                 dispatch_experimental_sgl_trtllm_lora,
             )
@@ -1251,7 +1268,11 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
 
 
 def get_lora_layer(
-    layer: nn.Module, lora_backend: BaseLoRABackend
+    layer: nn.Module,
+    lora_backend: BaseLoRABackend,
+    *,
+    lora_execution_engine: str = "legacy",
+    enable_lora_two_stream: bool = False,
 ) -> BaseLayerWithLoRA:
     supported_layer_types = {
         # the order matters
@@ -1270,7 +1291,15 @@ def get_lora_layer(
         return InklingQKVRLinearWithLoRA(layer, lora_backend)
     for src_layer_type, lora_layer_type in supported_layer_types.items():
         if isinstance(layer, src_layer_type):  # pylint: disable=unidiomatic-typecheck
-            ret = lora_layer_type(layer, lora_backend)
+            if src_layer_type is FusedMoE:
+                ret = lora_layer_type(
+                    layer,
+                    lora_backend,
+                    lora_execution_engine=lora_execution_engine,
+                    enable_lora_two_stream=enable_lora_two_stream,
+                )
+            else:
+                ret = lora_layer_type(layer, lora_backend)
             return ret
     raise Exception(f"No corresponding LoRA layer supported for {type(layer)}.")
 
