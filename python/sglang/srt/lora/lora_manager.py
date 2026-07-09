@@ -94,6 +94,8 @@ class LoRAManager:
         self.lora_strict_loading: bool = getattr(
             server_args, "lora_strict_loading", False
         )
+        self.lora_execution_engine: str = server_args.lora_execution_engine
+        self.enable_lora_two_stream: bool = server_args.enable_lora_two_stream
 
         # LoRA backend for running sgemm kernels
         logger.info(f"Using {lora_backend} as backend of LoRA kernels.")
@@ -126,9 +128,20 @@ class LoRAManager:
         )
 
         # ===== TO BE REFACTORED ====
-        # Pre-create the experimental LoRA two-stream side stream now (gated) so the
-        # torch.cuda.Stream() call never lands inside a cuda-graph capture region.
-        if _SGLANG_EXPERIMENTAL_LORA_OPTI:
+        # Pre-create the LoRA two-stream side stream so torch.cuda.Stream()
+        # never lands inside CUDA graph capture. The legacy experimental path
+        # retains its master gate; sgl_lora uses an explicit, default-off flag.
+        if self.lora_execution_engine == "sgl_lora":
+            # The legacy master may still install dense-layer overlap patches.
+            # They use the same named stream, so initialize it through the
+            # sgl_lora-owned helper without importing the temporary package.
+            if self.enable_lora_two_stream or _SGLANG_EXPERIMENTAL_LORA_OPTI:
+                from sglang.srt.lora.sgl_lora.runtime import (
+                    init_lora_two_stream_resources,
+                )
+
+                init_lora_two_stream_resources(self.device)
+        elif _SGLANG_EXPERIMENTAL_LORA_OPTI:
             from sglang.srt.lora.trtllm_lora_temp import (
                 init_lora_two_stream_resources,
             )
@@ -779,7 +792,12 @@ class LoRAManager:
 
     def set_lora_module(self, module_name, module):
         """Wrap any module (standard or MoE) with LoRA support."""
-        lora_module = get_lora_layer(module, self.lora_backend)
+        lora_module = get_lora_layer(
+            module,
+            self.lora_backend,
+            lora_execution_engine=self.lora_execution_engine,
+            enable_lora_two_stream=self.enable_lora_two_stream,
+        )
         replace_submodule(self.base_model, module_name, lora_module)
         return lora_module
 

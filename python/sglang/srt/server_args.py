@@ -259,6 +259,7 @@ MOE_RUNNER_BACKEND_CHOICES = [
     "flashinfer_cutlass",
     "flashinfer_mxfp4",
     "flashinfer_cutedsl",
+    "sgl_lora",
     "cutlass",
     "aiter",
     "marlin",
@@ -2335,6 +2336,24 @@ class ServerArgs:
             choices=LORA_BACKEND_CHOICES,
         ),
     ] = "csgmv"
+    lora_execution_engine: A[
+        Literal["auto", "legacy", "sgl_lora"],
+        Arg(
+            help=(
+                "Choose the LoRA execution implementation. In Phase 1a, "
+                "'sgl_lora' selects the new MoE LoRA runner while dense and "
+                "special LoRA layers remain on their existing --lora-backend. "
+                "'auto' preserves legacy execution. The temporary "
+                "--moe-runner-backend=sgl_lora spelling is accepted as an "
+                "input alias and normalized away before provider selection."
+            ),
+            choices=["auto", "legacy", "sgl_lora"],
+        ),
+    ] = "auto"
+    enable_lora_two_stream: A[
+        bool,
+        "Enable the two-stream overlap policy for the sgl_lora execution engine. Disabled by default.",
+    ] = False
     max_lora_chunk_size: A[
         Optional[int],
         Arg(
@@ -2862,6 +2881,12 @@ class ServerArgs:
         # direct handler invocations can rely on it even when
         # _handle_model_specific_adjustments never runs.
         self._resolved_overrides = []
+
+        # Normalize the public LoRA execution selector before the dummy-model
+        # return and before model-specific MoE backend resolution. This makes
+        # either Phase-1a spelling sufficient while producing one authoritative
+        # runtime state.
+        self._handle_lora_execution_engine()
 
         if self.model_path.lower() in ["none", "dummy"]:
             return
@@ -5418,6 +5443,42 @@ class ServerArgs:
         from sglang.srt.arg_groups.overrides import _dp_lm_head_validation
 
         run_post_process_pass(self, _dp_lm_head_validation)
+
+    def _handle_lora_execution_engine(self):
+        engine = self.lora_execution_engine
+        runner = self.moe_runner_backend
+
+        if self.speculative_moe_runner_backend == "sgl_lora":
+            raise ValueError(
+                "sgl_lora is a target-model LoRA execution engine, not a "
+                "speculative draft MoE runner backend."
+            )
+
+        # Backward-compatible Phase-1a shorthand. Consume it at the CLI
+        # boundary so the runtime MoE-provider axis never contains a LoRA
+        # execution-engine value.
+        if runner == "sgl_lora":
+            if engine == "legacy":
+                raise ValueError(
+                    "Conflicting LoRA execution selection: "
+                    "--lora-execution-engine=legacy cannot be combined with "
+                    "--moe-runner-backend=sgl_lora."
+                )
+            engine = "sgl_lora"
+            runner = "auto"
+
+        if engine == "auto":
+            engine = "legacy"
+
+        self.lora_execution_engine = engine
+        self.moe_runner_backend = runner
+
+        if engine == "legacy":
+            return
+
+        # Virtual experts are the semantic model of the new engine, not an
+        # independent user choice. Keep the legacy flag for the legacy path.
+        self.lora_use_virtual_experts = True
 
     def _handle_moe_kernel_config(self):
         # The quantization-driven runner resolutions moved to the pipeline
