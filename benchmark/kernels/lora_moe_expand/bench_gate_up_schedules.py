@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """A/B benchmark for the direct gate/up LoRA expand schedules.
 
 This benchmark isolates the expand kernel: both implementations consume the
@@ -402,7 +401,8 @@ def _print_row(result: dict[str, object]) -> None:
         f"R={result['rank']:>2d} "
         f"flat={result['flat']['p50_us']:>8.3f} us "
         f"slice={result['sliced']['p50_us']:>8.3f} us "
-        f"speedup={result['speedup_p50']:>6.3f}x"
+        f"sliced_speedup={result['sliced_speedup_p50']:>6.3f}x "
+        f"sliced_delta={result['sliced_delta_pct']:>+6.2f}%"
     )
 
 
@@ -524,7 +524,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "expected_sliced_block_size_n": sliced_effective_bn,
                     "flat": asdict(flat_q),
                     "sliced": asdict(sliced_q),
-                    "speedup_p50": flat_q.p50_us / sliced_q.p50_us,
+                    "sliced_speedup_p50": flat_q.p50_us / sliced_q.p50_us,
+                    "sliced_delta_pct": 100.0 * (flat_q.p50_us / sliced_q.p50_us - 1.0),
                 }
                 results.append(result)
                 _print_row(result)
