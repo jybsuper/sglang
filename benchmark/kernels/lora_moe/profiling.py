@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import floor
+from time import perf_counter_ns
 from typing import Any, Callable, Iterator, Literal, Sequence
 
 ExecutionMode = Literal["eager", "cuda_graph"]
@@ -182,6 +183,56 @@ def time_cuda_events(
     )
 
 
+def time_isolated_cuda_wall(
+    batch_fn: Callable[[], None],
+    *,
+    launches_per_batch: int,
+    warmup: int,
+    samples: int,
+    before_sample: Callable[[], None] | None = None,
+) -> TimingStats:
+    """Measure isolated host-to-completion latency with a wall clock.
+
+    Every invocation starts from an idle device. ``before_sample`` runs before
+    that boundary, so output resets and cache eviction are neither timed nor
+    able to overlap the measured host preparation and CUDA API calls.  The
+    ending synchronization makes each sample include device completion and
+    prevents host/allocation work from hiding behind an earlier sample.
+    """
+
+    for name, value in (
+        ("launches_per_batch", launches_per_batch),
+        ("warmup", warmup),
+        ("samples", samples),
+    ):
+        _require_positive_int(name, value)
+
+    torch = _load_torch()
+
+    def prepare_isolated_sample() -> None:
+        if before_sample is not None:
+            before_sample()
+        torch.cuda.synchronize()
+
+    for _ in range(warmup):
+        prepare_isolated_sample()
+        batch_fn()
+        torch.cuda.synchronize()
+
+    samples_us = []
+    for _ in range(samples):
+        prepare_isolated_sample()
+        start_ns = perf_counter_ns()
+        batch_fn()
+        torch.cuda.synchronize()
+        samples_us.append((perf_counter_ns() - start_ns) / 1000.0 / launches_per_batch)
+
+    return summarize_timings_us(
+        samples_us,
+        launches_per_batch=launches_per_batch,
+    )
+
+
 @contextmanager
 def cuda_profile_range(
     label: str,
@@ -228,4 +279,5 @@ __all__ = [
     "make_batch",
     "summarize_timings_us",
     "time_cuda_events",
+    "time_isolated_cuda_wall",
 ]
