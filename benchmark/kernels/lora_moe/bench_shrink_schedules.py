@@ -353,11 +353,53 @@ def _prepare_shrink(
     )
 
 
-def _production_reference(fixture: SiteFixture) -> torch.Tensor:
-    fixture.invoke("routing", direct=True)
-    fixture.invoke("shrink", direct=True)
+def _torch_reference(fixture: SiteFixture) -> torch.Tensor:
+    """Build an independent FP32 oracle without relying on a launchable schedule.
+
+    A large rank can make the current production ``BN=next_power_of_two(N)``
+    schedule exceed the device shared-memory limit.  Correctness must remain
+    testable in exactly those cells, so gather only a bounded route-pair chunk
+    at a time and accumulate with PyTorch FP32 matmuls.
+    """
+    top_k = fixture.topk_ids.shape[1]
+    pair_count = fixture.topk_ids.numel()
+    weight_n = fixture.lora_a.shape[2]
+    weight_k = fixture.lora_a.shape[3]
+    reference = torch.zeros(
+        (pair_count, weight_n),
+        dtype=fixture.hidden_states.dtype,
+        device=fixture.hidden_states.device,
+    )
+    pair_ids = torch.arange(pair_count, device=fixture.hidden_states.device)
+    token_ids = pair_ids // top_k
+    input_ids = pair_ids if fixture.hidden_states.shape[0] == pair_count else token_ids
+    adapter_ids = fixture.token_lora_mapping[token_ids].long()
+    expert_ids = fixture.topk_ids.reshape(-1).long()
+    valid = (
+        (adapter_ids >= 0)
+        & (adapter_ids < fixture.lora_a.shape[0])
+        & (expert_ids >= 0)
+        & (expert_ids < fixture.case.e_local)
+    )
+    if fixture.lora_a.shape[1] == 1:
+        weight_expert_ids = torch.zeros_like(expert_ids)
+    else:
+        weight_expert_ids = expert_ids
+
+    # Bound the temporary FP32 weight gather to roughly 64 MiB.
+    bytes_per_pair = weight_n * weight_k * torch.float32.itemsize
+    chunk_size = max(1, min(128, (64 * 1024 * 1024) // bytes_per_pair))
+    valid_pairs = pair_ids[valid]
+    for start in range(0, valid_pairs.numel(), chunk_size):
+        indices = valid_pairs[start : start + chunk_size]
+        inputs = fixture.hidden_states[input_ids[indices]].float().unsqueeze(1)
+        weights = fixture.lora_a[
+            adapter_ids[indices], weight_expert_ids[indices]
+        ].float()
+        values = torch.bmm(inputs, weights.transpose(1, 2)).squeeze(1)
+        reference[indices] = values.to(reference.dtype)
     torch.cuda.synchronize()
-    return fixture.intermediate.view(-1, fixture.intermediate.shape[-1]).clone()
+    return reference
 
 
 def _check(op: PreparedShrink, reference: torch.Tensor) -> dict[str, float]:
@@ -509,7 +551,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
     fixture = _build_fixture(case, args.site)
-    reference = _production_reference(fixture)
+    reference = _torch_reference(fixture)
 
     templates: list[ShrinkSchedule | None]
     if args.all_configs:
@@ -539,13 +581,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         schedule = _apply_overrides(schedule, args)
         # An override may have changed BM after the initial plan was selected.
         plan = plan_for(schedule.block_m)
-        results.append(_run_schedule(fixture, reference, schedule, plan, args))
+        try:
+            results.append(_run_schedule(fixture, reference, schedule, plan, args))
+        except Exception as exc:
+            from triton.runtime.errors import OutOfResources
+
+            if not args.all_configs or not isinstance(exc, OutOfResources):
+                raise
+            error = {
+                "config": asdict(schedule),
+                "status": "unsupported",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            results.append(error)
+            print(f"{schedule.key:<28} unsupported: {exc}")
 
     report = {
         "environment": _environment(args),
         "case": _case_summary(case),
         "site": args.site,
-        "reference": "production shrink stage",
+        "reference": "chunked PyTorch FP32 route-pair oracle",
         "pdl_policy": "architecture_auto",
         "results": results,
     }
