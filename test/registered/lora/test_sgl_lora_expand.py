@@ -5,17 +5,19 @@ import torch
 
 from sglang.srt.lora.sgl_lora.triton_ops.expand import (
     SlicedLoraBLayout,
+    SlicedLoraBRankSchedule,
     SlicedLoraBSchedule,
     build_sliced_lora_b_descriptors,
     invoke_moe_lora_expand_add,
     invoke_sliced_lora_b_expand_add,
+    select_sliced_lora_b_rank_schedule,
 )
 from sglang.test.ci.ci_register import register_cuda_ci
 
-register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
+register_cuda_ci(est_time=20, stage="base-b", runner_config="1-gpu-small")
 
 
-@pytest.mark.parametrize("rank", [8, 16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64, 96, 257])
 @pytest.mark.parametrize("num_output_slices", [1, 2])
 def test_direct_expand_uses_the_requested_input_slice(
     rank: int,
@@ -97,7 +99,7 @@ def test_direct_expand_uses_the_requested_input_slice(
     torch.testing.assert_close(output, expected, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.parametrize("rank", [8, 16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64, 96, 257])
 def test_direct_expand_matches_production_down_projection(rank: int):
     """Cover routed weighting plus top-k collapse used by the Phase-1a runner."""
     torch.manual_seed(29)
@@ -179,11 +181,44 @@ def test_direct_expand_matches_production_down_projection(rank: int):
     )
 
 
-def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched():
+@pytest.mark.parametrize(
+    ("rank", "block_r", "expected_schedule", "expected_block_r"),
+    [
+        (8, 64, SlicedLoraBRankSchedule.WHOLE_RANK, 16),
+        (64, 64, SlicedLoraBRankSchedule.WHOLE_RANK, 64),
+        (65, 64, SlicedLoraBRankSchedule.LOOPED_RANK, 64),
+        (96, 32, SlicedLoraBRankSchedule.LOOPED_RANK, 32),
+        (128, 128, SlicedLoraBRankSchedule.WHOLE_RANK, 128),
+        (257, 64, SlicedLoraBRankSchedule.LOOPED_RANK, 64),
+    ],
+)
+def test_rank_schedule_uses_provider_rank_tile(
+    rank: int,
+    block_r: int,
+    expected_schedule: SlicedLoraBRankSchedule,
+    expected_block_r: int,
+):
+    assert select_sliced_lora_b_rank_schedule(rank, {"LORA_BLOCK_SIZE_R": block_r}) == (
+        expected_schedule,
+        expected_block_r,
+    )
+
+
+def test_rank_schedule_default_bounds_large_rank_tile():
+    assert select_sliced_lora_b_rank_schedule(1024, {}) == (
+        SlicedLoraBRankSchedule.LOOPED_RANK,
+        256,
+    )
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched(
+    dtype: torch.dtype,
+):
     """Arbitrary active slices need neither zero weights nor zero output tiles."""
     torch.manual_seed(71)
     device = "cuda"
-    num_tokens, rank, block_size_m = 3, 16, 16
+    num_tokens, rank, block_size_m = 3, 96, 16
     q_width, v_width = 17, 23
     k_gap = 14
 
@@ -197,16 +232,10 @@ def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched():
     descriptors = build_sliced_lora_b_descriptors(
         layout, block_size_n=16, device=device
     )
-    intermediate = torch.randn(
-        num_tokens, 2 * rank, dtype=torch.bfloat16, device=device
-    )
-    compact_b = torch.randn(
-        1, q_width + v_width, rank, dtype=torch.bfloat16, device=device
-    )
+    intermediate = torch.randn(num_tokens, 2 * rank, dtype=dtype, device=device)
+    compact_b = torch.randn(1, q_width + v_width, rank, dtype=dtype, device=device)
     output_width = q_width + k_gap + v_width
-    base_output = torch.randn(
-        num_tokens, output_width, dtype=torch.bfloat16, device=device
-    )
+    base_output = torch.randn(num_tokens, output_width, dtype=dtype, device=device)
     output = base_output.clone()
 
     topk_ids = torch.zeros((num_tokens, 1), dtype=torch.int32, device=device)

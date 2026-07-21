@@ -20,6 +20,11 @@ The source compiles into three slice schedules:
 The current MoE runner uses only the first two allocation-free schedules. A
 descriptor plan is built and cached by setup code before the ragged schedule is
 launched, keeping device addresses stable across CUDA-graph replay.
+
+Rank scheduling is orthogonal. ``WHOLE_RANK`` issues one padded rank dot, while
+``LOOPED_RANK`` lets one CTA accumulate bounded rank chunks in FP32 and store
+once. ``AUTO`` chooses a bounded tile until per-device tuning tables replace the
+fallback policy; this is not split-K and introduces no reduction atomics.
 """
 
 from __future__ import annotations
@@ -37,6 +42,12 @@ class SlicedLoraBSchedule(IntEnum):
     ALIGNED_FLAT = 0
     UNIFORM_SLICED = 1
     DESCRIPTOR_RAGGED = 2
+
+
+class SlicedLoraBRankSchedule(IntEnum):
+    WHOLE_RANK = 0
+    LOOPED_RANK = 1
+    AUTO = 2
 
 
 @dataclass(frozen=True)
@@ -148,6 +159,35 @@ def build_sliced_lora_b_descriptors(
     )
 
 
+def select_sliced_lora_b_rank_schedule(
+    rank: int,
+    config: dict[str, Any],
+    requested: SlicedLoraBRankSchedule = SlicedLoraBRankSchedule.AUTO,
+    *,
+    force_block_size_r: int | None = None,
+) -> tuple[SlicedLoraBRankSchedule, int]:
+    """Resolve a resource-safe compiled rank schedule.
+
+    ``LORA_BLOCK_SIZE_R`` is the provider/autotune seam for the rank tile. Until
+    per-device tables are generated, 256 is a bounded fallback that avoids the
+    large shared-memory footprint of arbitrary whole-rank tiles. Explicit
+    whole-rank and looped requests remain provider/benchmark-controlled. A
+    configured tile is clamped to at least 16 and rounded down to a power of two.
+    """
+    whole_block_r = max(16, triton.next_power_of_2(rank))
+    configured_block_r = force_block_size_r or config.get("LORA_BLOCK_SIZE_R", 256)
+    configured_block_r = max(16, configured_block_r)
+    configured_block_r = 1 << (configured_block_r.bit_length() - 1)
+
+    if requested == SlicedLoraBRankSchedule.WHOLE_RANK:
+        return requested, whole_block_r
+    if requested == SlicedLoraBRankSchedule.LOOPED_RANK:
+        return requested, min(configured_block_r, whole_block_r)
+    if whole_block_r <= configured_block_r:
+        return SlicedLoraBRankSchedule.WHOLE_RANK, whole_block_r
+    return SlicedLoraBRankSchedule.LOOPED_RANK, configured_block_r
+
+
 @triton.jit
 def _sliced_lora_b_expand_add_kernel(
     a_ptr,
@@ -174,6 +214,7 @@ def _sliced_lora_b_expand_add_kernel(
     stride_cn,
     router_topk: tl.constexpr,
     SCHEDULE: tl.constexpr,
+    RANK_SCHEDULE: tl.constexpr,
     NUM_SLICES: tl.constexpr,
     UNIFORM_SLICE_N: tl.constexpr,
     TOTAL_ACTIVE_N: tl.constexpr,
@@ -258,25 +299,46 @@ def _sliced_lora_b_expand_add_kernel(
             tl.store(c_ptrs, zeros, mask=c_mask)
         return
 
-    offs_r = tl.arange(0, BLOCK_SIZE_R).to(tl.int64)
-    rank_mask = offs_r < R
-    a = tl.load(
-        a_ptr
-        + offs_token[:, None] * stride_am
-        + (a_begin + offs_r)[None, :] * stride_ar,
-        mask=token_mask[:, None] & rank_mask[None, :],
-        other=0.0,
-    )
-    b = tl.load(
-        b_ptr
-        + off_expert * stride_be
-        + offs_b_n[None, :] * stride_bn
-        + offs_r[:, None] * stride_br,
-        mask=output_mask[None, :] & rank_mask[:, None],
-        other=0.0,
-    )
-
-    accumulator = tl.dot(a, b, out_dtype=tl.float32)
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    if RANK_SCHEDULE == 0:  # WHOLE_RANK
+        offs_r = tl.arange(0, BLOCK_SIZE_R).to(tl.int64)
+        rank_mask = offs_r < R
+        a = tl.load(
+            a_ptr
+            + offs_token[:, None] * stride_am
+            + (a_begin + offs_r)[None, :] * stride_ar,
+            mask=token_mask[:, None] & rank_mask[None, :],
+            other=0.0,
+        )
+        b = tl.load(
+            b_ptr
+            + off_expert * stride_be
+            + offs_b_n[None, :] * stride_bn
+            + offs_r[:, None] * stride_br,
+            mask=output_mask[None, :] & rank_mask[:, None],
+            other=0.0,
+        )
+        accumulator = tl.dot(a, b, out_dtype=tl.float32)
+    else:  # LOOPED_RANK
+        for rank_begin in range(0, R, BLOCK_SIZE_R):
+            offs_r = rank_begin + tl.arange(0, BLOCK_SIZE_R).to(tl.int64)
+            rank_mask = offs_r < R
+            a = tl.load(
+                a_ptr
+                + offs_token[:, None] * stride_am
+                + (a_begin + offs_r)[None, :] * stride_ar,
+                mask=token_mask[:, None] & rank_mask[None, :],
+                other=0.0,
+            )
+            b = tl.load(
+                b_ptr
+                + off_expert * stride_be
+                + offs_b_n[None, :] * stride_bn
+                + offs_r[:, None] * stride_br,
+                mask=output_mask[None, :] & rank_mask[:, None],
+                other=0.0,
+            )
+            accumulator += tl.dot(a, b, out_dtype=tl.float32)
     if MUL_ROUTED_WEIGHT:
         moe_weight = tl.load(topk_weights_ptr + offs_token, mask=token_mask, other=0.0)
         accumulator *= moe_weight[:, None]
@@ -310,8 +372,10 @@ def invoke_sliced_lora_b_expand_add(
     *,
     layout: SlicedLoraBLayout,
     schedule: SlicedLoraBSchedule,
+    rank_schedule: SlicedLoraBRankSchedule = SlicedLoraBRankSchedule.AUTO,
     descriptors: SlicedLoraBDescriptors | None = None,
     force_block_size_n: int | None = None,
+    force_block_size_r: int | None = None,
 ) -> None:
     """Launch one compiled slice schedule for a common-rank LoRA-B layout."""
     block_m = config["BLOCK_SIZE_M"]
@@ -351,6 +415,13 @@ def invoke_sliced_lora_b_expand_add(
             descriptors.tile_prefix,
         )
 
+    compiled_rank_schedule, block_r = select_sliced_lora_b_rank_schedule(
+        layout.rank,
+        config,
+        rank_schedule,
+        force_block_size_r=force_block_size_r,
+    )
+
     _sliced_lora_b_expand_add_kernel[grid](
         intermediate,
         weight,
@@ -372,6 +443,7 @@ def invoke_sliced_lora_b_expand_add(
         output.stride(-1),
         router_topk=topk_ids.shape[1],
         SCHEDULE=int(schedule),
+        RANK_SCHEDULE=int(compiled_rank_schedule),
         NUM_SLICES=layout.num_slices,
         UNIFORM_SLICE_N=layout.widths[0],
         TOTAL_ACTIVE_N=layout.active_width,
@@ -380,7 +452,7 @@ def invoke_sliced_lora_b_expand_add(
         NUM_M_BLOCKS=num_m_blocks,
         BLOCK_SIZE_M=block_m,
         BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_R=max(16, triton.next_power_of_2(layout.rank)),
+        BLOCK_SIZE_R=block_r,
         GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
         num_warps=config.get("num_warps", 4),
         num_stages=1,
@@ -613,10 +685,12 @@ def invoke_moe_lora_expand_add_sliced_for_benchmark(
 __all__ = [
     "SlicedLoraBDescriptors",
     "SlicedLoraBLayout",
+    "SlicedLoraBRankSchedule",
     "SlicedLoraBSchedule",
     "build_sliced_lora_b_descriptors",
     "invoke_moe_lora_expand_add",
     "invoke_moe_lora_expand_add_flat_for_benchmark",
     "invoke_moe_lora_expand_add_sliced_for_benchmark",
     "invoke_sliced_lora_b_expand_add",
+    "select_sliced_lora_b_rank_schedule",
 ]
