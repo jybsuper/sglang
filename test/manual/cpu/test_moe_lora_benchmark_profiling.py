@@ -174,6 +174,65 @@ def test_cuda_event_timing_runs_reset_before_unmeasured_boundary(monkeypatch):
     assert stats.min_us == stats.max_us == 1000.0
 
 
+def test_isolated_wall_timing_synchronizes_around_every_invocation(monkeypatch):
+    fake_torch, cuda = _fake_torch()
+    monkeypatch.setattr(profiling, "_load_torch", lambda: fake_torch)
+    monkeypatch.setattr(profiling, "perf_counter_ns", lambda: 0)
+    actions: list[str] = []
+    monkeypatch.setattr(cuda, "synchronize", lambda: actions.append("synchronize"))
+
+    def reset() -> None:
+        actions.append("reset")
+
+    def batch() -> None:
+        actions.append("batch")
+
+    profiling.time_isolated_cuda_wall(
+        batch,
+        launches_per_batch=1,
+        warmup=1,
+        samples=2,
+        before_sample=reset,
+    )
+
+    assert actions == ["reset", "synchronize", "batch", "synchronize"] * 3
+
+
+def test_isolated_wall_timing_normalizes_and_summarizes_samples(monkeypatch):
+    fake_torch, _ = _fake_torch()
+    monkeypatch.setattr(profiling, "_load_torch", lambda: fake_torch)
+    timestamps_ns = iter(
+        (
+            0,
+            2_000_000,
+            10_000_000,
+            14_000_000,
+            20_000_000,
+            26_000_000,
+            30_000_000,
+            38_000_000,
+            40_000_000,
+            50_000_000,
+        )
+    )
+    monkeypatch.setattr(profiling, "perf_counter_ns", lambda: next(timestamps_ns))
+
+    stats = profiling.time_isolated_cuda_wall(
+        lambda: None,
+        launches_per_batch=2,
+        warmup=1,
+        samples=5,
+    )
+
+    assert stats.min_us == 1000.0
+    assert stats.p20_us == 1800.0
+    assert stats.p50_us == 3000.0
+    assert stats.p80_us == 4200.0
+    assert stats.max_us == 5000.0
+    assert stats.num_samples == 5
+    assert stats.launches_per_batch == 2
+
+
 def test_cuda_profile_range_orders_markers_and_profiler_api(monkeypatch):
     fake_torch, cuda = _fake_torch()
     monkeypatch.setattr(profiling, "_load_torch", lambda: fake_torch)

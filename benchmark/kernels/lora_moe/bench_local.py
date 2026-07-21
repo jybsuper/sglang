@@ -15,7 +15,8 @@ Examples::
 
 Use ``--mode nsys`` under ``nsys profile --capture-range=cudaProfilerApi`` and
 ``--mode ncu`` under ``ncu --profile-from-start off``.  Timing mode is always
-unprofiled and reports CUDA-event quantiles.
+unprofiled: K0 reports CUDA-event quantiles, while O0 reports isolated
+host-to-device-completion wall-clock quantiles.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ from benchmark.kernels.lora_moe.profiling import (
     cuda_profile_range,
     make_batch,
     time_cuda_events,
+    time_isolated_cuda_wall,
 )
 
 TARGETS = (
@@ -467,7 +469,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--samples", type=int, default=100)
-    parser.add_argument("--inner-iterations", type=int, default=10)
+    parser.add_argument("--inner-iterations", type=int)
     parser.add_argument("--profile-iterations", type=int, default=1)
     parser.add_argument("--skip-check", action="store_true")
     parser.add_argument("--json-output", type=Path)
@@ -484,6 +486,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("This benchmark requires CUDA")
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
+    if args.inner_iterations is None:
+        args.inner_iterations = 1 if args.scope == "O0" else 10
     if args.scope == "O0" and args.execution == "cuda_graph":
         raise ValueError("route-inclusive O0 is eager-only in this first checkpoint")
     if args.scope == "O0" and args.inner_iterations != 1:
@@ -541,7 +545,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
 
     if run_config.mode == "time":
-        timing = time_cuda_events(
+        timing_helper = (
+            time_isolated_cuda_wall if args.scope == "O0" else time_cuda_events
+        )
+        timing = timing_helper(
             batch.run,
             launches_per_batch=batch.launches_per_batch,
             warmup=run_config.warmup,
@@ -549,6 +556,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             before_sample=op.before_sample,
         )
         result["timing"] = asdict(timing)
+        result["timing_domain"] = (
+            "isolated_wall_host_to_device_completion"
+            if args.scope == "O0"
+            else "cuda_event_device"
+        )
         print(
             f"{case.case_id} {args.scope}/{args.target} "
             f"{result['effective_expand']} {args.execution}: "

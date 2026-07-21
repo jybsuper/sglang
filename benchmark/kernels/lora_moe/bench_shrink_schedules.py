@@ -2,8 +2,9 @@
 """Tune BF16 virtual-expert LoRA-A (shrink) launch schedules.
 
 This benchmark calls the production private Triton kernel with explicit launch
-metadata.  It does not copy or modify the kernel.  Routing is prepared once,
-outside the measured region, for the candidate's exact ``BLOCK_SIZE_M``.
+metadata.  It does not copy or modify the kernel.  K0 routing is prepared once,
+outside the measured region, for the candidate's exact ``BLOCK_SIZE_M``.  O0
+rebuilds only that A route inside each isolated eager measurement.
 
 Examples::
 
@@ -13,6 +14,9 @@ Examples::
       --config production --execution cuda_graph
     python benchmark/kernels/lora_moe/bench_shrink_schedules.py \
       --config bn64-sk4 --block-k 128 --num-warps 4
+    python benchmark/kernels/lora_moe/bench_shrink_schedules.py \
+      --case-id p0-qwen3.5-35b-a3b-sparse-h200 --site gate \
+      --config production --scope O0 --execution eager
 
 ``--all-configs`` is a small, curated sweep.  The script deliberately does not
 form a Cartesian product; wider searches belong in a separate orchestrator.
@@ -46,6 +50,7 @@ from benchmark.kernels.lora_moe.profiling import (
     cuda_profile_range,
     make_batch,
     time_cuda_events,
+    time_isolated_cuda_wall,
 )
 
 
@@ -358,6 +363,7 @@ class PreparedShrink:
     plan: RoutingPlan
     output: torch.Tensor
     launch: Callable[[], None]
+    launch_with_plan: Callable[[RoutingPlan], None]
     grid: tuple[int]
     num_m_blocks: int
     num_n_blocks: int
@@ -390,7 +396,7 @@ def _prepare_shrink(
     )
     enable_pdl, pdl_kwargs = _get_pdl_launch_metadata()
 
-    def launch() -> None:
+    def launch_with_plan(active_plan: RoutingPlan) -> None:
         # This zero is part of the operator semantics and measured/captured.
         # Every split writes the same destination through atomic_add.
         if schedule.split_k > 1:
@@ -399,9 +405,9 @@ def _prepare_shrink(
             fixture.hidden_states,
             weight,
             output,
-            plan.sorted_token_ids,
-            plan.expert_ids,
-            plan.num_tokens_post_padded,
+            active_plan.sorted_token_ids,
+            active_plan.expert_ids,
+            active_plan.num_tokens_post_padded,
             n,
             k,
             fixture.topk_ids.numel(),
@@ -424,11 +430,15 @@ def _prepare_shrink(
             **pdl_kwargs,
         )
 
+    def launch() -> None:
+        launch_with_plan(plan)
+
     return PreparedShrink(
         schedule=schedule,
         plan=plan,
         output=output,
         launch=launch,
+        launch_with_plan=launch_with_plan,
         grid=grid,
         num_m_blocks=num_m_blocks,
         num_n_blocks=num_n_blocks,
@@ -484,8 +494,12 @@ def _torch_reference(fixture: SiteFixture) -> torch.Tensor:
     return reference
 
 
-def _check(op: PreparedShrink, reference: torch.Tensor) -> dict[str, float]:
-    op.launch()
+def _check(
+    op: PreparedShrink,
+    reference: torch.Tensor,
+    launch: Callable[[], None] | None = None,
+) -> dict[str, float]:
+    (op.launch if launch is None else launch)()
     torch.cuda.synchronize()
     torch.testing.assert_close(op.output, reference, rtol=3e-2, atol=3e-2)
     error = (op.output.float() - reference.float()).abs()
@@ -504,9 +518,21 @@ def _run_schedule(
     args: argparse.Namespace,
 ) -> dict[str, object]:
     op = _prepare_shrink(fixture, schedule, plan)
-    op.launch()
+
+    if args.scope == "O0":
+
+        def measured_launch() -> None:
+            fresh_plan = _build_a_routing_plan(fixture, schedule.block_m)
+            op.launch_with_plan(fresh_plan)
+
+    else:
+        measured_launch = op.launch
+
+    measured_launch()
     torch.cuda.synchronize()
-    correctness = None if args.skip_check else _check(op, reference)
+    correctness = (
+        None if args.skip_check else _check(op, reference, launch=measured_launch)
+    )
     run_config = RunConfig(
         mode=args.mode,
         execution=args.execution,
@@ -516,12 +542,19 @@ def _run_schedule(
         profile_iterations=args.profile_iterations,
     )
     batch = make_batch(
-        op.launch,
+        measured_launch,
         execution=run_config.execution,
         inner_iterations=run_config.inner_iterations,
     )
     n, k = _merged_a_weight(fixture).shape[1:]
     result: dict[str, object] = {
+        "scope": args.scope,
+        "route_storage": "allocate" if args.scope == "O0" else "prebuilt",
+        "route_inclusion": (
+            "benchmark_equivalent_a_route_plus_shrink"
+            if args.scope == "O0"
+            else "prebuilt_a_route_shrink_only"
+        ),
         "config": asdict(schedule),
         "dimensions": {"M_valid": fixture.topk_ids.numel(), "N": n, "K": k},
         "grid": {
@@ -538,7 +571,10 @@ def _run_schedule(
         "correctness": correctness,
     }
     if run_config.mode == "time":
-        timing = time_cuda_events(
+        timing_helper = (
+            time_isolated_cuda_wall if args.scope == "O0" else time_cuda_events
+        )
+        timing = timing_helper(
             batch.run,
             launches_per_batch=batch.launches_per_batch,
             warmup=run_config.warmup,
@@ -546,6 +582,11 @@ def _run_schedule(
             before_sample=cache_control.before_sample(),
         )
         result["timing"] = asdict(timing)
+        result["timing_domain"] = (
+            "isolated_wall_host_to_device_completion"
+            if args.scope == "O0"
+            else "cuda_event_device"
+        )
         print(
             f"{schedule.key:<28} BM/BN/BK={schedule.block_m}/{schedule.block_n}/"
             f"{schedule.block_k} SK={schedule.split_k} "
@@ -555,7 +596,8 @@ def _run_schedule(
         )
     else:
         label = (
-            f"sgl_lora_moe::K0::shrink::{fixture.site}::{fixture.case.case_id}::"
+            f"sgl_lora_moe::{args.scope}::shrink::{fixture.site}::"
+            f"{fixture.case.case_id}::"
             f"{schedule.key}::{args.execution}::cache={args.cache_state}::pdl=auto"
         )
         if cache_control.state == "cold":
@@ -602,6 +644,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--num-warps", type=int)
     parser.add_argument("--num-stages", type=int)
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
+    parser.add_argument("--scope", choices=("K0", "O0"), default="K0")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument("--cache-state", choices=("hot", "cold"), default="hot")
     parser.add_argument("--warmup", type=int, default=20)
@@ -633,9 +676,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         _list_configs()
         return 0
     if args.inner_iterations is None:
-        args.inner_iterations = 1 if args.cache_state == "cold" else 10
+        args.inner_iterations = (
+            1 if args.cache_state == "cold" or args.scope == "O0" else 10
+        )
     elif args.cache_state == "cold" and args.inner_iterations != 1:
         raise ValueError("cold-cache runs require --inner-iterations 1")
+    if args.scope == "O0" and args.execution == "cuda_graph":
+        raise ValueError("allocation-inclusive O0 is eager-only")
+    if args.scope == "O0" and args.inner_iterations != 1:
+        raise ValueError("allocation-inclusive O0 requires --inner-iterations 1")
     if (
         args.cache_state == "cold"
         and args.mode != "time"
@@ -704,6 +753,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "environment": _environment(args),
         "case": _case_summary(case),
         "site": args.site,
+        "scope": args.scope,
+        "route_storage": "allocate" if args.scope == "O0" else "prebuilt",
+        "scope_note": (
+            "benchmark-equivalent A-only route construction plus shrink; "
+            "the A output is preallocated and reused"
+            if args.scope == "O0"
+            else "A routing is prebuilt outside the measured shrink"
+        ),
         "reference": "chunked PyTorch FP32 route-pair oracle",
         "pdl_policy": "architecture_auto",
         "cache_control": cache_control.metadata(),

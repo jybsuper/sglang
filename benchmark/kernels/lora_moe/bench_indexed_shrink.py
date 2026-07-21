@@ -18,7 +18,8 @@ The per-expert local API is::
 Negative/out-of-range adapter ids and negative/non-local expert ids preserve
 the corresponding output row.  ``--scope K0`` and ``--scope O0`` execute the
 same single kernel: raw route address resolution is already inside the kernel,
-so O0 has no separate route-plan work to add.
+so O0 has no separate route-plan work to add.  O0 uses isolated synchronized
+wall timing to match the grouped allocation-inclusive comparison.
 
 Examples::
 
@@ -64,6 +65,7 @@ from benchmark.kernels.lora_moe.profiling import (
     cuda_profile_range,
     make_batch,
     time_cuda_events,
+    time_isolated_cuda_wall,
 )
 
 try:
@@ -470,7 +472,10 @@ def _run_config(
         "correctness": correctness,
     }
     if run_config.mode == "time":
-        timing = time_cuda_events(
+        timing_helper = (
+            time_isolated_cuda_wall if args.scope == "O0" else time_cuda_events
+        )
+        timing = timing_helper(
             batch.run,
             launches_per_batch=batch.launches_per_batch,
             warmup=run_config.warmup,
@@ -478,6 +483,11 @@ def _run_config(
             before_sample=cache_control.before_sample(),
         )
         result["timing"] = asdict(timing)
+        result["timing_domain"] = (
+            "isolated_wall_host_to_device_completion"
+            if args.scope == "O0"
+            else "cuda_event_device"
+        )
         print(
             f"{config.key:<18} {args.scope}/{fixture.site} {args.execution}: "
             f"p50={timing.p50_us:.3f} us "
@@ -542,7 +552,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _list_configs()
         return 0
     if args.inner_iterations is None:
-        args.inner_iterations = 1 if args.cache_state == "cold" else 10
+        args.inner_iterations = (
+            1 if args.cache_state == "cold" or args.scope == "O0" else 10
+        )
     elif args.cache_state == "cold" and args.inner_iterations != 1:
         raise ValueError("cold-cache runs require --inner-iterations 1")
     if (
@@ -594,6 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.scope == "K0"
             else "raw_route_addressing_inline_no_separate_plan"
         ),
+        "route_storage": "none_inline_raw",
         "scope_note": (
             "K0 and O0 launch the same candidate kernel because adapter/expert "
             "address resolution is inline and no route plan exists"
