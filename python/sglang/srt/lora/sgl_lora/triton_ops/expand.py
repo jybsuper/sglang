@@ -25,6 +25,11 @@ Rank scheduling is orthogonal. ``WHOLE_RANK`` issues one padded rank dot, while
 ``LOOPED_RANK`` lets one CTA accumulate bounded rank chunks in FP32 and store
 once. ``AUTO`` chooses a bounded tile until per-device tuning tables replace the
 fallback policy; this is not split-K and introduces no reduction atomics.
+
+The caller-owned destination tensor defines the final LoRA delta/result dtype.
+The dot accumulates in FP32, then the epilogue converts once to the destination
+dtype for store, add-to-base, or routed pair-to-token reduction. This policy is
+independent from the LoRA-A intermediate and split-K accumulation dtype.
 """
 
 from __future__ import annotations
@@ -219,6 +224,7 @@ def _sliced_lora_b_expand_add_kernel(
     UNIFORM_SLICE_N: tl.constexpr,
     TOTAL_ACTIVE_N: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
+    FUSE_ADD_TO_OUTPUT: tl.constexpr,
     FUSE_SUM_ALL_REDUCE: tl.constexpr,
     NUM_M_BLOCKS: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -288,7 +294,7 @@ def _sliced_lora_b_expand_add_kernel(
 
     off_expert = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
     if off_expert == -1:
-        if not FUSE_SUM_ALL_REDUCE:
+        if not FUSE_ADD_TO_OUTPUT and not FUSE_SUM_ALL_REDUCE:
             c_ptrs = (
                 c_ptr
                 + offs_token[:, None] * stride_cm
@@ -318,6 +324,7 @@ def _sliced_lora_b_expand_add_kernel(
             mask=output_mask[None, :] & rank_mask[:, None],
             other=0.0,
         )
+        a = a.to(b.dtype)
         accumulator = tl.dot(a, b, out_dtype=tl.float32)
     else:  # LOOPED_RANK
         for rank_begin in range(0, R, BLOCK_SIZE_R):
@@ -338,6 +345,7 @@ def _sliced_lora_b_expand_add_kernel(
                 mask=output_mask[None, :] & rank_mask[:, None],
                 other=0.0,
             )
+            a = a.to(b.dtype)
             accumulator += tl.dot(a, b, out_dtype=tl.float32)
     if MUL_ROUTED_WEIGHT:
         moe_weight = tl.load(topk_weights_ptr + offs_token, mask=token_mask, other=0.0)
@@ -353,6 +361,13 @@ def _sliced_lora_b_expand_add_kernel(
     c_mask = token_mask[:, None] & output_mask[None, :]
     if FUSE_SUM_ALL_REDUCE:
         tl.atomic_add(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
+    elif FUSE_ADD_TO_OUTPUT:
+        base = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)
+        tl.store(
+            c_ptrs,
+            (accumulator + base).to(c_ptr.dtype.element_ty),
+            mask=c_mask,
+        )
     else:
         tl.store(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
 
@@ -370,6 +385,7 @@ def invoke_sliced_lora_b_expand_add(
     mul_routed_weight: bool,
     fuse_sum_all_reduce: bool,
     *,
+    fuse_add_to_output: bool = False,
     layout: SlicedLoraBLayout,
     schedule: SlicedLoraBSchedule,
     rank_schedule: SlicedLoraBRankSchedule = SlicedLoraBRankSchedule.AUTO,
@@ -448,6 +464,7 @@ def invoke_sliced_lora_b_expand_add(
         UNIFORM_SLICE_N=layout.widths[0],
         TOTAL_ACTIVE_N=layout.active_width,
         MUL_ROUTED_WEIGHT=mul_routed_weight,
+        FUSE_ADD_TO_OUTPUT=fuse_add_to_output,
         FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
         NUM_M_BLOCKS=num_m_blocks,
         BLOCK_SIZE_M=block_m,
@@ -473,6 +490,7 @@ def _invoke_flat(
     fuse_sum_all_reduce: bool,
     *,
     gated_midpoint: bool,
+    fuse_add_to_output: bool = False,
     force_block_size_n: int | None = None,
 ) -> None:
     n = weight.shape[1]
@@ -504,6 +522,7 @@ def _invoke_flat(
         config,
         mul_routed_weight,
         fuse_sum_all_reduce,
+        fuse_add_to_output=fuse_add_to_output,
         layout=layout,
         schedule=SlicedLoraBSchedule.ALIGNED_FLAT,
         force_block_size_n=block_n,
@@ -523,6 +542,7 @@ def _invoke_two_slice(
     mul_routed_weight: bool,
     fuse_sum_all_reduce: bool,
     *,
+    fuse_add_to_output: bool = False,
     force_block_size_n: int | None = None,
 ) -> None:
     slice_n = weight.shape[1] // 2
@@ -546,6 +566,7 @@ def _invoke_two_slice(
         config,
         mul_routed_weight,
         fuse_sum_all_reduce,
+        fuse_add_to_output=fuse_add_to_output,
         layout=layout,
         schedule=SlicedLoraBSchedule.UNIFORM_SLICED,
         force_block_size_n=block_n,
@@ -566,8 +587,9 @@ def invoke_moe_lora_expand_add(
     fuse_sum_all_reduce: bool,
     *,
     num_output_slices: int,
+    fuse_add_to_output: bool = False,
 ) -> None:
-    """Compatibility launcher for today's complete gate/up and down layouts."""
+    """Launch complete gate/up or down layouts into a caller-owned destination."""
     if num_output_slices == 2:
         if weight.shape[1] % 2 != 0:
             raise ValueError("complete gate/up LoRA-B requires two equal-width slices")
@@ -585,6 +607,7 @@ def invoke_moe_lora_expand_add(
                 mul_routed_weight,
                 fuse_sum_all_reduce,
                 gated_midpoint=True,
+                fuse_add_to_output=fuse_add_to_output,
             )
         else:
             _invoke_two_slice(
@@ -599,6 +622,7 @@ def invoke_moe_lora_expand_add(
                 config,
                 mul_routed_weight,
                 fuse_sum_all_reduce,
+                fuse_add_to_output=fuse_add_to_output,
             )
         return
     _invoke_flat(
@@ -614,6 +638,7 @@ def invoke_moe_lora_expand_add(
         mul_routed_weight,
         fuse_sum_all_reduce,
         gated_midpoint=False,
+        fuse_add_to_output=fuse_add_to_output,
     )
 
 

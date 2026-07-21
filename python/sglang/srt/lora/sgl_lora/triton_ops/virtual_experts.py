@@ -411,6 +411,12 @@ def _get_moe_lora_shrink_split_k(
 from sglang.srt.lora.sgl_lora.triton_ops.expand import (  # noqa: E402
     invoke_moe_lora_expand_add,
 )
+from sglang.srt.lora.sgl_lora.triton_ops.shrink import (  # noqa: E402
+    IndexedLoraARowPlan,
+    LoraAInputRowDomain,
+    invoke_indexed_lora_a_shrink,
+    select_indexed_lora_a_kernel_config,
+)
 
 
 def _align_block_size_jit(
@@ -644,12 +650,14 @@ def _merged_experts_fused_moe_lora_add_impl(
     - ``"expand"``: routing-B + LoRA-B expand/add only; requires ``intermediate_buffer`` =
       the tensor produced by the ``"shrink"`` stage.
 
-    EP: when `local_num_experts` (< global) is given, this rank only computes the
-    delta for the experts it owns. We keep the GLOBAL expert ids + global contiguous
-    weights (so the merged-weight reshape stays a free view) and mask non-owned
-    [token, k] slots to the -1 sentinel inside `_fused_virtual_topk_ids_kernel`; the
-    grid shrinks via the per-rank trim in `_get_routing`. Slicing the weight's expert
-    dim instead would force the reshape to copy every step (non-contiguous fold).
+    Captured split-stage callers must run ``stage="routing"`` on the allocation-owner
+    stream before the fork/capture. The production runner does this so neither the
+    shrink side stream nor the later expand stage creates routing buffers in capture.
+
+    The current StandardDispatcher supplies rank-local expert IDs and uses ``-1``
+    for non-owned routes. A provider that retains global IDs must supply the matching
+    local offset/count explicitly; global-ID provider integration remains separate
+    from this local-ID Phase-1 path.
     """
     max_loras, _, max_lora_rank, _ = lora_a.shape
     # Global per-expert dim of the LoRA weights. lora_a may be shared-outer (expert
@@ -834,6 +842,10 @@ def _merged_experts_fused_moe_lora_add_impl(
     ), f"invalid stage {stage!r}"
     lora_a_virtual = _merge_lora_expert_weight(lora_a)
     lora_b_virtual = _merge_lora_expert_weight(lora_b)
+    # The indexed A path may produce FP32 intermediates. The sgl_lora sliced B
+    # epilogue consumes those by converting A tiles to the B-factor dtype before
+    # the dot. Keep the stock generic B paired with the stock A until it is retired.
+    use_indexed_lora_a = lora_b_virtual.shape[2] > 64 and use_direct_expand_add
     num_experts_a = lora_a.shape[1]
     num_experts_b = lora_b.shape[1]
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
@@ -885,45 +897,79 @@ def _merged_experts_fused_moe_lora_add_impl(
             topk_ids.shape[1],
             max_lora_rank,
         ]
-        intermediate_split_k = _get_moe_lora_shrink_split_k(
-            lora_a_virtual, sorted_token_ids, a_stage_config
+        # Per-expert A can omit rows (notably StandardDispatcher's -1 EP routes),
+        # while shared B routes by adapter and can consume those same pair rows.
+        # Correctness follows this producer/consumer routing-domain mismatch, not
+        # whether expert storage happens to look globally or locally sized.
+        clear_unwritten_rows = (
+            experts_shared_outer_loras_b and not experts_shared_outer_loras_a
         )
-        # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert expand skips
-        # non-owned blocks (never reads them), but a shared-outer expand routes by lora id
-        # and would read them into the real (all-reduced) output -> must zero. split_k > 1
-        # also needs a zeroed buffer for its accumulation.
-        zero_intermediate = intermediate_split_k > 1 or (
-            ep_local and experts_shared_outer_loras_b
-        )
-        if intermediate is None:
-            intermediate = (
-                torch.zeros(
-                    intermediate_shape,
-                    dtype=hidden_states.dtype,
-                    device=hidden_states.device,
-                )
-                if zero_intermediate
-                else torch.empty(
-                    intermediate_shape,
-                    dtype=hidden_states.dtype,
-                    device=hidden_states.device,
-                )
+        if use_indexed_lora_a:
+            row_plan = IndexedLoraARowPlan(
+                sorted_pair_ids=sorted_token_ids,
+                block_group_ids=expert_ids,
+                num_pairs_post_padded=num_tokens_post_padded,
+                block_m=a_stage_config["BLOCK_SIZE_M"],
             )
-        elif zero_intermediate:
-            # Caller-provided buffer (allocated on the consumer stream): zero it in-stream.
-            intermediate.zero_()
+            a_kernel_config = select_indexed_lora_a_kernel_config(
+                lora_a_virtual, row_plan, a_stage_config
+            )
+            if intermediate is None:
+                intermediate = torch.empty(
+                    intermediate_shape,
+                    dtype=torch.float32,
+                    device=hidden_states.device,
+                )
+            invoke_indexed_lora_a_shrink(
+                hidden_states,
+                lora_a_virtual,
+                intermediate.view(-1, max_lora_rank),
+                row_plan,
+                num_valid_pairs=topk_ids.numel(),
+                router_topk=input_top_k,
+                input_row_domain=(
+                    LoraAInputRowDomain.TOKEN
+                    if input_top_k > 1
+                    else LoraAInputRowDomain.ROUTED_PAIR
+                ),
+                kernel_config=a_kernel_config,
+                clear_output=clear_unwritten_rows,
+            )
+        else:
+            intermediate_split_k = _get_moe_lora_shrink_split_k(
+                lora_a_virtual, sorted_token_ids, a_stage_config
+            )
+            # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert
+            # expand skips them; a shared-outer B may read them and needs zeros.
+            zero_intermediate = intermediate_split_k > 1 or clear_unwritten_rows
+            if intermediate is None:
+                intermediate = (
+                    torch.zeros(
+                        intermediate_shape,
+                        dtype=hidden_states.dtype,
+                        device=hidden_states.device,
+                    )
+                    if zero_intermediate
+                    else torch.empty(
+                        intermediate_shape,
+                        dtype=hidden_states.dtype,
+                        device=hidden_states.device,
+                    )
+                )
+            elif zero_intermediate:
+                intermediate.zero_()
 
-        _invoke_moe_lora_shrink_splitk(
-            hidden_states,
-            lora_a_virtual,
-            intermediate.view(-1, max_lora_rank),
-            topk_ids,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            input_top_k,
-            a_stage_config,
-        )
+            _invoke_moe_lora_shrink_splitk(
+                hidden_states,
+                lora_a_virtual,
+                intermediate.view(-1, max_lora_rank),
+                topk_ids,
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                input_top_k,
+                a_stage_config,
+            )
 
         if stage == "shrink":
             # Pre-warm the routing-B cache on this (side) stream so the later "expand" stage
@@ -953,11 +999,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     )
 
     intermediate_flat = intermediate.view(-1, max_lora_rank)
-    # The rank-specialized direct expand-add doesn't support the shared-outer
-    # LoRA-B layout; fall back to the generic kernel for that case instead of
-    # asserting, so adapters with experts_shared_outer_loras still work.
-    if use_direct_expand_add and not experts_shared_outer_loras_b:
-        assert not fuse_add_to_output
+    if use_direct_expand_add:
         invoke_moe_lora_expand_add(
             intermediate_flat,
             lora_b_virtual,
@@ -971,6 +1013,7 @@ def _merged_experts_fused_moe_lora_add_impl(
             mul_routed_weight,
             fuse_sum_all_reduce,
             num_output_slices=num_output_slices,
+            fuse_add_to_output=fuse_add_to_output,
         )
     else:
         from sglang.kernels.ops.moe.fused_moe_triton_kernels import (

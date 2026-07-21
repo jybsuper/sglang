@@ -7,6 +7,7 @@ from sglang.srt.lora.sgl_lora.triton_ops.shrink import (
     IndexedLoraAKernelConfig,
     IndexedLoraARowPlan,
     LoraAInputRowDomain,
+    LoraASplitKAccumulation,
     invoke_indexed_lora_a_shrink,
     select_indexed_lora_a_kernel_config,
 )
@@ -100,7 +101,10 @@ def test_indexed_lora_a_looped_k_matches_packed_factor_reference(
     torch.testing.assert_close(output, expected, rtol=3e-2, atol=3e-2)
 
 
-def test_indexed_lora_a_split_k_uses_fp32_workspace_and_replays_graph():
+@pytest.mark.parametrize("output_dtype", [torch.float32, torch.bfloat16])
+def test_indexed_lora_a_split_k_clears_output_and_replays_graph(
+    output_dtype: torch.dtype,
+):
     torch.manual_seed(211)
     num_tokens, topk = 4, 2
     num_pairs, hidden_size, packed_rank = num_tokens * topk, 257, 96
@@ -114,13 +118,18 @@ def test_indexed_lora_a_split_k_uses_fp32_workspace_and_replays_graph():
         2, packed_rank, hidden_size, dtype=torch.bfloat16, device="cuda"
     )
     output = torch.full(
-        (num_pairs, packed_rank), 31.0, dtype=torch.float32, device="cuda"
+        (num_pairs, packed_rank), 31.0, dtype=output_dtype, device="cuda"
     )
     kernel_config = IndexedLoraAKernelConfig(
         block_n=32,
         block_k=64,
         split_k=4,
         num_warps=4,
+        split_k_accumulation=(
+            LoraASplitKAccumulation.FP32
+            if output_dtype == torch.float32
+            else LoraASplitKAccumulation.OUTPUT_DTYPE
+        ),
     )
 
     def launch() -> None:
@@ -148,7 +157,10 @@ def test_indexed_lora_a_split_k_uses_fp32_workspace_and_replays_graph():
         expected[pair_idx] = (
             hidden_states[pair_idx // topk].float() @ weight[group].float().T
         )
-    torch.testing.assert_close(output, expected, rtol=3e-3, atol=3e-3)
+    if output_dtype == torch.float32:
+        torch.testing.assert_close(output, expected, rtol=3e-3, atol=3e-3)
+    else:
+        torch.testing.assert_close(output, expected, rtol=3e-2, atol=1.25e-1)
 
 
 def test_indexed_lora_a_can_clear_rows_omitted_by_its_routing_domain():

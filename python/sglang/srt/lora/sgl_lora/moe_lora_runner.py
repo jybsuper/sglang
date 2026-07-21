@@ -90,8 +90,10 @@ def run_sgl_lora_moe(
     fused_lora_routing_cache: dict = {}
 
     gate_up_delta = hidden_states.new_empty((num_tokens, top_k, 2 * inter))
-    gate_up_lora_intermediate = hidden_states.new_empty(
-        (num_tokens, top_k, lora_info.gate_up_lora_a_weights.shape[2])
+    gate_up_lora_intermediate = torch.empty(
+        (num_tokens, top_k, lora_info.gate_up_lora_a_weights.shape[2]),
+        dtype=(torch.float32 if lora_info.max_lora_rank > 64 else hidden_states.dtype),
+        device=hidden_states.device,
     )
 
     def _run_gate_up_lora(stage: str = "all") -> None:
@@ -109,7 +111,7 @@ def run_sgl_lora_moe(
             routing_cache=fused_lora_routing_cache,
             stage=stage,
             fuse_add_to_output=False,
-            use_direct_expand_add=lora_info.max_lora_rank <= 64,
+            use_direct_expand_add=True,
             num_output_slices=2,
             local_expert_offset=0,
             local_num_experts=quant_info.num_local_experts,
@@ -193,7 +195,7 @@ def run_sgl_lora_moe(
         routing_cache=fused_lora_routing_cache,
         fuse_add_to_output=False,
         fuse_sum_all_reduce=True,
-        use_direct_expand_add=lora_info.max_lora_rank <= 64,
+        use_direct_expand_add=True,
         num_output_slices=1,
         local_expert_offset=0,
         local_num_experts=quant_info.num_local_experts,

@@ -14,9 +14,11 @@ launches rather than represented by synthetic zero factors.
 This first production policy handles indexed rows grouped by virtual expert. A
 compile-time input-row domain distinguishes token-domain gate/up inputs from
 already-routed pair-domain down inputs. Reduction over the large hidden K is
-either single-owner looped K or FP32 split-K. Split-K uses a caller-owned FP32
-output that the launcher clears before accumulation, so no BF16 reduction is
-performed.
+either single-owner looped K or split-K. Split-K accumulation precision is an
+explicit schedule policy: FP32 avoids low-precision reduction, while
+``OUTPUT_DTYPE`` preserves the current backend's lower-traffic BF16/FP16 option.
+The caller-owned output dtype must agree with that policy, and the launcher clears
+the output before every split-K launch.
 """
 
 from __future__ import annotations
@@ -35,6 +37,11 @@ from sglang.jit_kernel.utils import is_arch_support_pdl
 class LoraAInputRowDomain(IntEnum):
     TOKEN = 0
     ROUTED_PAIR = 1
+
+
+class LoraASplitKAccumulation(IntEnum):
+    FP32 = 0
+    OUTPUT_DTYPE = 1
 
 
 @dataclass(frozen=True)
@@ -58,10 +65,17 @@ class IndexedLoraAKernelConfig:
     split_k: int
     num_warps: int
     num_stages: int = 1
+    split_k_accumulation: LoraASplitKAccumulation = LoraASplitKAccumulation.FP32
+
+    @property
+    def uses_split_k(self) -> bool:
+        return self.split_k > 1
 
     @property
     def requires_fp32_output(self) -> bool:
-        return self.split_k > 1
+        return self.uses_split_k and (
+            self.split_k_accumulation == LoraASplitKAccumulation.FP32
+        )
 
 
 def select_indexed_lora_a_kernel_config(
@@ -70,6 +84,7 @@ def select_indexed_lora_a_kernel_config(
     config: dict[str, Any],
     *,
     split_k: int | None = None,
+    split_k_accumulation: LoraASplitKAccumulation = LoraASplitKAccumulation.FP32,
 ) -> IndexedLoraAKernelConfig:
     """Resolve a bounded indexed-row A schedule without allocating workspace."""
     packed_rank = weight.shape[1]
@@ -108,6 +123,7 @@ def select_indexed_lora_a_kernel_config(
         split_k=split_k,
         num_warps=config.get("LORA_NUM_WARPS", config.get("num_warps", 4)),
         num_stages=config.get("LORA_NUM_STAGES", 1),
+        split_k_accumulation=split_k_accumulation,
     )
 
 
@@ -208,7 +224,12 @@ def _indexed_lora_a_shrink_kernel(
             mask=output_mask,
         )
     else:
-        tl.atomic_add(output_ptrs, accumulator, mask=output_mask, sem="relaxed")
+        tl.atomic_add(
+            output_ptrs,
+            accumulator.to(output_ptr.dtype.element_ty),
+            mask=output_mask,
+            sem="relaxed",
+        )
 
 
 def invoke_indexed_lora_a_shrink(
@@ -228,14 +249,15 @@ def invoke_indexed_lora_a_shrink(
     Output is always pair-domain; ``TOKEN`` changes only which input row each
     pair reads and does not yet deduplicate shared-A work across top-k slots.
 
-    Split-K owns and clears its FP32 accumulation buffer. ``clear_output`` also
+    Split-K owns and clears its accumulation buffer. Its explicit accumulation
+    policy must agree with the caller-owned output dtype. ``clear_output`` also
     clears the single-owner output when a later consumer has a broader routing
     domain and may read rows skipped by this A stage (for example EP-local A
     followed by shared-outer B).
     """
     if kernel_config.requires_fp32_output and output.dtype != torch.float32:
-        raise ValueError("split-K LoRA-A requires an FP32 output")
-    if kernel_config.requires_fp32_output or clear_output:
+        raise ValueError("FP32 split-K LoRA-A requires an FP32 output")
+    if kernel_config.uses_split_k or clear_output:
         output.zero_()
 
     if row_plan.sorted_pair_ids.numel() == 0 or weight.shape[1] == 0:
@@ -280,6 +302,7 @@ __all__ = [
     "IndexedLoraAKernelConfig",
     "IndexedLoraARowPlan",
     "LoraAInputRowDomain",
+    "LoraASplitKAccumulation",
     "invoke_indexed_lora_a_shrink",
     "select_indexed_lora_a_kernel_config",
 ]

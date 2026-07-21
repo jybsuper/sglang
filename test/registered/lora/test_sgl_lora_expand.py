@@ -181,6 +181,68 @@ def test_direct_expand_matches_production_down_projection(rank: int):
     )
 
 
+@pytest.mark.parametrize("intermediate_dtype", [torch.bfloat16, torch.float32])
+def test_direct_expand_add_uses_fp32_destination_dtype(
+    intermediate_dtype: torch.dtype,
+):
+    """The B destination, not the A workspace, owns final delta precision."""
+    torch.manual_seed(37)
+    device = "cuda"
+    num_tokens, rank, output_size, block_size_m = 3, 96, 65, 16
+
+    intermediate = torch.randn(
+        num_tokens, rank, dtype=intermediate_dtype, device=device
+    )
+    weight = torch.randn(1, output_size, rank, dtype=torch.bfloat16, device=device)
+    base_output = torch.randn(
+        num_tokens, output_size, dtype=torch.float32, device=device
+    )
+    output = base_output.clone()
+    topk_ids = torch.zeros((num_tokens, 1), dtype=torch.int32, device=device)
+    topk_weights = torch.ones((num_tokens, 1), dtype=torch.float32, device=device)
+    sorted_token_ids = torch.full(
+        (block_size_m,), num_tokens, dtype=torch.int32, device=device
+    )
+    sorted_token_ids[:num_tokens] = torch.arange(
+        num_tokens, dtype=torch.int32, device=device
+    )
+    expert_ids = torch.zeros((1,), dtype=torch.int32, device=device)
+    num_tokens_post_padded = torch.tensor(
+        [block_size_m], dtype=torch.int32, device=device
+    )
+
+    invoke_moe_lora_expand_add(
+        intermediate,
+        weight,
+        output,
+        topk_weights,
+        topk_ids,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        {
+            "BLOCK_SIZE_M": block_size_m,
+            "BLOCK_SIZE_N": 64,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
+        },
+        mul_routed_weight=False,
+        fuse_sum_all_reduce=False,
+        num_output_slices=1,
+        fuse_add_to_output=True,
+    )
+    torch.cuda.synchronize()
+
+    # B consumes the FP32 A workspace in the BF16 factor's tensor-core dtype,
+    # accumulates in FP32, and adds into the FP32 base without BF16 output rounding.
+    delta = intermediate.to(weight.dtype).float() @ weight[0].float().T
+    expected = base_output + delta
+    prematurely_rounded = base_output + delta.to(torch.bfloat16).float()
+    assert output.dtype == torch.float32
+    assert (expected - prematurely_rounded).abs().max() > 1e-2
+    torch.testing.assert_close(output, expected, rtol=5e-4, atol=5e-4)
+
+
 @pytest.mark.parametrize(
     ("rank", "block_r", "expected_schedule", "expected_block_r"),
     [

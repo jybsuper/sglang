@@ -73,7 +73,8 @@ class _FakeBaseGemm:
         output.fill_(2.0)
 
 
-def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
+@pytest.mark.parametrize("rank", [16, 128])
+def test_runner_wires_gate_up_and_production_down_options(monkeypatch, rank: int):
     """Cover the complete serial runner and its two virtual-expert call sites."""
     import sglang.srt.distributed as distributed
     import sglang.srt.layers.dp_attention as dp_attention
@@ -82,11 +83,12 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
 
     device = "cuda"
     num_tokens, top_k = 2, 2
-    num_experts, hidden, inter, rank = 3, 32, 48, 16
+    num_experts, hidden, inter = 3, 32, 48
     calls = []
 
     def fake_merged_experts_fused_moe_lora_add(**kwargs):
         calls.append(kwargs)
+        assert kwargs["use_direct_expand_add"]
         if kwargs["num_output_slices"] == 2:
             assert not kwargs["mul_routed_weight"]
             assert not kwargs.get("fuse_sum_all_reduce", False)
@@ -95,6 +97,9 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
                 num_tokens,
                 top_k,
                 2 * rank,
+            )
+            assert kwargs["intermediate_buffer"].dtype == (
+                torch.float32 if rank > 64 else torch.bfloat16
             )
             kwargs["output"].fill_(0.25)
         else:
