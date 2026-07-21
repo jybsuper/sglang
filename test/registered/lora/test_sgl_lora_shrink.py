@@ -253,11 +253,12 @@ def test_indexed_lora_a_selector_bounds_packed_rank_tile():
     config = select_indexed_lora_a_kernel_config(
         weight,
         row_plan,
-        {"num_warps": 4},
+        {"num_warps": 4, "num_stages": 3},
     )
     assert config.block_n == 64
     assert config.block_k == 256
     assert 1 <= config.split_k <= 8
+    assert config.num_stages == 3
 
 
 if __name__ == "__main__":

@@ -122,7 +122,7 @@ def select_indexed_lora_a_kernel_config(
         block_k=block_k,
         split_k=split_k,
         num_warps=config.get("LORA_NUM_WARPS", config.get("num_warps", 4)),
-        num_stages=config.get("LORA_NUM_STAGES", 1),
+        num_stages=config.get("LORA_NUM_STAGES", config.get("num_stages", 1)),
         split_k_accumulation=split_k_accumulation,
     )
 
