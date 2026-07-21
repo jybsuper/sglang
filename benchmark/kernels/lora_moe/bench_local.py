@@ -220,6 +220,19 @@ class SiteFixture:
         if self.base_output is not None:
             self.output.copy_(self.base_output)
 
+    def routing_metrics(self) -> list[dict[str, int]]:
+        metrics = []
+        for value in self.routing_cache.values():
+            sorted_token_ids, expert_ids, num_tokens_post_padded, _ = value
+            metrics.append(
+                {
+                    "allocated_pair_slots": sorted_token_ids.numel(),
+                    "allocated_expert_blocks": expert_ids.numel(),
+                    "actual_pair_slots": int(num_tokens_post_padded.item()),
+                }
+            )
+        return metrics
+
     def invoke(self, stage: str, *, direct: bool) -> torch.Tensor | None:
         from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import (
             merged_experts_fused_moe_lora_add,
@@ -386,10 +399,10 @@ def _build_op(
     )
 
 
-def _check_smoke(op: PreparedOp) -> None:
-    """Use direct-vs-generic and staged-vs-combined checks on the tiny case."""
+def _check_operator(op: PreparedOp) -> None:
+    """Check repeatability, direct-vs-generic, and staged-vs-combined paths."""
     fixture = op.fixture
-    if fixture.case.model.key != "synthetic-smoke" or op.target == "routing":
+    if op.target == "routing":
         return
 
     fixture.reset_output()
@@ -424,6 +437,7 @@ def _case_summary(case: MoeLoraBenchCase) -> dict[str, object]:
         "I": case.i_local,
         "E_local": case.e_local,
         "K": case.model.top_k,
+        "P_capacity": case.pair_capacity,
         "R": case.adapters.rank,
         "L_active": case.adapters.l_active,
         "B_base": case.adapters.b_base,
@@ -481,7 +495,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     op.launch()
     torch.cuda.synchronize()
     if not args.skip_check:
-        _check_smoke(op)
+        _check_operator(op)
         torch.cuda.synchronize()
 
     run_config = RunConfig(
@@ -504,9 +518,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         "scope": args.scope,
         "requested_variant": args.variant,
         "effective_expand": "direct" if op.direct else "generic",
+        "route_inclusion": "prebuilt" if args.scope == "K0" else "route_inclusive",
+        "cache_measurement": (
+            "single_plan_diagnostic"
+            if args.scope == "K0"
+            else "producer_realistic_route_rebuild"
+        ),
         "factor_shapes": {
             "a": list(fixture.lora_a.shape),
             "b": list(fixture.lora_b.shape),
+        },
+        "factor_bytes_allocated": (
+            fixture.lora_a.numel() * fixture.lora_a.element_size()
+            + fixture.lora_b.numel() * fixture.lora_b.element_size()
+        ),
+        "routing": {
+            "valid_pairs": fixture.topk_ids.numel(),
+            "experts_hit": int(torch.unique(fixture.topk_ids).numel()),
+            "virtual_expert_capacity": (case.e_local * case.adapters.l_capacity),
+            "plans": fixture.routing_metrics(),
         },
     }
 
