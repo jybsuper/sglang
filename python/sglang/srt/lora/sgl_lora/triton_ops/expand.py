@@ -10,16 +10,19 @@ In particular, ``b_offsets`` and ``output_offsets`` need not match: a compact B
 buffer may contain only Q and V while those slices still write to their original
 destinations in a Q/K/V/Z base output.
 
-The source compiles into three slice schedules:
+The source compiles into four slice schedules:
 
 * ``ALIGNED_FLAT`` for regular contiguous slices whose boundaries align to the
   chosen N tile (or the single-slice case);
 * ``UNIFORM_SLICED`` for regular equal-width slices with independent tail masks;
-* ``DESCRIPTOR_RAGGED`` for unequal widths, compact B, or output holes.
+* ``COMPILED_RAGGED`` for a stable irregular layout baked into one binary; and
+* ``DESCRIPTOR_RAGGED`` for runtime-selected layouts, including mixed adapters
+  whose virtual experts target different stacked slices.
 
-The current MoE runner uses only the first two allocation-free schedules. A
-descriptor plan is built and cached by setup code before the ragged schedule is
-launched, keeping device addresses stable across CUDA-graph replay.
+The current MoE runner uses only the first two common schedules. Stable irregular
+layouts can be compiled directly, while mixed/runtime layouts use a descriptor
+plan built and cached by setup code before launch, keeping device addresses stable
+across CUDA-graph replay.
 
 Rank scheduling is orthogonal. ``WHOLE_RANK`` issues one padded rank dot, while
 ``LOOPED_RANK`` lets one CTA accumulate bounded rank chunks in FP32 and store
@@ -46,7 +49,8 @@ import triton.language as tl
 class SlicedLoraBSchedule(IntEnum):
     ALIGNED_FLAT = 0
     UNIFORM_SLICED = 1
-    DESCRIPTOR_RAGGED = 2
+    COMPILED_RAGGED = 2
+    DESCRIPTOR_RAGGED = 3
 
 
 class SlicedLoraBRankSchedule(IntEnum):
@@ -127,40 +131,118 @@ class SlicedLoraBLayout:
 class SlicedLoraBDescriptors:
     """Graph-stable device metadata for ``DESCRIPTOR_RAGGED``.
 
+    ``layouts`` are host-side semantic descriptions used for validation and
+    launch planning. ``metadata`` is their packed device execution table; the
+    Triton kernel cannot dynamically index Python tuples. Keeping both avoids a
+    device-to-host synchronization while making the host/device boundary
+    explicit. The table is built once and reused, so forward performs no
+    allocation or host-to-device copy.
+
+    With ``group_layout_ids=None``, every routed group uses layout row zero and
+    the launcher uses its exact tile grid. Otherwise the graph-stable mapping is
+    indexed by the same virtual-expert/group id used to select LoRA-B weights;
+    ``-1`` means that group does not target this layer. The launcher uses
+    ``max_slice_tiles`` capacity and inactive CTAs return.
+
+    Ragged direct-store launches update only descriptor-selected destinations;
+    callers therefore initialize any untouched rows or slices they consume.
+    Both a ``-1`` group layout and a routed ``expert_id == -1`` leave the
+    destination unchanged. Add-to-output and routed reduction already have the
+    same no-delta behavior.
+
     Construct this object during adapter/layout setup, not inside a captured
-    forward. ``tile_prefix`` is specific to ``block_size_n``.
+    forward. Each metadata row starts with a four-int aligned header containing
+    its tile count, followed by aligned records
+    ``(a_begin, b_tile_begin, output_tile_begin, valid_columns)``. This direct
+    per-tile form avoids a runtime prefix search and is specific to
+    ``block_size_n``.
     """
 
-    layout: SlicedLoraBLayout
+    layouts: tuple[SlicedLoraBLayout, ...]
     block_size_n: int
-    total_tiles: int
-    a_offsets: torch.Tensor
-    b_offsets: torch.Tensor
-    output_offsets: torch.Tensor
-    widths: torch.Tensor
-    tile_prefix: torch.Tensor
+    layout_tile_counts: tuple[int, ...]
+    max_slice_tiles: int
+    metadata: torch.Tensor
+    group_layout_ids: torch.Tensor | None
+
+    @property
+    def rank(self) -> int:
+        return self.layouts[0].rank
+
+    @property
+    def is_group_indexed(self) -> bool:
+        return self.group_layout_ids is not None
 
 
 def build_sliced_lora_b_descriptors(
-    layout: SlicedLoraBLayout,
+    layout: SlicedLoraBLayout | tuple[SlicedLoraBLayout, ...],
     *,
     block_size_n: int,
     device: torch.device | str,
+    group_layout_ids: tuple[int, ...] | None = None,
 ) -> SlicedLoraBDescriptors:
-    """Build descriptor tensors outside the graph-captured execution path."""
-    tile_prefix = [0]
-    for width in layout.widths:
-        tile_prefix.append(tile_prefix[-1] + triton.cdiv(width, block_size_n))
-    tensor_kwargs = {"dtype": torch.int32, "device": device}
+    """Build a packed descriptor table outside graph-captured execution."""
+    layouts = (layout,) if isinstance(layout, SlicedLoraBLayout) else layout
+    if not layouts:
+        raise ValueError("sliced LoRA-B descriptors require at least one layout")
+    if len({item.rank for item in layouts}) != 1:
+        raise ValueError("descriptor layouts must use one common packed rank")
+    if len(layouts) > 1 and group_layout_ids is None:
+        raise ValueError("multiple descriptor layouts require group_layout_ids")
+    if group_layout_ids is not None and (
+        not group_layout_ids
+        or min(group_layout_ids) < -1
+        or max(group_layout_ids) >= len(layouts)
+    ):
+        raise ValueError("group_layout_ids must be -1 or index the supplied layouts")
+
+    layout_records: list[list[int]] = []
+    layout_tile_counts: list[int] = []
+    for item in layouts:
+        records: list[int] = []
+        for a_begin, b_begin, output_begin, width in zip(
+            item.a_offsets,
+            item.b_offsets,
+            item.output_offsets,
+            item.widths,
+            strict=True,
+        ):
+            for tile_offset in range(0, width, block_size_n):
+                records.extend(
+                    (
+                        a_begin,
+                        b_begin + tile_offset,
+                        output_begin + tile_offset,
+                        min(block_size_n, width - tile_offset),
+                    )
+                )
+        layout_records.append(records)
+        layout_tile_counts.append(len(records) // 4)
+
+    max_slice_tiles = max(layout_tile_counts)
+    rows = [
+        [
+            tile_count,
+            0,
+            0,
+            0,
+            *records,
+            *([0] * (4 * (max_slice_tiles - tile_count))),
+        ]
+        for records, tile_count in zip(layout_records, layout_tile_counts, strict=True)
+    ]
+
     return SlicedLoraBDescriptors(
-        layout=layout,
+        layouts=layouts,
         block_size_n=block_size_n,
-        total_tiles=tile_prefix[-1],
-        a_offsets=torch.tensor(layout.a_offsets, **tensor_kwargs),
-        b_offsets=torch.tensor(layout.b_offsets, **tensor_kwargs),
-        output_offsets=torch.tensor(layout.output_offsets, **tensor_kwargs),
-        widths=torch.tensor(layout.widths, **tensor_kwargs),
-        tile_prefix=torch.tensor(tile_prefix, **tensor_kwargs),
+        layout_tile_counts=tuple(layout_tile_counts),
+        max_slice_tiles=max_slice_tiles,
+        metadata=torch.tensor(rows, dtype=torch.int32, device=device),
+        group_layout_ids=(
+            torch.tensor(group_layout_ids, dtype=torch.int32, device=device)
+            if group_layout_ids is not None
+            else None
+        ),
     )
 
 
@@ -202,14 +284,12 @@ def _sliced_lora_b_expand_add_kernel(
     sorted_token_ids_ptr,
     expert_ids_ptr,
     num_tokens_post_padded_ptr,
-    a_offsets_ptr,
-    b_offsets_ptr,
-    output_offsets_ptr,
-    widths_ptr,
-    tile_prefix_ptr,
+    descriptor_metadata_ptr,
+    group_layout_ids_ptr,
     R: tl.constexpr,
     num_valid_tokens,
     total_slice_tiles,
+    descriptor_row_stride,
     stride_am,
     stride_ar,
     stride_be,
@@ -223,6 +303,12 @@ def _sliced_lora_b_expand_add_kernel(
     NUM_SLICES: tl.constexpr,
     UNIFORM_SLICE_N: tl.constexpr,
     TOTAL_ACTIVE_N: tl.constexpr,
+    COMPILED_A_OFFSETS: tl.constexpr,
+    COMPILED_B_OFFSETS: tl.constexpr,
+    COMPILED_OUTPUT_OFFSETS: tl.constexpr,
+    COMPILED_WIDTHS: tl.constexpr,
+    COMPILED_TILE_PREFIX: tl.constexpr,
+    PER_GROUP_LAYOUT: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     FUSE_ADD_TO_OUTPUT: tl.constexpr,
     FUSE_SUM_ALL_REDUCE: tl.constexpr,
@@ -239,7 +325,7 @@ def _sliced_lora_b_expand_add_kernel(
         num_pid_n = tl.cdiv(TOTAL_ACTIVE_N, BLOCK_SIZE_N)
     elif SCHEDULE == 1:  # UNIFORM_SLICED
         num_pid_n = tl.cdiv(UNIFORM_SLICE_N, BLOCK_SIZE_N)
-    else:  # DESCRIPTOR_RAGGED
+    else:  # COMPILED_RAGGED or DESCRIPTOR_RAGGED
         num_pid_n = total_slice_tiles
 
     if GROUP_SIZE_M == 1:
@@ -254,6 +340,9 @@ def _sliced_lora_b_expand_add_kernel(
         pid_n = (pid % num_pid_in_group) // group_size_m
 
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
+        return
+    off_expert = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
+    if SCHEDULE >= 2 and off_expert == -1:
         return
 
     if SCHEDULE == 0:
@@ -270,19 +359,52 @@ def _sliced_lora_b_expand_add_kernel(
         b_begin = slice_id * UNIFORM_SLICE_N
         output_begin = slice_id * UNIFORM_SLICE_N
         slice_width = UNIFORM_SLICE_N
-    else:
+    elif SCHEDULE == 2:  # COMPILED_RAGGED
         global_tile_id = pid_n
-        slice_id = global_tile_id * 0
+        tile_begin = global_tile_id * 0
+        a_begin = COMPILED_A_OFFSETS[0]
+        b_begin = COMPILED_B_OFFSETS[0]
+        output_begin = COMPILED_OUTPUT_OFFSETS[0]
+        slice_width = COMPILED_WIDTHS[0]
         for slice_idx in tl.static_range(1, NUM_SLICES):
-            slice_tile_begin = tl.load(tile_prefix_ptr + slice_idx)
-            slice_id += (global_tile_id >= slice_tile_begin).to(tl.int32)
-
-        tile_begin = tl.load(tile_prefix_ptr + slice_id).to(tl.int64)
+            slice_tile_begin = COMPILED_TILE_PREFIX[slice_idx]
+            is_later_slice = global_tile_id >= slice_tile_begin
+            tile_begin = tl.where(is_later_slice, slice_tile_begin, tile_begin)
+            a_begin = tl.where(is_later_slice, COMPILED_A_OFFSETS[slice_idx], a_begin)
+            b_begin = tl.where(is_later_slice, COMPILED_B_OFFSETS[slice_idx], b_begin)
+            output_begin = tl.where(
+                is_later_slice, COMPILED_OUTPUT_OFFSETS[slice_idx], output_begin
+            )
+            slice_width = tl.where(
+                is_later_slice, COMPILED_WIDTHS[slice_idx], slice_width
+            )
         local_tile_id = global_tile_id - tile_begin
-        a_begin = tl.load(a_offsets_ptr + slice_id).to(tl.int64)
-        b_begin = tl.load(b_offsets_ptr + slice_id).to(tl.int64)
-        output_begin = tl.load(output_offsets_ptr + slice_id).to(tl.int64)
-        slice_width = tl.load(widths_ptr + slice_id).to(tl.int64)
+    else:  # DESCRIPTOR_RAGGED
+        global_tile_id = pid_n
+        if PER_GROUP_LAYOUT:
+            safe_expert = tl.maximum(off_expert, 0)
+            layout_id = tl.load(group_layout_ids_ptr + safe_expert).to(tl.int64)
+            if layout_id < 0:
+                return
+        else:
+            layout_id = 0
+
+        descriptor_begin = layout_id * descriptor_row_stride
+        if PER_GROUP_LAYOUT:
+            group_total_tiles = tl.load(descriptor_metadata_ptr + descriptor_begin)
+            if global_tile_id >= group_total_tiles:
+                return
+
+        tile_descriptor = descriptor_begin + 4 + 4 * global_tile_id
+        local_tile_id = global_tile_id * 0
+        a_begin = tl.load(descriptor_metadata_ptr + tile_descriptor).to(tl.int64)
+        b_begin = tl.load(descriptor_metadata_ptr + tile_descriptor + 1).to(tl.int64)
+        output_begin = tl.load(descriptor_metadata_ptr + tile_descriptor + 2).to(
+            tl.int64
+        )
+        slice_width = tl.load(descriptor_metadata_ptr + tile_descriptor + 3).to(
+            tl.int64
+        )
 
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id).to(tl.int64)
@@ -292,7 +414,6 @@ def _sliced_lora_b_expand_add_kernel(
     offs_b_n = b_begin + local_n
     offs_output_n = output_begin + local_n
 
-    off_expert = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
     if off_expert == -1:
         if not FUSE_ADD_TO_OUTPUT and not FUSE_SUM_ALL_REDUCE:
             c_ptrs = (
@@ -386,27 +507,72 @@ def invoke_sliced_lora_b_expand_add(
     fuse_sum_all_reduce: bool,
     *,
     fuse_add_to_output: bool = False,
-    layout: SlicedLoraBLayout,
+    slice_plan: SlicedLoraBLayout | SlicedLoraBDescriptors,
     schedule: SlicedLoraBSchedule,
     rank_schedule: SlicedLoraBRankSchedule = SlicedLoraBRankSchedule.AUTO,
-    descriptors: SlicedLoraBDescriptors | None = None,
     force_block_size_n: int | None = None,
     force_block_size_r: int | None = None,
 ) -> None:
-    """Launch one compiled slice schedule for a common-rank LoRA-B layout."""
+    """Launch one compiled schedule from a logical layout or descriptor plan."""
     block_m = config["BLOCK_SIZE_M"]
     block_n = force_block_size_n or config["BLOCK_SIZE_N"]
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], block_m)
 
-    if schedule == SlicedLoraBSchedule.ALIGNED_FLAT:
+    compiled_a_offsets = (0,)
+    compiled_b_offsets = (0,)
+    compiled_output_offsets = (0,)
+    compiled_widths = (0,)
+    compiled_tile_prefix = (0,)
+    per_group_layout = False
+    descriptor_ptrs = (output, output)
+    descriptor_row_stride = 0
+
+    if schedule == SlicedLoraBSchedule.DESCRIPTOR_RAGGED:
+        if not isinstance(slice_plan, SlicedLoraBDescriptors):
+            raise ValueError("descriptor-ragged LoRA-B requires a descriptor plan")
+        descriptors = slice_plan
+        if descriptors.block_size_n != block_n:
+            raise ValueError("ragged descriptors must match BLOCK_SIZE_N")
+        rank = descriptors.rank
+        # Runtime descriptors are already expanded per tile, so their compiled
+        # binary does not specialize on the logical slice count.
+        num_slices = 1
+        per_group_layout = descriptors.is_group_indexed
+        total_slice_tiles = (
+            descriptors.max_slice_tiles
+            if per_group_layout
+            else descriptors.layout_tile_counts[0]
+        )
+        grid = (num_m_blocks * total_slice_tiles,)
+        descriptor_ptrs = (
+            descriptors.metadata,
+            (
+                descriptors.group_layout_ids
+                if descriptors.group_layout_ids is not None
+                else output
+            ),
+        )
+        descriptor_row_stride = descriptors.metadata.stride(0)
+        compiled_uniform_slice_n = 0
+        compiled_total_active_n = 0
+    elif not isinstance(slice_plan, SlicedLoraBLayout):
+        raise ValueError("compiled slice schedules require a logical layout")
+    elif schedule == SlicedLoraBSchedule.ALIGNED_FLAT:
+        layout = slice_plan
+        rank = layout.rank
+        num_slices = layout.num_slices
         if not layout.is_uniform_contiguous or (
             layout.num_slices > 1 and layout.widths[0] % block_n != 0
         ):
             raise ValueError("flat sliced LoRA-B requires aligned contiguous slices")
         grid = (num_m_blocks * triton.cdiv(layout.active_width, block_n),)
         total_slice_tiles = 0
-        descriptor_ptrs = (output, output, output, output, output)
+        compiled_uniform_slice_n = layout.widths[0]
+        compiled_total_active_n = layout.active_width
     elif schedule == SlicedLoraBSchedule.UNIFORM_SLICED:
+        layout = slice_plan
+        rank = layout.rank
+        num_slices = layout.num_slices
         if not layout.is_uniform_contiguous:
             raise ValueError("uniform sliced LoRA-B requires contiguous equal slices")
         slice_width = layout.widths[0]
@@ -415,24 +581,29 @@ def invoke_sliced_lora_b_expand_add(
             layout.num_slices,
         )
         total_slice_tiles = 0
-        descriptor_ptrs = (output, output, output, output, output)
-    else:
-        if descriptors is None or descriptors.layout != layout:
-            raise ValueError("ragged sliced LoRA-B requires matching descriptors")
-        if descriptors.block_size_n != block_n:
-            raise ValueError("ragged descriptors must match BLOCK_SIZE_N")
-        total_slice_tiles = descriptors.total_tiles
+        compiled_uniform_slice_n = layout.widths[0]
+        compiled_total_active_n = 0
+    elif schedule == SlicedLoraBSchedule.COMPILED_RAGGED:
+        layout = slice_plan
+        rank = layout.rank
+        num_slices = layout.num_slices
+        tile_prefix = [0]
+        for width in layout.widths:
+            tile_prefix.append(tile_prefix[-1] + triton.cdiv(width, block_n))
+        total_slice_tiles = tile_prefix[-1]
         grid = (num_m_blocks * total_slice_tiles,)
-        descriptor_ptrs = (
-            descriptors.a_offsets,
-            descriptors.b_offsets,
-            descriptors.output_offsets,
-            descriptors.widths,
-            descriptors.tile_prefix,
-        )
+        compiled_a_offsets = layout.a_offsets
+        compiled_b_offsets = layout.b_offsets
+        compiled_output_offsets = layout.output_offsets
+        compiled_widths = layout.widths
+        compiled_tile_prefix = tuple(tile_prefix)
+        compiled_uniform_slice_n = 0
+        compiled_total_active_n = 0
+    else:
+        raise ValueError(f"unsupported sliced LoRA-B schedule: {schedule}")
 
     compiled_rank_schedule, block_r = select_sliced_lora_b_rank_schedule(
-        layout.rank,
+        rank,
         config,
         rank_schedule,
         force_block_size_r=force_block_size_r,
@@ -447,9 +618,10 @@ def invoke_sliced_lora_b_expand_add(
         expert_ids,
         num_tokens_post_padded,
         *descriptor_ptrs,
-        layout.rank,
+        rank,
         topk_ids.numel(),
         total_slice_tiles,
+        descriptor_row_stride,
         intermediate.stride(0),
         intermediate.stride(1),
         weight.stride(0),
@@ -460,9 +632,15 @@ def invoke_sliced_lora_b_expand_add(
         router_topk=topk_ids.shape[1],
         SCHEDULE=int(schedule),
         RANK_SCHEDULE=int(compiled_rank_schedule),
-        NUM_SLICES=layout.num_slices,
-        UNIFORM_SLICE_N=layout.widths[0],
-        TOTAL_ACTIVE_N=layout.active_width,
+        NUM_SLICES=num_slices,
+        UNIFORM_SLICE_N=compiled_uniform_slice_n,
+        TOTAL_ACTIVE_N=compiled_total_active_n,
+        COMPILED_A_OFFSETS=compiled_a_offsets,
+        COMPILED_B_OFFSETS=compiled_b_offsets,
+        COMPILED_OUTPUT_OFFSETS=compiled_output_offsets,
+        COMPILED_WIDTHS=compiled_widths,
+        COMPILED_TILE_PREFIX=compiled_tile_prefix,
+        PER_GROUP_LAYOUT=per_group_layout,
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         FUSE_ADD_TO_OUTPUT=fuse_add_to_output,
         FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
@@ -523,7 +701,7 @@ def _invoke_flat(
         mul_routed_weight,
         fuse_sum_all_reduce,
         fuse_add_to_output=fuse_add_to_output,
-        layout=layout,
+        slice_plan=layout,
         schedule=SlicedLoraBSchedule.ALIGNED_FLAT,
         force_block_size_n=block_n,
     )
@@ -567,7 +745,7 @@ def _invoke_two_slice(
         mul_routed_weight,
         fuse_sum_all_reduce,
         fuse_add_to_output=fuse_add_to_output,
-        layout=layout,
+        slice_plan=layout,
         schedule=SlicedLoraBSchedule.UNIFORM_SLICED,
         force_block_size_n=block_n,
     )
@@ -642,71 +820,6 @@ def invoke_moe_lora_expand_add(
     )
 
 
-def invoke_moe_lora_expand_add_flat_for_benchmark(
-    intermediate: torch.Tensor,
-    weight: torch.Tensor,
-    output: torch.Tensor,
-    topk_weights: torch.Tensor,
-    topk_ids: torch.Tensor,
-    sorted_token_ids: torch.Tensor,
-    expert_ids: torch.Tensor,
-    num_tokens_post_padded: torch.Tensor,
-    config: dict[str, Any],
-    mul_routed_weight: bool = False,
-    fuse_sum_all_reduce: bool = False,
-    *,
-    force_block_size_n: int | None = None,
-) -> None:
-    """Launch the midpoint-compatible flat schedule for controlled A/B tests."""
-    _invoke_flat(
-        intermediate,
-        weight,
-        output,
-        topk_weights,
-        topk_ids,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        config,
-        mul_routed_weight,
-        fuse_sum_all_reduce,
-        gated_midpoint=True,
-        force_block_size_n=force_block_size_n,
-    )
-
-
-def invoke_moe_lora_expand_add_sliced_for_benchmark(
-    intermediate: torch.Tensor,
-    weight: torch.Tensor,
-    output: torch.Tensor,
-    topk_weights: torch.Tensor,
-    topk_ids: torch.Tensor,
-    sorted_token_ids: torch.Tensor,
-    expert_ids: torch.Tensor,
-    num_tokens_post_padded: torch.Tensor,
-    config: dict[str, Any],
-    mul_routed_weight: bool = False,
-    fuse_sum_all_reduce: bool = False,
-    *,
-    force_block_size_n: int | None = None,
-) -> None:
-    """Launch the uniform two-slice schedule for controlled A/B tests."""
-    _invoke_two_slice(
-        intermediate,
-        weight,
-        output,
-        topk_weights,
-        topk_ids,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        config,
-        mul_routed_weight,
-        fuse_sum_all_reduce,
-        force_block_size_n=force_block_size_n,
-    )
-
-
 __all__ = [
     "SlicedLoraBDescriptors",
     "SlicedLoraBLayout",
@@ -714,8 +827,6 @@ __all__ = [
     "SlicedLoraBSchedule",
     "build_sliced_lora_b_descriptors",
     "invoke_moe_lora_expand_add",
-    "invoke_moe_lora_expand_add_flat_for_benchmark",
-    "invoke_moe_lora_expand_add_sliced_for_benchmark",
     "invoke_sliced_lora_b_expand_add",
     "select_sliced_lora_b_rank_schedule",
 ]

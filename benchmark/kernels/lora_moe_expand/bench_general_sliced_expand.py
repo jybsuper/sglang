@@ -38,6 +38,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -47,8 +48,19 @@ import triton.language as tl
 
 from sglang.srt.lora.sgl_lora.triton_ops.expand import (
     _invoke_flat,
-    invoke_moe_lora_expand_add_flat_for_benchmark,
-    invoke_moe_lora_expand_add_sliced_for_benchmark,
+    _invoke_two_slice,
+)
+
+_invoke_flat_for_benchmark = partial(
+    _invoke_flat,
+    mul_routed_weight=False,
+    fuse_sum_all_reduce=False,
+    gated_midpoint=True,
+)
+_invoke_sliced_for_benchmark = partial(
+    _invoke_two_slice,
+    mul_routed_weight=False,
+    fuse_sum_all_reduce=False,
 )
 
 ALIGNED_FLAT = 0
@@ -441,7 +453,7 @@ def _launch_aligned(case: ExpandCase, output: torch.Tensor, block_size_n: int) -
 def _launch_specialized(
     case: ExpandCase, output: torch.Tensor, block_size_n: int
 ) -> None:
-    invoke_moe_lora_expand_add_sliced_for_benchmark(
+    _invoke_sliced_for_benchmark(
         case.intermediate,
         case.weight,
         output,
@@ -456,7 +468,7 @@ def _launch_specialized(
 
 
 def _launch_flat(case: ExpandCase, output: torch.Tensor, block_size_n: int) -> None:
-    invoke_moe_lora_expand_add_flat_for_benchmark(
+    _invoke_flat_for_benchmark(
         case.intermediate,
         case.weight,
         output,

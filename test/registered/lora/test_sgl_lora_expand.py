@@ -274,48 +274,59 @@ def test_rank_schedule_default_bounds_large_rank_tile():
 
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        SlicedLoraBSchedule.COMPILED_RAGGED,
+        SlicedLoraBSchedule.DESCRIPTOR_RAGGED,
+    ],
+)
 def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched(
     dtype: torch.dtype,
+    schedule: SlicedLoraBSchedule,
 ):
     """Arbitrary active slices need neither zero weights nor zero output tiles."""
     torch.manual_seed(71)
     device = "cuda"
-    num_tokens, rank, block_size_m = 3, 96, 16
-    q_width, v_width = 17, 23
-    k_gap = 14
+    num_tokens, num_target_tokens, rank, block_size_m = 4, 3, 96, 16
+    q_width, v_width, z_width = 17, 23, 16
+    k_gap, z_gap = 14, 7
 
     layout = SlicedLoraBLayout(
-        a_offsets=(0, rank),
-        b_offsets=(0, q_width),
-        output_offsets=(0, q_width + k_gap),
-        widths=(q_width, v_width),
+        a_offsets=(0, rank, 0),
+        b_offsets=(0, q_width, q_width + v_width),
+        output_offsets=(0, q_width + k_gap, q_width + k_gap + v_width + z_gap),
+        widths=(q_width, v_width, z_width),
         rank=rank,
     )
     descriptors = build_sliced_lora_b_descriptors(
         layout, block_size_n=16, device=device
     )
     intermediate = torch.randn(num_tokens, 2 * rank, dtype=dtype, device=device)
-    compact_b = torch.randn(1, q_width + v_width, rank, dtype=dtype, device=device)
-    output_width = q_width + k_gap + v_width
+    compact_b = torch.randn(
+        1, q_width + v_width + z_width, rank, dtype=dtype, device=device
+    )
+    output_width = q_width + k_gap + v_width + z_gap + z_width
     base_output = torch.randn(num_tokens, output_width, dtype=dtype, device=device)
     output = base_output.clone()
 
-    topk_ids = torch.zeros((num_tokens, 1), dtype=torch.int32, device=device)
+    topk_ids = torch.tensor([[0], [0], [0], [-1]], dtype=torch.int32, device=device)
     topk_weights = torch.ones((num_tokens, 1), dtype=torch.float32, device=device)
     sorted_token_ids = torch.full(
-        (block_size_m,), num_tokens, dtype=torch.int32, device=device
+        (2 * block_size_m,), num_tokens, dtype=torch.int32, device=device
     )
-    sorted_token_ids[:num_tokens] = torch.arange(
-        num_tokens, dtype=torch.int32, device=device
+    sorted_token_ids[:num_target_tokens] = torch.arange(
+        num_target_tokens, dtype=torch.int32, device=device
     )
-    expert_ids = torch.zeros((1,), dtype=torch.int32, device=device)
+    sorted_token_ids[block_size_m] = num_target_tokens
+    expert_ids = torch.tensor([0, -1], dtype=torch.int32, device=device)
     num_tokens_post_padded = torch.tensor(
-        [block_size_m], dtype=torch.int32, device=device
+        [2 * block_size_m], dtype=torch.int32, device=device
     )
     config = {
         "BLOCK_SIZE_M": block_size_m,
         "BLOCK_SIZE_N": 16,
-        "GROUP_SIZE_M": 1,
+        "GROUP_SIZE_M": 4,
         "num_warps": 4,
     }
 
@@ -332,9 +343,12 @@ def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched(
             config,
             mul_routed_weight=False,
             fuse_sum_all_reduce=False,
-            layout=layout,
-            schedule=SlicedLoraBSchedule.DESCRIPTOR_RAGGED,
-            descriptors=descriptors,
+            slice_plan=(
+                descriptors
+                if schedule == SlicedLoraBSchedule.DESCRIPTOR_RAGGED
+                else layout
+            ),
+            schedule=schedule,
         )
 
     # Compile first, then prove the cached descriptors can be reused by a graph.
@@ -348,9 +362,137 @@ def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched(
     torch.cuda.synchronize()
 
     expected = base_output.clone()
-    expected[:, :q_width] = intermediate[:, :rank] @ compact_b[0, :q_width].T
-    expected[:, q_width + k_gap :] = intermediate[:, rank:] @ compact_b[0, q_width:].T
+    expected[:num_target_tokens, :q_width] = (
+        intermediate[:num_target_tokens, :rank] @ compact_b[0, :q_width].T
+    )
+    expected[:num_target_tokens, q_width + k_gap : q_width + k_gap + v_width] = (
+        intermediate[:num_target_tokens, rank:]
+        @ compact_b[0, q_width : q_width + v_width].T
+    )
+    expected[:num_target_tokens, -z_width:] = (
+        intermediate[:num_target_tokens, :rank] @ compact_b[0, q_width + v_width :].T
+    )
     torch.testing.assert_close(output, expected, rtol=2e-2, atol=2e-2)
+
+
+def test_group_indexed_ragged_expand_supports_mixed_adapter_slice_layouts():
+    """Virtual experts may select different compact stacked-projection layouts."""
+    torch.manual_seed(73)
+    device = "cuda"
+    num_tokens, rank, block_size_m = 6, 16, 16
+    active_m_blocks, capacity_m_blocks = 6, 7
+    q_width, k_width, v_width = 17, 14, 23
+
+    qv_layout = SlicedLoraBLayout(
+        a_offsets=(0, rank),
+        b_offsets=(0, q_width),
+        output_offsets=(0, q_width + k_width),
+        widths=(q_width, v_width),
+        rank=rank,
+    )
+    k_layout = SlicedLoraBLayout(
+        a_offsets=(0,),
+        b_offsets=(0,),
+        output_offsets=(q_width,),
+        widths=(k_width,),
+        rank=rank,
+    )
+    descriptors = build_sliced_lora_b_descriptors(
+        (qv_layout, k_layout),
+        block_size_n=16,
+        device=device,
+        group_layout_ids=(0, 1, -1),
+    )
+
+    intermediate = torch.randn(
+        num_tokens, 2 * rank, dtype=torch.bfloat16, device=device
+    )
+    compact_width = max(q_width + v_width, k_width)
+    compact_b = torch.randn(3, compact_width, rank, dtype=torch.bfloat16, device=device)
+    output_width = q_width + k_width + v_width
+    base_output = torch.randn(
+        num_tokens, output_width, dtype=torch.bfloat16, device=device
+    )
+    output = base_output.clone()
+
+    token_experts = (0, 1, 2, 0, 1, -1)
+    topk_ids = torch.tensor(token_experts, dtype=torch.int32, device=device)[:, None]
+    topk_weights = torch.ones((num_tokens, 1), dtype=torch.float32, device=device)
+    sorted_token_ids = torch.full(
+        (capacity_m_blocks * block_size_m,),
+        num_tokens,
+        dtype=torch.int32,
+        device=device,
+    )
+    for token_id in range(num_tokens):
+        sorted_token_ids[token_id * block_size_m] = token_id
+    expert_ids = torch.tensor([*token_experts, -1], dtype=torch.int32, device=device)
+    num_tokens_post_padded = torch.tensor(
+        [active_m_blocks * block_size_m], dtype=torch.int32, device=device
+    )
+    config = {
+        "BLOCK_SIZE_M": block_size_m,
+        "BLOCK_SIZE_N": 16,
+        "GROUP_SIZE_M": 4,
+        "num_warps": 4,
+    }
+
+    def launch() -> None:
+        invoke_sliced_lora_b_expand_add(
+            intermediate,
+            compact_b,
+            output,
+            topk_weights,
+            topk_ids,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            config,
+            mul_routed_weight=False,
+            fuse_sum_all_reduce=False,
+            slice_plan=descriptors,
+            schedule=SlicedLoraBSchedule.DESCRIPTOR_RAGGED,
+        )
+
+    launch()
+    torch.cuda.synchronize()
+    output.copy_(base_output)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        launch()
+    graph.replay()
+    torch.cuda.synchronize()
+
+    def reference(group_layout_ids: tuple[int, ...]) -> torch.Tensor:
+        expected = base_output.clone()
+        for token_id, expert_id in enumerate(token_experts):
+            if expert_id < 0 or group_layout_ids[expert_id] < 0:
+                continue
+            if group_layout_ids[expert_id] == 0:
+                expected[token_id, :q_width] = (
+                    intermediate[token_id, :rank] @ compact_b[expert_id, :q_width].T
+                )
+                expected[token_id, q_width + k_width :] = (
+                    intermediate[token_id, rank:]
+                    @ compact_b[expert_id, q_width : q_width + v_width].T
+                )
+            else:
+                expected[token_id, q_width : q_width + k_width] = (
+                    intermediate[token_id, :rank] @ compact_b[expert_id, :k_width].T
+                )
+        return expected
+
+    torch.testing.assert_close(output, reference((0, 1, -1)), rtol=2e-2, atol=2e-2)
+
+    # Keep graph addresses fixed while setup metadata changes in place.
+    assert descriptors.group_layout_ids is not None
+    descriptors.group_layout_ids.copy_(
+        torch.tensor((1, 0, -1), dtype=torch.int32, device=device)
+    )
+    output.copy_(base_output)
+    graph.replay()
+    torch.cuda.synchronize()
+    torch.testing.assert_close(output, reference((1, 0, -1)), rtol=2e-2, atol=2e-2)
 
 
 if __name__ == "__main__":

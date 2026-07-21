@@ -28,6 +28,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -35,9 +36,12 @@ import torch
 import triton
 
 from sglang.srt.lora.sgl_lora.triton_ops.expand import (
-    invoke_moe_lora_expand_add_flat_for_benchmark,
-    invoke_moe_lora_expand_add_sliced_for_benchmark,
+    _invoke_flat,
+    _invoke_two_slice,
 )
+
+_invoke_flat_for_benchmark = partial(_invoke_flat, gated_midpoint=True)
+_invoke_sliced_for_benchmark = _invoke_two_slice
 
 
 @dataclass
@@ -274,13 +278,13 @@ def check_correctness(
     )
     sliced_output = torch.empty_like(flat_output)
     _launch(
-        invoke_moe_lora_expand_add_flat_for_benchmark,
+        _invoke_flat_for_benchmark,
         case,
         flat_output,
         flat_force_bn,
     )
     _launch(
-        invoke_moe_lora_expand_add_sliced_for_benchmark,
+        _invoke_sliced_for_benchmark,
         case,
         sliced_output,
         sliced_force_bn,
@@ -492,13 +496,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     case, flat_force_bn, sliced_force_bn
                 )
                 flat_fn = lambda: _launch(
-                    invoke_moe_lora_expand_add_flat_for_benchmark,
+                    _invoke_flat_for_benchmark,
                     case,
                     flat_output,
                     flat_force_bn,
                 )
                 sliced_fn = lambda: _launch(
-                    invoke_moe_lora_expand_add_sliced_for_benchmark,
+                    _invoke_sliced_for_benchmark,
                     case,
                     sliced_output,
                     sliced_force_bn,
