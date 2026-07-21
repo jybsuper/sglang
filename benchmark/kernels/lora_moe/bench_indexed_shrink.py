@@ -54,7 +54,11 @@ from benchmark.kernels.lora_moe.bench_local import (
     _environment,
     _select_case,
 )
-from benchmark.kernels.lora_moe.bench_shrink_schedules import _torch_reference
+from benchmark.kernels.lora_moe.bench_shrink_schedules import (
+    _CacheControl,
+    _make_cache_control,
+    _torch_reference,
+)
 from benchmark.kernels.lora_moe.profiling import (
     RunConfig,
     cuda_profile_range,
@@ -421,6 +425,7 @@ def _run_config(
     fixture: SiteFixture,
     reference: torch.Tensor,
     config: IndexedShrinkConfig,
+    cache_control: _CacheControl,
     args: argparse.Namespace,
 ) -> dict[str, object]:
     op = _prepare_candidate(fixture, config)
@@ -470,6 +475,7 @@ def _run_config(
             launches_per_batch=batch.launches_per_batch,
             warmup=run_config.warmup,
             samples=run_config.samples,
+            before_sample=cache_control.before_sample(),
         )
         result["timing"] = asdict(timing)
         print(
@@ -481,8 +487,11 @@ def _run_config(
         label = (
             f"sgl_lora_moe::{args.scope}::indexed_shrink::{fixture.site}::"
             f"{fixture.case.case_id}::{config.key}::{args.execution}::"
-            "route=inline_raw::pdl=auto"
+            f"route=inline_raw::cache={args.cache_state}::pdl=auto"
         )
+        if cache_control.state == "cold":
+            cache_control.evict()
+            torch.cuda.synchronize()
         with cuda_profile_range(label):
             for _ in range(run_config.profile_iterations):
                 batch.run()
@@ -517,9 +526,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scope", choices=("K0", "O0"), default="K0")
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
+    parser.add_argument("--cache-state", choices=("hot", "cold"), default="hot")
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--samples", type=int, default=100)
-    parser.add_argument("--inner-iterations", type=int, default=10)
+    parser.add_argument("--inner-iterations", type=int)
     parser.add_argument("--profile-iterations", type=int, default=1)
     parser.add_argument("--skip-check", action="store_true")
     parser.add_argument("--json-output", type=Path)
@@ -531,6 +541,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.list_configs:
         _list_configs()
         return 0
+    if args.inner_iterations is None:
+        args.inner_iterations = 1 if args.cache_state == "cold" else 10
+    elif args.cache_state == "cold" and args.inner_iterations != 1:
+        raise ValueError("cold-cache runs require --inner-iterations 1")
+    if (
+        args.cache_state == "cold"
+        and args.mode != "time"
+        and args.profile_iterations != 1
+    ):
+        raise ValueError("cold-cache profiling requires --profile-iterations 1")
     if not torch.cuda.is_available():
         raise RuntimeError("This benchmark requires CUDA")
     device = _detect_device(args.device)
@@ -543,12 +563,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     reference = _torch_reference(fixture).view(
         fixture.topk_ids.shape[0], fixture.topk_ids.shape[1], -1
     )
+    cache_control = _make_cache_control(args.cache_state, fixture.hidden_states.device)
 
     configs = INDEXED_CONFIGS if args.all_configs else (_CONFIGS_BY_KEY[args.config],)
     results = []
     for config in configs:
         try:
-            results.append(_run_config(fixture, reference, config, args))
+            results.append(_run_config(fixture, reference, config, cache_control, args))
         except Exception as exc:
             from triton.runtime.errors import OutOfResources
 
@@ -578,6 +599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "address resolution is inline and no route plan exists"
         ),
         "pdl_policy": "architecture_auto",
+        "cache_control": cache_control.metadata(),
         "baseline_driver": "benchmark/kernels/lora_moe/bench_shrink_schedules.py",
         "results": results,
     }

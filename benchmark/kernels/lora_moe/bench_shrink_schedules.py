@@ -92,6 +92,88 @@ CURATED_SCHEDULES: tuple[ShrinkSchedule, ...] = (
 _SCHEDULES_BY_KEY = {schedule.key: schedule for schedule in CURATED_SCHEDULES}
 
 
+_FALLBACK_CACHE_EVICTION_BYTES = 256 * 1024 * 1024
+
+
+@dataclass(slots=True)
+class _CacheControl:
+    state: str
+    buffer: torch.Tensor | None
+    flush_bytes: int
+    detected_l2_bytes: int | None
+    size_source: str
+
+    def evict(self) -> None:
+        if self.buffer is not None:
+            # Read and write the entire buffer on the current stream.  With a
+            # buffer larger than L2 this replaces the benchmark working set;
+            # callers place this before the timing start event.
+            self.buffer.add_(1)
+
+    def before_sample(self) -> Callable[[], None] | None:
+        return self.evict if self.buffer is not None else None
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "method": (
+                "preallocated_int32_read_write_on_current_stream"
+                if self.buffer is not None
+                else "none_hot_working_set"
+            ),
+            "flush_bytes": self.flush_bytes,
+            "detected_l2_bytes": self.detected_l2_bytes,
+            "size_source": self.size_source,
+        }
+
+
+def _make_cache_control(cache_state: str, device: torch.device) -> _CacheControl:
+    """Prepare a reusable same-stream L2 eviction buffer.
+
+    Recent PyTorch CUDA device properties expose ``L2_cache_size`` in bytes,
+    but that attribute is not present in every supported PyTorch build.  Keep
+    a lowercase probe for vendor/build portability and use 256 MiB when neither
+    spelling is available.  H200 and GB300 expose the canonical uppercase
+    property in the benchmark environments.
+    """
+    if cache_state not in ("hot", "cold"):
+        raise ValueError(f"unsupported cache state {cache_state!r}")
+
+    properties = torch.cuda.get_device_properties(device)
+    detected_l2_bytes = None
+    size_source = "fixed_256_mib_fallback"
+    for property_name in ("L2_cache_size", "l2_cache_size"):
+        value = getattr(properties, property_name, None)
+        if isinstance(value, int) and value > 0:
+            detected_l2_bytes = value
+            size_source = f"torch.cuda.get_device_properties.{property_name}"
+            break
+
+    if cache_state == "hot":
+        return _CacheControl(
+            state=cache_state,
+            buffer=None,
+            flush_bytes=0,
+            detected_l2_bytes=detected_l2_bytes,
+            size_source=size_source,
+        )
+
+    requested_bytes = (
+        2 * detected_l2_bytes
+        if detected_l2_bytes is not None
+        else _FALLBACK_CACHE_EVICTION_BYTES
+    )
+    element_count = (requested_bytes + torch.int32.itemsize - 1) // torch.int32.itemsize
+    buffer = torch.zeros(element_count, dtype=torch.int32, device=device)
+    return _CacheControl(
+        state=cache_state,
+        buffer=buffer,
+        flush_bytes=buffer.numel() * buffer.element_size(),
+        detected_l2_bytes=detected_l2_bytes,
+        size_source=size_source,
+    )
+
+
 @dataclass(slots=True)
 class RoutingPlan:
     sorted_token_ids: torch.Tensor
@@ -418,6 +500,7 @@ def _run_schedule(
     reference: torch.Tensor,
     schedule: ShrinkSchedule,
     plan: RoutingPlan,
+    cache_control: _CacheControl,
     args: argparse.Namespace,
 ) -> dict[str, object]:
     op = _prepare_shrink(fixture, schedule, plan)
@@ -460,6 +543,7 @@ def _run_schedule(
             launches_per_batch=batch.launches_per_batch,
             warmup=run_config.warmup,
             samples=run_config.samples,
+            before_sample=cache_control.before_sample(),
         )
         result["timing"] = asdict(timing)
         print(
@@ -472,8 +556,13 @@ def _run_schedule(
     else:
         label = (
             f"sgl_lora_moe::K0::shrink::{fixture.site}::{fixture.case.case_id}::"
-            f"{schedule.key}::{args.execution}::pdl=auto"
+            f"{schedule.key}::{args.execution}::cache={args.cache_state}::pdl=auto"
         )
+        if cache_control.state == "cold":
+            # Keep eviction out of the profiler capture just as it is kept
+            # before the CUDA timing start event.
+            cache_control.evict()
+            torch.cuda.synchronize()
         with cuda_profile_range(label):
             for _ in range(run_config.profile_iterations):
                 batch.run()
@@ -514,9 +603,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--num-stages", type=int)
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
+    parser.add_argument("--cache-state", choices=("hot", "cold"), default="hot")
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--samples", type=int, default=100)
-    parser.add_argument("--inner-iterations", type=int, default=10)
+    parser.add_argument("--inner-iterations", type=int)
     parser.add_argument("--profile-iterations", type=int, default=1)
     parser.add_argument("--skip-check", action="store_true")
     parser.add_argument("--json-output", type=Path)
@@ -542,6 +632,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.list_configs:
         _list_configs()
         return 0
+    if args.inner_iterations is None:
+        args.inner_iterations = 1 if args.cache_state == "cold" else 10
+    elif args.cache_state == "cold" and args.inner_iterations != 1:
+        raise ValueError("cold-cache runs require --inner-iterations 1")
+    if (
+        args.cache_state == "cold"
+        and args.mode != "time"
+        and args.profile_iterations != 1
+    ):
+        raise ValueError("cold-cache profiling requires --profile-iterations 1")
     if args.all_configs and _has_overrides(args):
         raise ValueError(
             "explicit launch overrides cannot be combined with --all-configs"
@@ -552,6 +652,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     case = _select_case(device, args.case_id)
     fixture = _build_fixture(case, args.site)
     reference = _torch_reference(fixture)
+    cache_control = _make_cache_control(args.cache_state, fixture.hidden_states.device)
 
     templates: list[ShrinkSchedule | None]
     if args.all_configs:
@@ -582,7 +683,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # An override may have changed BM after the initial plan was selected.
         plan = plan_for(schedule.block_m)
         try:
-            results.append(_run_schedule(fixture, reference, schedule, plan, args))
+            results.append(
+                _run_schedule(fixture, reference, schedule, plan, cache_control, args)
+            )
         except Exception as exc:
             from triton.runtime.errors import OutOfResources
 
@@ -603,6 +706,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "site": args.site,
         "reference": "chunked PyTorch FP32 route-pair oracle",
         "pdl_policy": "architecture_auto",
+        "cache_control": cache_control.metadata(),
         "results": results,
     }
     if args.json_output is not None:
