@@ -4,14 +4,18 @@ import pytest
 import torch
 
 from sglang.srt.lora.sgl_lora.triton_ops.expand import (
+    SlicedLoraBLayout,
+    SlicedLoraBSchedule,
+    build_sliced_lora_b_descriptors,
     invoke_moe_lora_expand_add,
+    invoke_sliced_lora_b_expand_add,
 )
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 
 
-@pytest.mark.parametrize("rank", [16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64])
 @pytest.mark.parametrize("num_output_slices", [1, 2])
 def test_direct_expand_uses_the_requested_input_slice(
     rank: int,
@@ -42,20 +46,24 @@ def test_direct_expand_uses_the_requested_input_slice(
 
     # One aligned expert block. Padded entries use num_valid_tokens as the
     # sentinel, matching moe_align_block_size's contract.
+    # Keep four blocks of graph-stable routing capacity while only the first is
+    # active. GROUP_SIZE_M must use launch capacity for its swizzle, then guard
+    # against the device-side active count.
+    routing_capacity = 4 * block_size_m
     sorted_token_ids = torch.full(
-        (block_size_m,), num_tokens, dtype=torch.int32, device=device
+        (routing_capacity,), num_tokens, dtype=torch.int32, device=device
     )
     sorted_token_ids[:num_tokens] = torch.arange(
         num_tokens, dtype=torch.int32, device=device
     )
-    expert_ids = torch.zeros((1,), dtype=torch.int32, device=device)
+    expert_ids = torch.tensor([0, -1, -1, -1], dtype=torch.int32, device=device)
     num_tokens_post_padded = torch.tensor(
         [block_size_m], dtype=torch.int32, device=device
     )
     config = {
         "BLOCK_SIZE_M": block_size_m,
         "BLOCK_SIZE_N": 128,
-        "GROUP_SIZE_M": 1,
+        "GROUP_SIZE_M": 4,
         "num_warps": 4,
     }
 
@@ -89,7 +97,7 @@ def test_direct_expand_uses_the_requested_input_slice(
     torch.testing.assert_close(output, expected, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.parametrize("rank", [16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64])
 def test_direct_expand_matches_production_down_projection(rank: int):
     """Cover routed weighting plus top-k collapse used by the Phase-1a runner."""
     torch.manual_seed(29)
@@ -169,6 +177,89 @@ def test_direct_expand_matches_production_down_projection(rank: int):
     torch.testing.assert_close(
         output, expected.to(torch.bfloat16), rtol=5e-2, atol=5e-2
     )
+
+
+def test_ragged_expand_uses_compact_b_and_leaves_inactive_output_untouched():
+    """Arbitrary active slices need neither zero weights nor zero output tiles."""
+    torch.manual_seed(71)
+    device = "cuda"
+    num_tokens, rank, block_size_m = 3, 16, 16
+    q_width, v_width = 17, 23
+    k_gap = 14
+
+    layout = SlicedLoraBLayout(
+        a_offsets=(0, rank),
+        b_offsets=(0, q_width),
+        output_offsets=(0, q_width + k_gap),
+        widths=(q_width, v_width),
+        rank=rank,
+    )
+    descriptors = build_sliced_lora_b_descriptors(
+        layout, block_size_n=16, device=device
+    )
+    intermediate = torch.randn(
+        num_tokens, 2 * rank, dtype=torch.bfloat16, device=device
+    )
+    compact_b = torch.randn(
+        1, q_width + v_width, rank, dtype=torch.bfloat16, device=device
+    )
+    output_width = q_width + k_gap + v_width
+    base_output = torch.randn(
+        num_tokens, output_width, dtype=torch.bfloat16, device=device
+    )
+    output = base_output.clone()
+
+    topk_ids = torch.zeros((num_tokens, 1), dtype=torch.int32, device=device)
+    topk_weights = torch.ones((num_tokens, 1), dtype=torch.float32, device=device)
+    sorted_token_ids = torch.full(
+        (block_size_m,), num_tokens, dtype=torch.int32, device=device
+    )
+    sorted_token_ids[:num_tokens] = torch.arange(
+        num_tokens, dtype=torch.int32, device=device
+    )
+    expert_ids = torch.zeros((1,), dtype=torch.int32, device=device)
+    num_tokens_post_padded = torch.tensor(
+        [block_size_m], dtype=torch.int32, device=device
+    )
+    config = {
+        "BLOCK_SIZE_M": block_size_m,
+        "BLOCK_SIZE_N": 16,
+        "GROUP_SIZE_M": 1,
+        "num_warps": 4,
+    }
+
+    def launch() -> None:
+        invoke_sliced_lora_b_expand_add(
+            intermediate,
+            compact_b,
+            output,
+            topk_weights,
+            topk_ids,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            config,
+            mul_routed_weight=False,
+            fuse_sum_all_reduce=False,
+            layout=layout,
+            schedule=SlicedLoraBSchedule.DESCRIPTOR_RAGGED,
+            descriptors=descriptors,
+        )
+
+    # Compile first, then prove the cached descriptors can be reused by a graph.
+    launch()
+    torch.cuda.synchronize()
+    output.copy_(base_output)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        launch()
+    graph.replay()
+    torch.cuda.synchronize()
+
+    expected = base_output.clone()
+    expected[:, :q_width] = intermediate[:, :rank] @ compact_b[0, :q_width].T
+    expected[:, q_width + k_gap :] = intermediate[:, rank:] @ compact_b[0, q_width:].T
+    torch.testing.assert_close(output, expected, rtol=2e-2, atol=2e-2)
 
 
 if __name__ == "__main__":

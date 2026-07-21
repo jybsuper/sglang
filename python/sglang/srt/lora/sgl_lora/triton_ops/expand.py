@@ -1,13 +1,31 @@
-"""Rank-specialized LoRA-B expand kernels owned by ``sgl_lora``.
+"""Sliced routed LoRA-B expand/add kernels owned by ``sgl_lora``.
 
-Gate and up are independent output slices.  The fast path keeps the existing
-flat grid when a tensor-core-sized tile can end exactly at their midpoint.  A
-two-slice grid handles other widths: gate and up receive independent ``pid_n``
-ranges, so each final tile can be masked without reading the wrong LoRA-A half.
+One semantic operation covers ordinary projections, complete stacked
+projections, and arbitrary active subsets of a stacked projection::
 
-The non-gated down projection uses the flat kernel with one input/output slice.
+    C[:, output_i] <epilogue>= A[:, a_i] @ B[:, b_i].T
+
+The logical slice layout is deliberately independent from routed-row metadata.
+In particular, ``b_offsets`` and ``output_offsets`` need not match: a compact B
+buffer may contain only Q and V while those slices still write to their original
+destinations in a Q/K/V/Z base output.
+
+The source compiles into three slice schedules:
+
+* ``ALIGNED_FLAT`` for regular contiguous slices whose boundaries align to the
+  chosen N tile (or the single-slice case);
+* ``UNIFORM_SLICED`` for regular equal-width slices with independent tail masks;
+* ``DESCRIPTOR_RAGGED`` for unequal widths, compact B, or output holes.
+
+The current MoE runner uses only the first two allocation-free schedules. A
+descriptor plan is built and cached by setup code before the ragged schedule is
+launched, keeping device addresses stable across CUDA-graph replay.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any
 
 import torch
@@ -15,109 +33,123 @@ import triton
 import triton.language as tl
 
 
-@triton.jit
-def _moe_lora_expand_add_flat_kernel(
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    topk_weights_ptr,
-    sorted_token_ids_ptr,
-    expert_ids_ptr,
-    num_tokens_post_padded_ptr,
-    N,
-    R: tl.constexpr,
-    num_valid_tokens,
-    stride_am,
-    stride_ar,
-    stride_be,
-    stride_bn,
-    stride_br,
-    stride_cm,
-    stride_cn,
-    router_topk: tl.constexpr,
-    MUL_ROUTED_WEIGHT: tl.constexpr,
-    FUSE_SUM_ALL_REDUCE: tl.constexpr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_R: tl.constexpr,
-    GROUP_SIZE_M: tl.constexpr,
-    GATED_A_HALF: tl.constexpr,
-):
-    """Flat-N reference and non-gated expand kernel.
+class SlicedLoraBSchedule(IntEnum):
+    ALIGNED_FLAT = 0
+    UNIFORM_SLICED = 1
+    DESCRIPTOR_RAGGED = 2
 
-    ``GATED_A_HALF`` enables the midpoint-safe gate/up schedule.  Its launcher
-    guarantees that no tile crosses the midpoint.
+
+@dataclass(frozen=True)
+class SlicedLoraBLayout:
+    """Host description of the active LoRA-B output slices.
+
+    Version one uses one common rank, matching SGLang's adapter-level rank and
+    current packed weight arena. Multiple slices may reference the same
+    ``a_offset`` so a later A plan can compute a shared factor only once.
+
+    Setup code owns bounds validation against the packed A, B, and output
+    arenas. Store destinations must not overlap within one layout.
     """
-    pid = tl.program_id(0)
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
-    num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    a_offsets: tuple[int, ...]
+    b_offsets: tuple[int, ...]
+    output_offsets: tuple[int, ...]
+    widths: tuple[int, ...]
+    rank: int
 
-    if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
-        return
+    def __post_init__(self) -> None:
+        num_slices = len(self.widths)
+        if num_slices == 0 or any(
+            len(offsets) != num_slices
+            for offsets in (self.a_offsets, self.b_offsets, self.output_offsets)
+        ):
+            raise ValueError("sliced LoRA-B layout fields must have one active entry")
+        if self.rank <= 0 or any(width <= 0 for width in self.widths):
+            raise ValueError("sliced LoRA-B rank and widths must be positive")
 
-    offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
-    offs_token = tl.load(sorted_token_ids_ptr + offs_token_id).to(tl.int64)
-    token_mask = offs_token < num_valid_tokens
-    offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+    @classmethod
+    def contiguous(
+        cls,
+        *,
+        widths: tuple[int, ...],
+        rank: int,
+    ) -> SlicedLoraBLayout:
+        output_offsets = []
+        offset = 0
+        for width in widths:
+            output_offsets.append(offset)
+            offset += width
+        return cls(
+            a_offsets=tuple(slice_id * rank for slice_id in range(len(widths))),
+            b_offsets=tuple(output_offsets),
+            output_offsets=tuple(output_offsets),
+            widths=widths,
+            rank=rank,
+        )
 
-    off_expert = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
-    if off_expert == -1:
-        if not FUSE_SUM_ALL_REDUCE:
-            c_ptrs = (
-                c_ptr + offs_token[:, None] * stride_cm + offs_n[None, :] * stride_cn
-            )
-            c_mask = token_mask[:, None] & (offs_n[None, :] < N)
-            zeros = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=c_ptr.dtype.element_ty)
-            tl.store(c_ptrs, zeros, mask=c_mask)
-        return
+    @property
+    def num_slices(self) -> int:
+        return len(self.widths)
 
-    offs_r = tl.arange(0, BLOCK_SIZE_R).to(tl.int64)
-    rank_mask = offs_r < R
-    a_col = offs_r
-    if GATED_A_HALF > 0:
-        a_col = offs_r + tl.where(pid_n * BLOCK_SIZE_N >= GATED_A_HALF, R, 0)
+    @property
+    def active_width(self) -> int:
+        return sum(self.widths)
 
-    a = tl.load(
-        a_ptr + offs_token[:, None] * stride_am + a_col[None, :] * stride_ar,
-        mask=token_mask[:, None] & rank_mask[None, :],
-        other=0.0,
+    @property
+    def is_uniform_contiguous(self) -> bool:
+        if len(set(self.widths)) != 1:
+            return False
+        expected = SlicedLoraBLayout.contiguous(widths=self.widths, rank=self.rank)
+        return (
+            self.a_offsets == expected.a_offsets
+            and self.b_offsets == expected.b_offsets
+            and self.output_offsets == expected.output_offsets
+        )
+
+
+@dataclass(frozen=True)
+class SlicedLoraBDescriptors:
+    """Graph-stable device metadata for ``DESCRIPTOR_RAGGED``.
+
+    Construct this object during adapter/layout setup, not inside a captured
+    forward. ``tile_prefix`` is specific to ``block_size_n``.
+    """
+
+    layout: SlicedLoraBLayout
+    block_size_n: int
+    total_tiles: int
+    a_offsets: torch.Tensor
+    b_offsets: torch.Tensor
+    output_offsets: torch.Tensor
+    widths: torch.Tensor
+    tile_prefix: torch.Tensor
+
+
+def build_sliced_lora_b_descriptors(
+    layout: SlicedLoraBLayout,
+    *,
+    block_size_n: int,
+    device: torch.device | str,
+) -> SlicedLoraBDescriptors:
+    """Build descriptor tensors outside the graph-captured execution path."""
+    tile_prefix = [0]
+    for width in layout.widths:
+        tile_prefix.append(tile_prefix[-1] + triton.cdiv(width, block_size_n))
+    tensor_kwargs = {"dtype": torch.int32, "device": device}
+    return SlicedLoraBDescriptors(
+        layout=layout,
+        block_size_n=block_size_n,
+        total_tiles=tile_prefix[-1],
+        a_offsets=torch.tensor(layout.a_offsets, **tensor_kwargs),
+        b_offsets=torch.tensor(layout.b_offsets, **tensor_kwargs),
+        output_offsets=torch.tensor(layout.output_offsets, **tensor_kwargs),
+        widths=torch.tensor(layout.widths, **tensor_kwargs),
+        tile_prefix=torch.tensor(tile_prefix, **tensor_kwargs),
     )
-    b = tl.load(
-        b_ptr
-        + off_expert * stride_be
-        + offs_n[None, :] * stride_bn
-        + offs_r[:, None] * stride_br,
-        mask=(offs_n[None, :] < N) & rank_mask[:, None],
-        other=0.0,
-    )
-
-    accumulator = tl.dot(a, b, out_dtype=tl.float32)
-    if MUL_ROUTED_WEIGHT:
-        moe_weight = tl.load(topk_weights_ptr + offs_token, mask=token_mask, other=0.0)
-        accumulator *= moe_weight[:, None]
-
-    if FUSE_SUM_ALL_REDUCE:
-        offs_token_out = offs_token // router_topk
-    else:
-        offs_token_out = offs_token
-    c_ptrs = c_ptr + offs_token_out[:, None] * stride_cm + offs_n[None, :] * stride_cn
-    c_mask = token_mask[:, None] & (offs_n[None, :] < N)
-    if FUSE_SUM_ALL_REDUCE:
-        tl.atomic_add(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
-    else:
-        tl.store(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
 
 
 @triton.jit
-def _moe_lora_expand_add_two_slice_kernel(
+def _sliced_lora_b_expand_add_kernel(
     a_ptr,
     b_ptr,
     c_ptr,
@@ -125,10 +157,14 @@ def _moe_lora_expand_add_two_slice_kernel(
     sorted_token_ids_ptr,
     expert_ids_ptr,
     num_tokens_post_padded_ptr,
-    N,
-    SLICE_N,
+    a_offsets_ptr,
+    b_offsets_ptr,
+    output_offsets_ptr,
+    widths_ptr,
+    tile_prefix_ptr,
     R: tl.constexpr,
     num_valid_tokens,
+    total_slice_tiles,
     stride_am,
     stride_ar,
     stride_be,
@@ -137,42 +173,85 @@ def _moe_lora_expand_add_two_slice_kernel(
     stride_cm,
     stride_cn,
     router_topk: tl.constexpr,
+    SCHEDULE: tl.constexpr,
+    NUM_SLICES: tl.constexpr,
+    UNIFORM_SLICE_N: tl.constexpr,
+    TOTAL_ACTIVE_N: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     FUSE_SUM_ALL_REDUCE: tl.constexpr,
+    NUM_M_BLOCKS: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_R: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
 ):
-    """Gate/up expand with an independent N grid for each output slice."""
+    """One source specialized into flat, uniform-sliced, or ragged schedules."""
     pid = tl.program_id(0)
-    slice_id = tl.program_id(1)
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
-    num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(SLICE_N, BLOCK_SIZE_N)
+    if SCHEDULE == 0:  # ALIGNED_FLAT
+        num_pid_n = tl.cdiv(TOTAL_ACTIVE_N, BLOCK_SIZE_N)
+    elif SCHEDULE == 1:  # UNIFORM_SLICED
+        num_pid_n = tl.cdiv(UNIFORM_SLICE_N, BLOCK_SIZE_N)
+    else:  # DESCRIPTOR_RAGGED
+        num_pid_n = total_slice_tiles
 
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    if GROUP_SIZE_M == 1:
+        pid_m = pid // num_pid_n
+        pid_n = pid % num_pid_n
+    else:
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(NUM_M_BLOCKS - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
 
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
         return
 
+    if SCHEDULE == 0:
+        local_tile_id = pid_n
+        slice_id = (pid_n * BLOCK_SIZE_N) // UNIFORM_SLICE_N
+        a_begin = slice_id * R
+        b_begin = 0
+        output_begin = 0
+        slice_width = TOTAL_ACTIVE_N
+    elif SCHEDULE == 1:
+        local_tile_id = pid_n
+        slice_id = tl.program_id(1)
+        a_begin = slice_id * R
+        b_begin = slice_id * UNIFORM_SLICE_N
+        output_begin = slice_id * UNIFORM_SLICE_N
+        slice_width = UNIFORM_SLICE_N
+    else:
+        global_tile_id = pid_n
+        slice_id = global_tile_id * 0
+        for slice_idx in tl.static_range(1, NUM_SLICES):
+            slice_tile_begin = tl.load(tile_prefix_ptr + slice_idx)
+            slice_id += (global_tile_id >= slice_tile_begin).to(tl.int32)
+
+        tile_begin = tl.load(tile_prefix_ptr + slice_id).to(tl.int64)
+        local_tile_id = global_tile_id - tile_begin
+        a_begin = tl.load(a_offsets_ptr + slice_id).to(tl.int64)
+        b_begin = tl.load(b_offsets_ptr + slice_id).to(tl.int64)
+        output_begin = tl.load(output_offsets_ptr + slice_id).to(tl.int64)
+        slice_width = tl.load(widths_ptr + slice_id).to(tl.int64)
+
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id).to(tl.int64)
     token_mask = offs_token < num_valid_tokens
-    local_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
-    offs_n = slice_id * SLICE_N + local_n
-    output_mask = local_n < SLICE_N
+    local_n = local_tile_id * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+    output_mask = local_n < slice_width
+    offs_b_n = b_begin + local_n
+    offs_output_n = output_begin + local_n
 
     off_expert = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
     if off_expert == -1:
         if not FUSE_SUM_ALL_REDUCE:
             c_ptrs = (
-                c_ptr + offs_token[:, None] * stride_cm + offs_n[None, :] * stride_cn
+                c_ptr
+                + offs_token[:, None] * stride_cm
+                + offs_output_n[None, :] * stride_cn
             )
             c_mask = token_mask[:, None] & output_mask[None, :]
             zeros = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=c_ptr.dtype.element_ty)
@@ -181,16 +260,17 @@ def _moe_lora_expand_add_two_slice_kernel(
 
     offs_r = tl.arange(0, BLOCK_SIZE_R).to(tl.int64)
     rank_mask = offs_r < R
-    a_col = slice_id * R + offs_r
     a = tl.load(
-        a_ptr + offs_token[:, None] * stride_am + a_col[None, :] * stride_ar,
+        a_ptr
+        + offs_token[:, None] * stride_am
+        + (a_begin + offs_r)[None, :] * stride_ar,
         mask=token_mask[:, None] & rank_mask[None, :],
         other=0.0,
     )
     b = tl.load(
         b_ptr
         + off_expert * stride_be
-        + offs_n[None, :] * stride_bn
+        + offs_b_n[None, :] * stride_bn
         + offs_r[:, None] * stride_br,
         mask=output_mask[None, :] & rank_mask[:, None],
         other=0.0,
@@ -205,7 +285,9 @@ def _moe_lora_expand_add_two_slice_kernel(
         offs_token_out = offs_token // router_topk
     else:
         offs_token_out = offs_token
-    c_ptrs = c_ptr + offs_token_out[:, None] * stride_cm + offs_n[None, :] * stride_cn
+    c_ptrs = (
+        c_ptr + offs_token_out[:, None] * stride_cm + offs_output_n[None, :] * stride_cn
+    )
     c_mask = token_mask[:, None] & output_mask[None, :]
     if FUSE_SUM_ALL_REDUCE:
         tl.atomic_add(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
@@ -213,7 +295,7 @@ def _moe_lora_expand_add_two_slice_kernel(
         tl.store(c_ptrs, accumulator.to(c_ptr.dtype.element_ty), mask=c_mask)
 
 
-def _common_launch_args(
+def invoke_sliced_lora_b_expand_add(
     intermediate: torch.Tensor,
     weight: torch.Tensor,
     output: torch.Tensor,
@@ -222,8 +304,54 @@ def _common_launch_args(
     sorted_token_ids: torch.Tensor,
     expert_ids: torch.Tensor,
     num_tokens_post_padded: torch.Tensor,
-) -> tuple:
-    return (
+    config: dict[str, Any],
+    mul_routed_weight: bool,
+    fuse_sum_all_reduce: bool,
+    *,
+    layout: SlicedLoraBLayout,
+    schedule: SlicedLoraBSchedule,
+    descriptors: SlicedLoraBDescriptors | None = None,
+    force_block_size_n: int | None = None,
+) -> None:
+    """Launch one compiled slice schedule for a common-rank LoRA-B layout."""
+    block_m = config["BLOCK_SIZE_M"]
+    block_n = force_block_size_n or config["BLOCK_SIZE_N"]
+    num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], block_m)
+
+    if schedule == SlicedLoraBSchedule.ALIGNED_FLAT:
+        if not layout.is_uniform_contiguous or (
+            layout.num_slices > 1 and layout.widths[0] % block_n != 0
+        ):
+            raise ValueError("flat sliced LoRA-B requires aligned contiguous slices")
+        grid = (num_m_blocks * triton.cdiv(layout.active_width, block_n),)
+        total_slice_tiles = 0
+        descriptor_ptrs = (output, output, output, output, output)
+    elif schedule == SlicedLoraBSchedule.UNIFORM_SLICED:
+        if not layout.is_uniform_contiguous:
+            raise ValueError("uniform sliced LoRA-B requires contiguous equal slices")
+        slice_width = layout.widths[0]
+        grid = (
+            num_m_blocks * triton.cdiv(slice_width, block_n),
+            layout.num_slices,
+        )
+        total_slice_tiles = 0
+        descriptor_ptrs = (output, output, output, output, output)
+    else:
+        if descriptors is None or descriptors.layout != layout:
+            raise ValueError("ragged sliced LoRA-B requires matching descriptors")
+        if descriptors.block_size_n != block_n:
+            raise ValueError("ragged descriptors must match BLOCK_SIZE_N")
+        total_slice_tiles = descriptors.total_tiles
+        grid = (num_m_blocks * total_slice_tiles,)
+        descriptor_ptrs = (
+            descriptors.a_offsets,
+            descriptors.b_offsets,
+            descriptors.output_offsets,
+            descriptors.widths,
+            descriptors.tile_prefix,
+        )
+
+    _sliced_lora_b_expand_add_kernel[grid](
         intermediate,
         weight,
         output,
@@ -231,9 +359,10 @@ def _common_launch_args(
         sorted_token_ids,
         expert_ids,
         num_tokens_post_padded,
-        weight.shape[1],
-        weight.shape[2],
+        *descriptor_ptrs,
+        layout.rank,
         topk_ids.numel(),
+        total_slice_tiles,
         intermediate.stride(0),
         intermediate.stride(1),
         weight.stride(0),
@@ -241,6 +370,20 @@ def _common_launch_args(
         weight.stride(2),
         output.stride(-2),
         output.stride(-1),
+        router_topk=topk_ids.shape[1],
+        SCHEDULE=int(schedule),
+        NUM_SLICES=layout.num_slices,
+        UNIFORM_SLICE_N=layout.widths[0],
+        TOTAL_ACTIVE_N=layout.active_width,
+        MUL_ROUTED_WEIGHT=mul_routed_weight,
+        FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
+        NUM_M_BLOCKS=num_m_blocks,
+        BLOCK_SIZE_M=block_m,
+        BLOCK_SIZE_N=block_n,
+        BLOCK_SIZE_R=max(16, triton.next_power_of_2(layout.rank)),
+        GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
+        num_warps=config.get("num_warps", 4),
+        num_stages=1,
     )
 
 
@@ -262,43 +405,36 @@ def _invoke_flat(
 ) -> None:
     n = weight.shape[1]
     rank = weight.shape[2]
-    block_m = config["BLOCK_SIZE_M"]
+    widths = (n // 2, n // 2) if gated_midpoint else (n,)
+    layout = SlicedLoraBLayout.contiguous(widths=widths, rank=rank)
     block_n = (
         force_block_size_n
         if force_block_size_n is not None
         else (128 if n % 128 == 0 else config["BLOCK_SIZE_N"])
     )
     if gated_midpoint:
-        half = n // 2
-        while block_n > 16 and half % block_n != 0:
+        while block_n > 16 and widths[0] % block_n != 0:
             block_n //= 2
-        if half % block_n != 0:
+        if widths[0] % block_n != 0:
             raise ValueError(
-                f"flat midpoint schedule cannot tile output half {half} with BLOCK_SIZE_N={block_n}"
+                f"flat midpoint schedule cannot tile output half {widths[0]} "
+                f"with BLOCK_SIZE_N={block_n}"
             )
-
-    grid = (triton.cdiv(sorted_token_ids.shape[0], block_m) * triton.cdiv(n, block_n),)
-    _moe_lora_expand_add_flat_kernel[grid](
-        *_common_launch_args(
-            intermediate,
-            weight,
-            output,
-            topk_weights,
-            topk_ids,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-        ),
-        router_topk=topk_ids.shape[1],
-        MUL_ROUTED_WEIGHT=mul_routed_weight,
-        FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
-        BLOCK_SIZE_M=block_m,
-        BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_R=triton.next_power_of_2(rank),
-        GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
-        GATED_A_HALF=n // 2 if gated_midpoint else 0,
-        num_warps=config.get("num_warps", 4),
-        num_stages=1,
+    invoke_sliced_lora_b_expand_add(
+        intermediate,
+        weight,
+        output,
+        topk_weights,
+        topk_ids,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        config,
+        mul_routed_weight,
+        fuse_sum_all_reduce,
+        layout=layout,
+        schedule=SlicedLoraBSchedule.ALIGNED_FLAT,
+        force_block_size_n=block_n,
     )
 
 
@@ -317,20 +453,16 @@ def _invoke_two_slice(
     *,
     force_block_size_n: int | None = None,
 ) -> None:
-    n = weight.shape[1]
-    rank = weight.shape[2]
-    slice_n = n // 2
-    block_m = config["BLOCK_SIZE_M"]
+    slice_n = weight.shape[1] // 2
+    layout = SlicedLoraBLayout.contiguous(
+        widths=(slice_n, slice_n), rank=weight.shape[2]
+    )
     block_n = (
         force_block_size_n
         if force_block_size_n is not None
         else min(64, max(16, triton.next_power_of_2(slice_n)))
     )
-    grid = (
-        triton.cdiv(sorted_token_ids.shape[0], block_m) * triton.cdiv(slice_n, block_n),
-        2,
-    )
-    common = _common_launch_args(
+    invoke_sliced_lora_b_expand_add(
         intermediate,
         weight,
         output,
@@ -339,20 +471,12 @@ def _invoke_two_slice(
         sorted_token_ids,
         expert_ids,
         num_tokens_post_padded,
-    )
-    _moe_lora_expand_add_two_slice_kernel[grid](
-        *common[:8],
-        slice_n,
-        *common[8:],
-        router_topk=topk_ids.shape[1],
-        MUL_ROUTED_WEIGHT=mul_routed_weight,
-        FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
-        BLOCK_SIZE_M=block_m,
-        BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_R=triton.next_power_of_2(rank),
-        GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
-        num_warps=config.get("num_warps", 4),
-        num_stages=1,
+        config,
+        mul_routed_weight,
+        fuse_sum_all_reduce,
+        layout=layout,
+        schedule=SlicedLoraBSchedule.UNIFORM_SLICED,
+        force_block_size_n=block_n,
     )
 
 
@@ -371,15 +495,10 @@ def invoke_moe_lora_expand_add(
     *,
     num_output_slices: int,
 ) -> None:
-    """Launch the direct expand used by ``sgl_lora`` for ranks up to 64.
-
-    Across the tested GB300 rank range, the flat midpoint schedule is the safer
-    static policy when each half is divisible by a 16-column tensor-core tile;
-    the two-slice grid helps only some rank-16 shapes and regresses larger
-    ranks.  It remains the layout-general fallback when the flat schedule
-    cannot satisfy the boundary without a sub-tensor-core tile.
-    """
+    """Compatibility launcher for today's complete gate/up and down layouts."""
     if num_output_slices == 2:
+        if weight.shape[1] % 2 != 0:
+            raise ValueError("complete gate/up LoRA-B requires two equal-width slices")
         if weight.shape[1] % 2 == 0 and (weight.shape[1] // 2) % 16 == 0:
             _invoke_flat(
                 intermediate,
@@ -441,7 +560,7 @@ def invoke_moe_lora_expand_add_flat_for_benchmark(
     *,
     force_block_size_n: int | None = None,
 ) -> None:
-    """Launch the old midpoint/divisor schedule for controlled A/B tests."""
+    """Launch the midpoint-compatible flat schedule for controlled A/B tests."""
     _invoke_flat(
         intermediate,
         weight,
@@ -474,7 +593,7 @@ def invoke_moe_lora_expand_add_sliced_for_benchmark(
     *,
     force_block_size_n: int | None = None,
 ) -> None:
-    """Launch the two-slice schedule for controlled A/B tests."""
+    """Launch the uniform two-slice schedule for controlled A/B tests."""
     _invoke_two_slice(
         intermediate,
         weight,
@@ -492,7 +611,12 @@ def invoke_moe_lora_expand_add_sliced_for_benchmark(
 
 
 __all__ = [
+    "SlicedLoraBDescriptors",
+    "SlicedLoraBLayout",
+    "SlicedLoraBSchedule",
+    "build_sliced_lora_b_descriptors",
     "invoke_moe_lora_expand_add",
     "invoke_moe_lora_expand_add_flat_for_benchmark",
     "invoke_moe_lora_expand_add_sliced_for_benchmark",
+    "invoke_sliced_lora_b_expand_add",
 ]
