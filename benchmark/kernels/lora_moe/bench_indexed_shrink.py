@@ -540,7 +540,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.scope == "O0" and args.inner_iterations != 1:
         raise ValueError("route-inclusive O0 requires --inner-iterations 1")
     fixture = _build_fixture(case, args.site)
-    reference = _torch_reference(fixture)
+    reference = _torch_reference(fixture).view(
+        fixture.topk_ids.shape[0], fixture.topk_ids.shape[1], -1
+    )
 
     configs = INDEXED_CONFIGS if args.all_configs else (_CONFIGS_BY_KEY[args.config],)
     results = []
