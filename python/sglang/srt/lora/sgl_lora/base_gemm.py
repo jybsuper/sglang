@@ -697,7 +697,6 @@ class DeepGemmFp8BaseGemm(_MaskedBaseGemm):
             column_major_scales=packed_ue8m0,
             scale_tma_aligned=packed_ue8m0,
             scale_ue8m0=packed_ue8m0,
-            enable_v2=True,
         )
         if self._deep_gemm.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             # Keep this conversion explicit even when the quantizer returned a
