@@ -28,10 +28,11 @@ import platform
 import socket
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -63,6 +64,190 @@ TARGETS = (
     "down_ab",
 )
 VARIANTS = ("production", "direct", "generic")
+B_CONFIG_SELECTORS = ("logical-t", "flat-tk", "explicit")
+
+
+@dataclass(frozen=True, slots=True)
+class ExplicitBConfig:
+    block_m: int = 64
+    block_n: int = 64
+    block_k: int = 64
+    group_size_m: int = 1
+    num_warps: int = 4
+    num_stages: int = 4
+
+    def kernel_config(self) -> dict[str, int]:
+        return {
+            "BLOCK_SIZE_M": self.block_m,
+            "BLOCK_SIZE_N": self.block_n,
+            "BLOCK_SIZE_K": self.block_k,
+            "GROUP_SIZE_M": self.group_size_m,
+            "num_warps": self.num_warps,
+            "num_stages": self.num_stages,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BConfigSelection:
+    selector: str
+    lookup_m: int | None
+    resolved_config: dict[str, Any]
+    resolution_status: str
+    resolution_error: str | None
+    held_override: dict[str, Any] | None
+
+
+def _local_b_fallback(merged_shape: tuple[int, ...]) -> dict[str, int]:
+    _, n_dim, k_dim = merged_shape
+    default_block_k = 256 if k_dim >= 1024 else 64 if k_dim >= 64 else max(16, k_dim)
+    return {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": min(64, max(16, n_dim)),
+        "BLOCK_SIZE_K": min(default_block_k, max(16, k_dim)),
+        "GROUP_SIZE_M": 1,
+        "num_warps": 4,
+        "num_stages": 4,
+    }
+
+
+def _resolve_production_b_config(
+    merged_shape: tuple[int, ...], dtype: torch.dtype, lookup_m: int
+) -> dict[str, Any]:
+    from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_config import (
+        get_config_dtype_str,
+        try_get_optimal_moe_config,
+    )
+
+    return dict(
+        try_get_optimal_moe_config(
+            merged_shape,
+            merged_shape,
+            1,
+            get_config_dtype_str(dtype=dtype),
+            lookup_m,
+        )
+    )
+
+
+def _select_b_config(
+    fixture: SiteFixture, selector: str, explicit: ExplicitBConfig
+) -> BConfigSelection:
+    if selector not in B_CONFIG_SELECTORS:
+        raise ValueError(f"unknown B config selector {selector!r}")
+    weight = fixture.lora_b
+    merged_shape = (weight.shape[0] * weight.shape[1], *weight.shape[2:])
+    logical_m = fixture.case.t_local
+    flat_pair_m = fixture.topk_ids.numel()
+    if selector == "explicit":
+        resolved = explicit.kernel_config()
+        return BConfigSelection(
+            selector=selector,
+            lookup_m=None,
+            resolved_config=resolved,
+            resolution_status="benchmark_explicit",
+            resolution_error=None,
+            held_override=resolved,
+        )
+
+    lookup_m = logical_m if selector == "logical-t" else flat_pair_m
+    try:
+        resolved = _resolve_production_b_config(
+            merged_shape, fixture.hidden_states.dtype, lookup_m
+        )
+        status = "production_resolver"
+        error = None
+    except ValueError as exc:
+        resolved = _local_b_fallback(merged_shape)
+        status = "local_fallback_after_value_error"
+        error = f"{type(exc).__name__}: {exc}"
+    return BConfigSelection(
+        selector=selector,
+        lookup_m=lookup_m,
+        resolved_config=resolved,
+        resolution_status=status,
+        resolution_error=error,
+        held_override=resolved if selector == "flat-tk" else None,
+    )
+
+
+@contextmanager
+def _exit_context_normally(manager) -> Iterator[None]:
+    """Resume a generator context normally even when the body raises."""
+    manager.__enter__()
+    try:
+        yield
+    finally:
+        manager.__exit__(None, None, None)
+
+
+@contextmanager
+def _b_config_override(config: dict[str, Any] | None) -> Iterator[None]:
+    if config is None:
+        yield
+        return
+    from sglang.srt.layers.moe.moe_runner.triton_utils import override_config
+
+    # Production's generator does not restore on exceptional `throw()`. Force
+    # a normal resume in our outer finally without changing that shared utility.
+    with _exit_context_normally(override_config(config)):
+        yield
+
+
+def _next_power_of_two(value: int) -> int:
+    return 1 << (value - 1).bit_length()
+
+
+def _effective_b_config(
+    fixture: SiteFixture, *, direct: bool, resolved: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Describe the launch constants actually consumed by the selected B path."""
+    if resolved is None:
+        return None
+    if not direct:
+        return {"kernel_family": "generic_fused_moe", **resolved}
+
+    n = fixture.lora_b.shape[2]
+    rank = fixture.lora_b.shape[3]
+    block_n_from_config = resolved["BLOCK_SIZE_N"]
+    block_n_uses_config = True
+    if fixture.num_slices == 2:
+        slice_n = n // 2
+        if n % 2 == 0 and slice_n % 16 == 0:
+            schedule = "aligned_flat"
+            if n % 128 == 0:
+                block_n = 128
+                block_n_uses_config = False
+            else:
+                block_n = block_n_from_config
+            while block_n > 16 and slice_n % block_n != 0:
+                block_n //= 2
+        else:
+            schedule = "two_slice"
+            block_n = min(64, max(16, _next_power_of_two(slice_n)))
+            block_n_uses_config = False
+    else:
+        schedule = "flat"
+        if n % 128 == 0:
+            block_n = 128
+            block_n_uses_config = False
+        else:
+            block_n = block_n_from_config
+
+    ignored_fields = ["BLOCK_SIZE_K", "num_stages"]
+    if not block_n_uses_config:
+        ignored_fields.append("BLOCK_SIZE_N")
+
+    return {
+        "kernel_family": "direct_lora_b",
+        "schedule": schedule,
+        "BLOCK_SIZE_M": resolved["BLOCK_SIZE_M"],
+        "BLOCK_SIZE_N": block_n,
+        "BLOCK_SIZE_R": _next_power_of_two(rank),
+        "GROUP_SIZE_M": resolved.get("GROUP_SIZE_M", 1),
+        "num_warps": resolved.get("num_warps", 4),
+        "num_stages": 1,
+        "resolved_fields_not_consumed": ignored_fields,
+    }
 
 
 def _smoke_case(device: str) -> MoeLoraBenchCase:
@@ -222,15 +407,22 @@ class SiteFixture:
         if self.base_output is not None:
             self.output.copy_(self.base_output)
 
-    def routing_metrics(self) -> list[dict[str, int]]:
+    def routing_metrics(self) -> list[dict[str, int | bool]]:
         metrics = []
-        for value in self.routing_cache.values():
+        for key, value in self.routing_cache.items():
+            num_experts, shared_outer, block_m = key
             sorted_token_ids, expert_ids, num_tokens_post_padded, _ = value
+            post_padding_pairs = int(num_tokens_post_padded.item())
             metrics.append(
                 {
+                    "num_experts": num_experts,
+                    "shared_outer": shared_outer,
+                    "block_m": block_m,
                     "allocated_pair_slots": sorted_token_ids.numel(),
                     "allocated_expert_blocks": expert_ids.numel(),
-                    "actual_pair_slots": int(num_tokens_post_padded.item()),
+                    "actual_pair_slots": post_padding_pairs,
+                    "post_padding_pair_slots": post_padding_pairs,
+                    "padding_pair_slots": post_padding_pairs - self.topk_ids.numel(),
                 }
             )
         return metrics
@@ -342,6 +534,14 @@ def _resolve_direct(variant: str, rank: int) -> bool:
     return rank <= 64
 
 
+def _target_stage(target: str) -> str:
+    if target == "routing":
+        return "routing"
+    if target.endswith("_ab"):
+        return "all"
+    return "expand" if target.endswith("_b") else "shrink"
+
+
 @dataclass(slots=True)
 class PreparedOp:
     fixture: SiteFixture
@@ -357,7 +557,6 @@ def _build_op(
 ) -> PreparedOp:
     direct = _resolve_direct(variant, fixture.case.adapters.rank)
     is_b = target.endswith("_b")
-    is_ab = target.endswith("_ab")
 
     # Seed both A and B route plans, then compile the A producer needed by a
     # B-only target. None of this is part of K0 timing.
@@ -366,18 +565,14 @@ def _build_op(
         fixture.invoke("shrink", direct=direct)
     torch.cuda.synchronize()
 
-    if target == "routing":
-        stage = "routing"
-    elif is_ab:
-        stage = "all"
-    elif is_b:
-        stage = "expand"
-    else:
-        stage = "shrink"
+    stage = _target_stage(target)
 
     if scope == "O0":
-        if target not in ("routing", "gate_ab", "down_ab"):
-            raise ValueError("O0 supports routing or a complete A+B operator")
+        if target not in ("routing", "gate_b", "gate_ab", "down_b", "down_ab"):
+            raise ValueError(
+                "O0 supports routing, route-inclusive B with precomputed A, "
+                "or a complete A+B operator"
+            )
 
         def launch() -> None:
             fixture.routing_cache.clear()
@@ -401,33 +596,54 @@ def _build_op(
     )
 
 
-def _check_operator(op: PreparedOp) -> None:
-    """Check repeatability, direct-vs-generic, and staged-vs-combined paths."""
+def _clone_operator_value(fixture: SiteFixture, target: str) -> torch.Tensor | None:
+    if target == "routing":
+        return None
+    value = fixture.intermediate if target.endswith("_a") else fixture.output
+    return value.clone()
+
+
+def _production_config_reference(
+    fixture: SiteFixture, *, target: str, variant: str
+) -> torch.Tensor | None:
+    """Compute a safe reference before installing an experimental B config."""
+    direct = _resolve_direct(variant, fixture.case.adapters.rank)
+    fixture.routing_cache.clear()
+    fixture.invoke("routing", direct=direct)
+    if target.endswith("_b"):
+        fixture.invoke("shrink", direct=direct)
+
+    if target != "routing":
+        fixture.reset_output()
+        fixture.invoke(_target_stage(target), direct=direct)
+    torch.cuda.synchronize()
+    reference = _clone_operator_value(fixture, target)
+    fixture.routing_cache.clear()
+    return reference
+
+
+def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
+    """Compare only the selected B family with a production-config reference."""
     fixture = op.fixture
     if op.target == "routing":
+        op.launch()
+        torch.cuda.synchronize()
         return
 
-    fixture.reset_output()
-    fixture.invoke("shrink", direct=op.direct)
-    if op.target.endswith("_a"):
-        actual = fixture.intermediate.clone()
-        fixture.invoke("shrink", direct=op.direct)
-        torch.testing.assert_close(fixture.intermediate, actual, rtol=3e-2, atol=3e-2)
-        return
-
-    fixture.invoke("expand", direct=op.direct)
-    staged = fixture.output.clone()
-    fixture.reset_output()
-    fixture.invoke("shrink", direct=op.direct)
-    fixture.invoke("expand", direct=not op.direct)
-    alternate = fixture.output.clone()
-    torch.testing.assert_close(staged, alternate, rtol=6e-2, atol=6e-2)
-
-    if op.target.endswith("_ab"):
+    def run_once() -> torch.Tensor:
         fixture.reset_output()
-        fixture.invoke("all", direct=op.direct)
-        combined = fixture.output.clone()
-        torch.testing.assert_close(staged, combined, rtol=6e-2, atol=6e-2)
+        op.launch()
+        torch.cuda.synchronize()
+        value = _clone_operator_value(fixture, op.target)
+        assert value is not None
+        return value
+
+    first = run_once()
+    second = run_once()
+    rtol = atol = 3e-2 if op.target.endswith("_a") else 6e-2
+    assert reference is not None
+    torch.testing.assert_close(first, reference, rtol=rtol, atol=atol)
+    torch.testing.assert_close(second, first, rtol=rtol, atol=atol)
 
 
 def _case_summary(case: MoeLoraBenchCase) -> dict[str, object]:
@@ -464,6 +680,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--case-id")
     parser.add_argument("--target", choices=TARGETS, default="gate_ab")
     parser.add_argument("--variant", choices=VARIANTS, default="production")
+    parser.add_argument(
+        "--b-config-selector",
+        choices=B_CONFIG_SELECTORS,
+        default="logical-t",
+        help=(
+            "LoRA-B config policy: current logical T lookup, alternate flattened "
+            "T*K lookup, or benchmark-owned explicit fields"
+        ),
+    )
+    for name, choices, default in (
+        ("block-m", (16, 32, 64, 128), 64),
+        ("block-n", (16, 32, 64, 128, 256, 512), 64),
+        ("block-k", (16, 32, 64, 128, 256), 64),
+        ("group-size-m", (1, 2, 4, 8, 16, 32), 1),
+        ("num-warps", (2, 4, 8), 4),
+        ("num-stages", (1, 2, 3, 4, 5), 4),
+    ):
+        parser.add_argument(
+            f"--b-{name}",
+            type=int,
+            choices=choices,
+            default=default,
+            help="benchmark-owned explicit B config field",
+        )
     parser.add_argument("--scope", choices=("K0", "O0"), default="K0")
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
@@ -476,31 +716,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    if args.list_cases:
-        device = args.device if args.device != "auto" else "h200"
-        _list_cases(device)
-        return 0
-    if not torch.cuda.is_available():
-        raise RuntimeError("This benchmark requires CUDA")
-    device = _detect_device(args.device)
-    case = _select_case(device, args.case_id)
-    if args.inner_iterations is None:
-        args.inner_iterations = 1 if args.scope == "O0" else 10
-    if args.scope == "O0" and args.execution == "cuda_graph":
-        raise ValueError("route-inclusive O0 is eager-only in this first checkpoint")
-    if args.scope == "O0" and args.inner_iterations != 1:
-        raise ValueError("route-inclusive O0 requires --inner-iterations 1")
-
-    site = "down" if args.target.startswith("down") else "gate"
-    fixture = _build_fixture(case, site)
+def _execute_benchmark(
+    args: argparse.Namespace,
+    case: MoeLoraBenchCase,
+    fixture: SiteFixture,
+    selection: BConfigSelection,
+    reference: torch.Tensor | None,
+) -> dict[str, object]:
     op = _build_op(fixture, target=args.target, variant=args.variant, scope=args.scope)
-    op.launch()
+    if args.skip_check:
+        op.launch()
+    else:
+        _check_operator(op, reference)
     torch.cuda.synchronize()
-    if not args.skip_check:
-        _check_operator(op)
-        torch.cuda.synchronize()
 
     run_config = RunConfig(
         mode=args.mode,
@@ -522,11 +750,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         "scope": args.scope,
         "requested_variant": args.variant,
         "effective_expand": "direct" if op.direct else "generic",
-        "route_inclusion": "prebuilt" if args.scope == "K0" else "route_inclusive",
+        "b_config": {
+            "requested_selector": selection.selector,
+            "site": fixture.site,
+            "lookup_m": selection.lookup_m,
+            "resolution_status": selection.resolution_status,
+            "resolution_error": selection.resolution_error,
+            "held_override": selection.held_override is not None,
+            "resolved_config": selection.resolved_config,
+            "effective_config": _effective_b_config(
+                fixture, direct=op.direct, resolved=selection.resolved_config
+            ),
+        },
+        "route_inclusion": (
+            "prebuilt"
+            if args.scope == "K0"
+            else (
+                "route_inclusive_b_with_precomputed_a"
+                if args.target.endswith("_b")
+                else "route_inclusive"
+            )
+        ),
         "cache_measurement": (
             "single_plan_diagnostic"
             if args.scope == "K0"
-            else "producer_realistic_route_rebuild"
+            else (
+                "b_route_rebuild_with_fixed_a_intermediate"
+                if args.target.endswith("_b")
+                else "producer_realistic_route_rebuild"
+            )
         ),
         "factor_shapes": {
             "a": list(fixture.lora_a.shape),
@@ -540,7 +792,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "valid_pairs": fixture.topk_ids.numel(),
             "experts_hit": int(torch.unique(fixture.topk_ids).numel()),
             "virtual_expert_capacity": (case.e_local * case.adapters.l_capacity),
-            "plans": fixture.routing_metrics(),
         },
     }
 
@@ -563,7 +814,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(
             f"{case.case_id} {args.scope}/{args.target} "
-            f"{result['effective_expand']} {args.execution}: "
+            f"{result['effective_expand']} B={selection.selector} {args.execution}: "
             f"p50={timing.p50_us:.3f} us "
             f"p20/p80={timing.p20_us:.3f}/{timing.p80_us:.3f} us"
         )
@@ -572,7 +823,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             op.before_sample()
         label = (
             f"sgl_lora_moe::{args.scope}::{args.target}::{case.case_id}::"
-            f"{result['effective_expand']}::{args.execution}::pdl=auto"
+            f"{result['effective_expand']}::B={selection.selector}::"
+            f"{args.execution}::pdl=auto"
         )
         with cuda_profile_range(label):
             for _ in range(run_config.profile_iterations):
@@ -583,6 +835,51 @@ def main(argv: Sequence[str] | None = None) -> int:
             "iterations": run_config.profile_iterations,
         }
         print(f"captured {label}")
+
+    result["routing"]["plans"] = fixture.routing_metrics()
+    return result
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.list_cases:
+        device = args.device if args.device != "auto" else "h200"
+        _list_cases(device)
+        return 0
+    if not torch.cuda.is_available():
+        raise RuntimeError("This benchmark requires CUDA")
+    device = _detect_device(args.device)
+    case = _select_case(device, args.case_id)
+    if args.inner_iterations is None:
+        args.inner_iterations = 1 if args.scope == "O0" else 10
+    if args.scope == "O0" and args.execution == "cuda_graph":
+        raise ValueError("route-inclusive O0 is eager-only")
+    if args.scope == "O0" and args.inner_iterations != 1:
+        raise ValueError("route-inclusive O0 requires --inner-iterations 1")
+
+    site = "down" if args.target.startswith("down") else "gate"
+    fixture = _build_fixture(case, site)
+    explicit = ExplicitBConfig(
+        block_m=args.b_block_m,
+        block_n=args.b_block_n,
+        block_k=args.b_block_k,
+        group_size_m=args.b_group_size_m,
+        num_warps=args.b_num_warps,
+        num_stages=args.b_num_stages,
+    )
+    reference = (
+        None
+        if args.skip_check
+        else _production_config_reference(
+            fixture, target=args.target, variant=args.variant
+        )
+    )
+    selection = _select_b_config(fixture, args.b_config_selector, explicit)
+    # The production reference left only compiled kernels behind. Per-config
+    # routing starts from an empty cache under the selected held override.
+    fixture.routing_cache.clear()
+    with _b_config_override(selection.held_override):
+        result = _execute_benchmark(args, case, fixture, selection, reference)
 
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
