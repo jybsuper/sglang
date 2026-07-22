@@ -5,12 +5,23 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import torch
 
 from sglang.srt.arg_groups.overrides import _moe_runner_fusion_disable
+from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
 from sglang.srt.layers.moe.utils import MoeRunnerBackend
 from sglang.srt.lora.layers import FusedMoEWithLoRA
-from sglang.srt.lora.sgl_lora.lora_layer import _use_stock_base_path
+from sglang.srt.lora.sgl_lora.lora_layer import (
+    _effective_sgl_lora_runner_config,
+    _fp8_resident_scale_abi_violations,
+    _phase1a_contract_violations,
+    _use_stock_base_path,
+    build_sgl_lora_quant_info,
+    dispatch_sgl_lora_moe,
+    validate_sgl_lora_factor_dtypes,
+)
 from sglang.srt.model_executor.runner_utils.capture_mode import (
     capture_lora_variant,
     get_capture_lora_variant,
@@ -23,6 +34,148 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestSglLoraExecutionSelection(unittest.TestCase):
+    def test_topk_fused_routed_scale_is_not_applied_twice(self):
+        config = MoeRunnerConfig(routed_scaling_factor=1.7)
+        base_layer = SimpleNamespace(
+            moe_runner_config=config,
+            should_fuse_routed_scaling_factor_in_topk=True,
+        )
+        effective = _effective_sgl_lora_runner_config(base_layer)
+        self.assertEqual(effective.routed_scaling_factor, 1.0)
+        self.assertEqual(config.routed_scaling_factor, 1.7)
+
+        base_layer.should_fuse_routed_scaling_factor_in_topk = False
+        self.assertIs(_effective_sgl_lora_runner_config(base_layer), config)
+
+    def test_blackwell_fp8_requires_resident_packed_scale_abi(self):
+        unpacked = torch.ones((1, 1), dtype=torch.float32)
+        packed = torch.ones((1, 1), dtype=torch.int32)
+        packed.format_ue8m0 = True
+
+        self.assertEqual(
+            _fp8_resident_scale_abi_violations(
+                unpacked, unpacked, requires_packed_ue8m0=False
+            ),
+            [],
+        )
+        self.assertEqual(
+            len(
+                _fp8_resident_scale_abi_violations(
+                    unpacked, packed, requires_packed_ue8m0=True
+                )
+            ),
+            1,
+        )
+        self.assertEqual(
+            _fp8_resident_scale_abi_violations(
+                packed, packed, requires_packed_ue8m0=True
+            ),
+            [],
+        )
+
+    def test_lora_factor_dtype_is_validated_when_pool_binds(self):
+        contract = SimpleNamespace(lora_delta_dtype=torch.bfloat16)
+        validate_sgl_lora_factor_dtypes(
+            contract,
+            gate_up_lora_a_weights=torch.empty(1, dtype=torch.bfloat16),
+            gate_up_lora_b_weights=(torch.empty(1, dtype=torch.bfloat16),),
+        )
+        with self.assertRaisesRegex(TypeError, "gate_up_lora_a_weights"):
+            validate_sgl_lora_factor_dtypes(
+                contract,
+                gate_up_lora_a_weights=torch.empty(1, dtype=torch.float32),
+            )
+
+    def test_up_gate_resident_bf16_layout_is_rejected(self):
+        from sglang.srt.layers.quantization.unquant import UnquantizedFusedMoEMethod
+
+        quant_method = UnquantizedFusedMoEMethod()
+        quant_method.use_flashinfer_cutlass = True
+        base_layer = SimpleNamespace(quant_method=quant_method)
+        with self.assertRaisesRegex(NotImplementedError, r"\[Up,Gate\]"):
+            build_sgl_lora_quant_info(base_layer)
+
+    def test_nonstandard_dispatcher_is_rejected_at_attach_time(self):
+        config = SimpleNamespace(
+            activation="silu",
+            is_gated=True,
+            gemm1_alpha=None,
+            gemm1_clamp_limit=None,
+            swiglu_limit=None,
+            apply_router_weight_on_input=False,
+            no_combine=False,
+            use_tp_all_gather_activation=False,
+        )
+        violations = _phase1a_contract_violations(
+            SimpleNamespace(moe_runner_config=config, dispatcher=object())
+        )
+        self.assertTrue(
+            any("Standard dispatch/combine ABI" in item for item in violations)
+        )
+
+    def test_no_adapter_path_uses_resident_quant_method(self):
+        from sglang.srt.layers.moe.token_dispatcher.standard import (
+            StandardCombineInput,
+        )
+
+        expected = StandardCombineInput(
+            hidden_states=torch.ones((2, 4), dtype=torch.bfloat16)
+        )
+        dispatch_output = object()
+        quant_method = SimpleNamespace(apply=Mock(return_value=expected))
+        base_layer = SimpleNamespace(quant_method=quant_method)
+        wrapper = SimpleNamespace(base_layer=base_layer)
+        lora_info = SimpleNamespace(has_active_lora=False)
+
+        with patch(
+            "sglang.srt.model_executor.runner_utils.capture_mode.get_is_capture_mode",
+            return_value=False,
+        ):
+            actual = dispatch_sgl_lora_moe(dispatch_output, wrapper, lora_info)
+
+        self.assertIs(actual, expected)
+        quant_method.apply.assert_called_once_with(
+            layer=base_layer,
+            dispatch_output=dispatch_output,
+        )
+
+    def test_no_adapter_path_honors_explicit_output_dtype(self):
+        from sglang.srt.layers.moe.token_dispatcher.standard import (
+            StandardCombineInput,
+        )
+
+        resident = StandardCombineInput(
+            hidden_states=torch.ones((2, 4), dtype=torch.bfloat16)
+        )
+        base_layer = SimpleNamespace(
+            quant_method=SimpleNamespace(apply=Mock(return_value=resident))
+        )
+        wrapper = SimpleNamespace(base_layer=base_layer)
+        lora_info = SimpleNamespace(has_active_lora=False)
+
+        with patch(
+            "sglang.srt.model_executor.runner_utils.capture_mode.get_is_capture_mode",
+            return_value=False,
+        ):
+            actual = dispatch_sgl_lora_moe(
+                object(), wrapper, lora_info, output_dtype=torch.float32
+            )
+
+        self.assertEqual(actual.hidden_states.dtype, torch.float32)
+        torch.testing.assert_close(
+            actual.hidden_states, resident.hidden_states.float(), rtol=0, atol=0
+        )
+
+    def test_static_activation_fp8_is_rejected(self):
+        from sglang.srt.layers.quantization.fp8 import Fp8MoEMethod
+
+        quant_method = object.__new__(Fp8MoEMethod)
+        quant_method.with_bias = False
+        quant_method.is_fp4_expert = False
+        quant_method.quant_config = SimpleNamespace(activation_scheme="static")
+        with self.assertRaisesRegex(NotImplementedError, "static-activation FP8"):
+            build_sgl_lora_quant_info(SimpleNamespace(quant_method=quant_method))
+
     def test_decode_graph_variants_are_scoped_to_sgl_lora(self):
         ordinary_decode = SimpleNamespace(is_none=lambda: True)
         speculative = SimpleNamespace(is_none=lambda: False)

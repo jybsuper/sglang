@@ -12,6 +12,8 @@ Dispatch routes per batch:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 
 from sglang.srt.lora.sgl_lora.quant_info import (
@@ -38,6 +40,14 @@ def _phase1a_contract_violations(base_layer) -> list[str]:
     """
     cfg = base_layer.moe_runner_config
     violations = []
+
+    from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatcher
+
+    if not isinstance(base_layer.dispatcher, StandardDispatcher):
+        violations.append(
+            "dispatcher must use the Standard dispatch/combine ABI "
+            f"(got {type(base_layer.dispatcher).__name__})"
+        )
 
     if cfg.activation != "silu" or not cfg.is_gated:
         violations.append(
@@ -92,6 +102,53 @@ def _canonical_weight_violations(
             f"(got w13={tuple(w13.shape)}, w2={tuple(w2.shape)})"
         )
     return violations
+
+
+def _fp8_resident_scale_abi_violations(
+    w13_scale: torch.Tensor,
+    w2_scale: torch.Tensor,
+    *,
+    requires_packed_ue8m0: bool,
+) -> list[str]:
+    """Validate the load-time weight-scale representation borrowed by SGL."""
+    if not requires_packed_ue8m0:
+        return []
+    violations = []
+    for name, scale in (("w13", w13_scale), ("w2", w2_scale)):
+        if scale.dtype != torch.int32 or not getattr(scale, "format_ue8m0", False):
+            violations.append(
+                f"{name} scale is not resident packed UE8M0 "
+                f"(dtype={scale.dtype}, format_ue8m0="
+                f"{getattr(scale, 'format_ue8m0', False)})"
+            )
+    return violations
+
+
+def _effective_sgl_lora_runner_config(base_layer):
+    """Return the post-topk scaling contract consumed by SGL stages."""
+    cfg = base_layer.moe_runner_config
+    if not base_layer.should_fuse_routed_scaling_factor_in_topk:
+        return cfg
+    # TopK already multiplied its weights by the routed scale.  Base finalize
+    # and down LoRA must therefore consume a neutral factor or they would apply
+    # it a second time.
+    return replace(cfg, routed_scaling_factor=1.0)
+
+
+def validate_sgl_lora_factor_dtypes(contract, **factor_groups) -> None:
+    """Validate persistent pool factors once when a layer binds its buffers."""
+    for factor_name, factor_or_factors in factor_groups.items():
+        factors = (
+            factor_or_factors
+            if isinstance(factor_or_factors, (tuple, list))
+            else (factor_or_factors,)
+        )
+        for factor in factors:
+            if factor.dtype != contract.lora_delta_dtype:
+                raise TypeError(
+                    f"sgl_lora requires {contract.lora_delta_dtype} "
+                    f"{factor_name}, got {factor.dtype}"
+                )
 
 
 def _from_marlin_quant_info(base_layer, quant_info) -> SglLoraMarlinQuantInfo:
@@ -158,6 +215,11 @@ def build_sgl_lora_quant_info(base_layer) -> SglLoraQuantInfo:
             raise NotImplementedError(
                 "BlockMajorK TRT-LLM BF16 weights do not expose the LoRA activation seam"
             )
+        if quant_method.load_up_proj_weight_first:
+            raise NotImplementedError(
+                "resident BF16 W13 stores [Up,Gate], but the current sgl_lora "
+                "provider requires canonical [Gate,Up]"
+            )
         if quant_method.with_bias:
             raise NotImplementedError("BF16 expert bias is not supported")
         w13, w2 = base_layer.w13_weight, base_layer.w2_weight
@@ -180,6 +242,12 @@ def build_sgl_lora_quant_info(base_layer) -> SglLoraQuantInfo:
         if quant_method.is_fp4_expert:
             raise NotImplementedError(
                 "FP4-expert tensors carried by Fp8MoEMethod require a distinct recipe"
+            )
+        if quant_method.quant_config.activation_scheme != "dynamic":
+            raise NotImplementedError(
+                "static-activation FP8 checkpoints require resident input scales; "
+                "the current sgl_lora FP8 provider supports dynamic activation "
+                "quantization only"
             )
         w13, w2 = base_layer.w13_weight, base_layer.w2_weight
         violations = _canonical_weight_violations(
@@ -211,6 +279,18 @@ def build_sgl_lora_quant_info(base_layer) -> SglLoraQuantInfo:
             )
         if block_shape is None:
             raise NotImplementedError("FP8 provider requires an explicit block shape")
+        from sglang.srt.layers import deep_gemm_wrapper
+
+        scale_violations = _fp8_resident_scale_abi_violations(
+            w13_scale,
+            w2_scale,
+            requires_packed_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+        )
+        if scale_violations:
+            raise NotImplementedError(
+                "Blackwell DeepGEMM FP8 requires weights/scales prepared by a "
+                "resident DeepGEMM runner; " + "; ".join(scale_violations)
+            )
         return SglLoraFp8QuantInfo(
             w13_weight=w13,
             w2_weight=w2,
@@ -302,6 +382,7 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
         )
 
     cfg = base_layer.moe_runner_config
+    layer._sgl_lora_runner_config = _effective_sgl_lora_runner_config(base_layer)
     layer._lora_runner = None
     layer._quant_info = build_sgl_lora_quant_info(base_layer)
     # Every MoE layer executes sequentially through one backend.  Sharing the
@@ -343,17 +424,6 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
                 layer._sgl_lora_base_gemm.lora_expert_id_maps[
                     topology.num_factor_experts
                 ] = build_routed_expert_id_map(topology, device=device)
-    # Kept for canonical BF16 no-adapter dispatch. Quant providers use
-    # quant_method.apply so the stock path retains its selected physical
-    # backend.
-    get_triton_quant_info = (
-        getattr(base_layer.quant_method, "get_triton_quant_info", None)
-        if isinstance(layer._quant_info, SglLoraBf16QuantInfo)
-        else None
-    )
-    layer._sgl_lora_triton_qi = (
-        get_triton_quant_info(base_layer) if callable(get_triton_quant_info) else None
-    )
 
 
 def dispatch_sgl_lora_moe(
@@ -383,24 +453,18 @@ def dispatch_sgl_lora_moe(
         capture_variant=capture_variant,
     )
     if use_stock_base:
-        # Preserve the model's resident no-LoRA implementation. Canonical BF16
-        # retains its established Triton control; packed quantized providers
-        # must go through quant_method.apply rather than a fabricated Triton
-        # payload or a provider-private layout conversion.
-        if wrapper._sgl_lora_triton_qi is not None:
-            from sglang.srt.layers.moe.moe_runner.triton import (
-                fused_experts_none_to_triton,
-            )
-
-            return fused_experts_none_to_triton(
-                dispatch_output,
-                wrapper._sgl_lora_triton_qi,
-                base_layer.moe_runner_config,
-            )
-        return base_layer.quant_method.apply(
+        # Preserve the model's resident no-LoRA implementation and physical
+        # weight representation.  This is also the fixed topology captured by
+        # the ``nolora`` CUDA-graph family.
+        result = base_layer.quant_method.apply(
             layer=base_layer,
             dispatch_output=dispatch_output,
         )
+        if output_dtype is not None and result.hidden_states.dtype != output_dtype:
+            # Keep the public LoRA layer output contract independent of whether
+            # this replay selected the active-LoRA or resident no-LoRA graph.
+            return type(result)(hidden_states=result.hidden_states.to(output_dtype))
+        return result
 
     plan = build_moe_lora_execution_plan(
         phase=lora_info.forward_phase,
@@ -422,7 +486,7 @@ def dispatch_sgl_lora_moe(
     return run_sgl_lora_moe_plan(
         dispatch_output,
         wrapper._quant_info,
-        base_layer.moe_runner_config,
+        wrapper._sgl_lora_runner_config,
         lora_info,
         wrapper._sgl_lora_base_gemm,
         plan,
