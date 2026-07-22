@@ -1,0 +1,60 @@
+D0 two-node GB300 topology evidence
+===================================
+
+Physical rank placement:
+  rank 0: rdx-gb300-r01-c012.rdx.local
+  rank 1: rdx-gb300-r01-c012.rdx.local
+  rank 2: rdx-gb300-r01-c012.rdx.local
+  rank 3: rdx-gb300-r01-c012.rdx.local
+  rank 4: rdx-gb300-r01-c018.rdx.local
+  rank 5: rdx-gb300-r01-c018.rdx.local
+  rank 6: rdx-gb300-r01-c018.rdx.local
+  rank 7: rdx-gb300-r01-c018.rdx.local
+
+Rank-0 SGL groups:
+  moe_dp: [0, 4]
+  moe_ep: [0, 2]
+  moe_tp: [0, 1]
+  tp: [0, 1, 2, 3, 4, 5, 6, 7]
+
+NCCL 'via P2P/MNNVL' lines in retained Nsight logs: 1536
+NCCL MNNVL clique lines in retained Nsight logs: 48
+
+MNNVL clique samples:
+  rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 0
+  rdx-gb300-r01-c012:484498:484498 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 2
+  rdx-gb300-r01-c012:484499:484499 [3] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 3
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 1
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 2 cliqueRank 0
+  rdx-gb300-r01-c012:484498:484498 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 2 cliqueRank 1
+  rdx-gb300-r01-c018:1526834:1526834 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 5
+  rdx-gb300-r01-c018:1526835:1526835 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 6
+
+P2P/MNNVL channel samples:
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 02/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 03/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 04/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 05/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 06/0 : 1[1] -> 2[2] via P2P/MNNVL
+  rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[1] via P2P/MNNVL
+  rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[1] via P2P/MNNVL
+  rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 07/0 : 1[1] -> 2[2] via P2P/MNNVL
+
+Nsight CUDA kernel rows:
+  node0: ncclDevKernel_AllReduce_Sum_f32_RING_LL, instances=20, total_time_ns=208033755
+  node0: ncclDevKernel_SendRecv, instances=28, total_time_ns=202302999
+  node0: ncclDevKernel_AllGather_RING_LL, instances=8, total_time_ns=175776
+  node1: ncclDevKernel_AllReduce_Sum_f32_RING_LL, instances=20, total_time_ns=282541922
+  node1: ncclDevKernel_SendRecv, instances=28, total_time_ns=88405450
+  node1: ncclDevKernel_AllGather_RING_LL, instances=8, total_time_ns=5184100
+
+Interpretation:
+  EP groups are intra-node under contiguous torchrun rank placement.
+  MoE-DP groups [0,4], [1,5], [2,6], [3,7] cross the physical nodes.
+  The trace therefore proves real inter-node MNNVL transport for the
+  DP all-gather, while SendRecv proves the real EP all-to-all path.
+  MoE-TP all-reduce groups are intra-node in this topology.

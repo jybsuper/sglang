@@ -1,0 +1,6310 @@
+{
+  "assertions": {
+    "all_local_graph_replays_passed": true,
+    "all_rank_statuses_passed": true,
+    "full_server_base_adapter_mixed_passed": true,
+    "global_to_local_boundary_verified": true,
+    "independent_oracle_passed": true,
+    "nsight_contains_nccl_sendrecv_allreduce_allgather": true,
+    "planned_matrix_complete": true,
+    "real_ep_all_to_all_executed": true,
+    "real_moe_dp_all_gather_executed": true,
+    "real_moe_tp_all_reduce_executed": true,
+    "two_physical_gb300_hosts_verified": true
+  },
+  "case_count": 33,
+  "full_server": {
+    "adapter_output_ids": [
+      220,
+      22,
+      18,
+      15,
+      24,
+      488,
+      220,
+      19
+    ],
+    "attention_backend": "triton",
+    "base_after_output_ids": [
+      32671,
+      624,
+      59604,
+      198,
+      39572,
+      198,
+      94409,
+      198
+    ],
+    "base_before_output_ids": [
+      32671,
+      624,
+      59604,
+      198,
+      39572,
+      198,
+      94409,
+      198
+    ],
+    "base_stable_across_adapter_transition": true,
+    "cuda_graph": false,
+    "first_adapter_request_includes_jit_warmup": true,
+    "flashinfer_control": "The first launch stopped before model execution because installed flashinfer_python 0.6.12 was below required 0.6.15; the retained successful run selected Triton attention explicitly.",
+    "lora_backend": "csgmv",
+    "lora_execution_engine": "sgl_lora",
+    "mixed_adapter_output_ids": [
+      220,
+      22,
+      18,
+      15,
+      24,
+      488,
+      220,
+      19
+    ],
+    "mixed_base_output_ids": [
+      32671,
+      624,
+      59604,
+      198,
+      39572,
+      198,
+      94409,
+      198
+    ],
+    "mixed_batch_matches_individual_requests": true,
+    "model": "Qwen/Qwen1.5-MoE-A2.7B",
+    "status": "passed",
+    "topology": "TP4/EP4",
+    "virtual_experts": true
+  },
+  "graph_pass_count": 204,
+  "matrix": [
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp1_standard_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp1 --route-mode standard --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp1_standard_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.3878601496107876e-07,
+      "max_rel_l2": 0.00019434205535446463,
+      "min_cosine": 1.0,
+      "moe_dp": 1,
+      "moe_tp": 4,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 104,
+      "topology": "tp4_ep1_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp1_standard_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp1 --route-mode standard --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp1_standard_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.4304532669484615e-07,
+      "max_rel_l2": 2.736992894457549e-05,
+      "min_cosine": 1.0,
+      "moe_dp": 1,
+      "moe_tp": 4,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 104,
+      "topology": "tp4_ep1_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp1_standard_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp1 --route-mode standard --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp1_standard_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.4304532669484615e-07,
+      "max_rel_l2": 0.0001489242379526084,
+      "min_cosine": 1.0,
+      "moe_dp": 1,
+      "moe_tp": 4,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 104,
+      "topology": "tp4_ep1_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp4_standard_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp4 --route-mode standard --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp4_standard_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.549706212244928e-07,
+      "max_rel_l2": 0.00022431473946383517,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 4,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 48,
+      "topology": "tp4_ep1_dp4",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp4_standard_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp4 --route-mode standard --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp4_standard_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.0010664049630698497,
+      "min_cosine": 0.9999995231628418,
+      "moe_dp": 4,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 48,
+      "topology": "tp4_ep1_dp4",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/matrix/tp4_ep1_dp4_standard_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep1_dp4 --route-mode standard --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep1_dp4_standard_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 1,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.0010664049630698497,
+      "min_cosine": 0.9999995231628418,
+      "moe_dp": 4,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            0
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            1
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            2
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_ep": [
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "standard",
+      "self_send_pairs": 48,
+      "topology": "tp4_ep1_dp4",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_all_local_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode all_local --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_all_local_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.8777791410684586e-07,
+      "max_rel_l2": 0.00021144643752790278,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "all_local",
+      "self_send_pairs": 26,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_all_local_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode all_local --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_all_local_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.000518466052348583,
+      "min_cosine": 0.9999997615814209,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "all_local",
+      "self_send_pairs": 26,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_all_local_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode all_local --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_all_local_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.0005412094375079221,
+      "min_cosine": 0.9999998211860657,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "all_local",
+      "self_send_pairs": 26,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_mixed_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode mixed --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_mixed_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.5497789718210697e-07,
+      "max_rel_l2": 0.00022668537366693557,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 13,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "mixed",
+      "self_send_pairs": 13,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_mixed_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode mixed --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_mixed_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.0005473687845821727,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 13,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "mixed",
+      "self_send_pairs": 13,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_mixed_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode mixed --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_mixed_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.1444208212196827e-06,
+      "max_rel_l2": 0.0005721810965443872,
+      "min_cosine": 0.9999998211860657,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 13,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "mixed",
+      "self_send_pairs": 13,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_no_local_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode no_local --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_no_local_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.9073195289820433e-07,
+      "max_rel_l2": 0.00022698750123826135,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 26,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_no_local_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode no_local --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_no_local_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 5.722104106098413e-07,
+      "max_rel_l2": 0.0002001977845362307,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 26,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/matrix/tp4_ep4_dp1_no_local_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp4_ep4_dp1 --route-mode no_local --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/matrix/tp4_ep4_dp1_no_local_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 4,
+      "graph_passes": 4,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 5.722104106098413e-07,
+      "max_rel_l2": 0.00027603895018849726,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 1,
+      "moe_tp": 1,
+      "nonlocal_send_pairs": 26,
+      "platform": "h200_single_node_4rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            0
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            2
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3
+          ],
+          "moe_ep": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "moe_tp": [
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 4,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp4_ep4_dp1",
+      "torch_version": "2.11.0+cu129",
+      "tp": 4
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.9354123398661613e-07,
+      "max_rel_l2": 0.00024930149353477284,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.861015673261136e-07,
+      "max_rel_l2": 9.546077296407725e-05,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_all_local_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.861015673261136e-07,
+      "max_rel_l2": 0.00020078941525275497,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 3.0100636649876833e-07,
+      "max_rel_l2": 0.00025541857982685004,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.860906533896923e-07,
+      "max_rel_l2": 9.360149649045252e-05,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_mixed_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 2.860906533896923e-07,
+      "max_rel_l2": 0.0001930453984502348,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_active.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode active --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_active.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.437729224562645e-07,
+      "max_rel_l2": 0.00020947700085004937,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_base.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode base --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_base.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.9073195289820433e-07,
+      "max_rel_l2": 4.883829323408915e-05,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_mixed.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode mixed --graph-replay --output /workspace/artifacts/distributed_d0/raw/h200/tp8_matrix/tp8_ep2_dp2_no_local_mixed.json",
+      "cuda_version": "12.9",
+      "device": "NVIDIA H200",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "max_abs": 1.9073195289820433e-07,
+      "max_rel_l2": 0.0001892895687939849,
+      "min_cosine": 0.9999998211860657,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "h200_single_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "sglang-29157-v0514-h200-exact",
+        "1": "sglang-29157-v0514-h200-exact",
+        "2": "sglang-29157-v0514-h200-exact",
+        "3": "sglang-29157-v0514-h200-exact",
+        "4": "sglang-29157-v0514-h200-exact",
+        "5": "sglang-29157-v0514-h200-exact",
+        "6": "sglang-29157-v0514-h200-exact",
+        "7": "sglang-29157-v0514-h200-exact"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu129",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_all_local_active_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode active --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_all_local_active_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 2.9354123398661613e-07,
+      "max_rel_l2": 0.00024930149353477284,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_all_local_base_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode base --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_all_local_base_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 2.861015673261136e-07,
+      "max_rel_l2": 9.546069219236678e-05,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_all_local_mixed_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode all_local --adapter-mode mixed --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_all_local_mixed_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 2.861015673261136e-07,
+      "max_rel_l2": 0.00020087410269445792,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 0,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "all_local",
+      "self_send_pairs": 64,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_mixed_active_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode active --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_mixed_active_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 3.0100636649876833e-07,
+      "max_rel_l2": 0.00025541857982685004,
+      "min_cosine": 0.9999998807907104,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_mixed_base_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode base --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_mixed_base_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 2.860906533896923e-07,
+      "max_rel_l2": 9.360219327476821e-05,
+      "min_cosine": 1.0,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_mixed_mixed_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode mixed --adapter-mode mixed --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_mixed_mixed_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 2.860906533896923e-07,
+      "max_rel_l2": 0.00019305992276524275,
+      "min_cosine": 1.0,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 32,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "mixed",
+      "self_send_pairs": 32,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "active",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_no_local_active_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode active --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_no_local_active_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 1.437729224562645e-07,
+      "max_rel_l2": 0.00020947105272894233,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "base",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_no_local_base_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode base --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_no_local_base_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 1.9073195289820433e-07,
+      "max_rel_l2": 4.883921260192437e-05,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    {
+      "adapter_mode": "mixed",
+      "artifact": "raw/gb300_2node/tp8_ep2_dp2_no_local_mixed_2node.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode mixed --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_no_local_mixed_2node.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 1.9073195289820433e-07,
+      "max_rel_l2": 0.00018889202110594186,
+      "min_cosine": 0.9999998211860657,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "gb300_two_node_8rank",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    }
+  ],
+  "nsight_trace": {
+    "case": {
+      "adapter_mode": "active",
+      "artifact": "raw/gb300_2node/traces/tp8_ep2_dp2_no_local_active_trace.json",
+      "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode active --graph-replay --output /workspace/distributed_d0_artifacts/traces/tp8_ep2_dp2_no_local_active_trace.json",
+      "cuda_version": "13.0",
+      "device": "NVIDIA GB300",
+      "ep": 2,
+      "graph_passes": 8,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "max_abs": 1.437729224562645e-07,
+      "max_rel_l2": 0.00020947105272894233,
+      "min_cosine": 0.9999999403953552,
+      "moe_dp": 2,
+      "moe_tp": 2,
+      "nonlocal_send_pairs": 64,
+      "platform": "gb300_two_node_nsys",
+      "rank_groups": {
+        "0": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "1": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            0,
+            1
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "2": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            0,
+            2
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "3": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            1,
+            3
+          ],
+          "moe_tp": [
+            2,
+            3
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "4": {
+          "moe_dp": [
+            0,
+            4
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "5": {
+          "moe_dp": [
+            1,
+            5
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            4,
+            5
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "6": {
+          "moe_dp": [
+            2,
+            6
+          ],
+          "moe_ep": [
+            4,
+            6
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "7": {
+          "moe_dp": [
+            3,
+            7
+          ],
+          "moe_ep": [
+            5,
+            7
+          ],
+          "moe_tp": [
+            6,
+            7
+          ],
+          "tp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "rank_host_map": {
+        "0": "rdx-gb300-r01-c012.rdx.local",
+        "1": "rdx-gb300-r01-c012.rdx.local",
+        "2": "rdx-gb300-r01-c012.rdx.local",
+        "3": "rdx-gb300-r01-c012.rdx.local",
+        "4": "rdx-gb300-r01-c018.rdx.local",
+        "5": "rdx-gb300-r01-c018.rdx.local",
+        "6": "rdx-gb300-r01-c018.rdx.local",
+        "7": "rdx-gb300-r01-c018.rdx.local"
+      },
+      "rank_reports": 8,
+      "route_mode": "no_local",
+      "self_send_pairs": 0,
+      "topology": "tp8_ep2_dp2",
+      "torch_version": "2.11.0+cu130",
+      "tp": 8
+    },
+    "kernel_rows": [
+      {
+        "instances": 20,
+        "name": "ncclDevKernel_AllReduce_Sum_f32_RING_LL",
+        "node": "node0",
+        "total_time_ns": 208033755
+      },
+      {
+        "instances": 28,
+        "name": "ncclDevKernel_SendRecv",
+        "node": "node0",
+        "total_time_ns": 202302999
+      },
+      {
+        "instances": 8,
+        "name": "ncclDevKernel_AllGather_RING_LL",
+        "node": "node0",
+        "total_time_ns": 175776
+      },
+      {
+        "instances": 20,
+        "name": "ncclDevKernel_AllReduce_Sum_f32_RING_LL",
+        "node": "node1",
+        "total_time_ns": 282541922
+      },
+      {
+        "instances": 28,
+        "name": "ncclDevKernel_SendRecv",
+        "node": "node1",
+        "total_time_ns": 88405450
+      },
+      {
+        "instances": 8,
+        "name": "ncclDevKernel_AllGather_RING_LL",
+        "node": "node1",
+        "total_time_ns": 5184100
+      }
+    ],
+    "mnnvl_clique_line_count": 48,
+    "mnnvl_clique_samples": [
+      "rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 0",
+      "rdx-gb300-r01-c012:484498:484498 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 2",
+      "rdx-gb300-r01-c012:484499:484499 [3] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 3",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 1",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 2 cliqueRank 0",
+      "rdx-gb300-r01-c012:484498:484498 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 2 cliqueRank 1",
+      "rdx-gb300-r01-c018:1526834:1526834 [1] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 5",
+      "rdx-gb300-r01-c018:1526835:1526835 [2] NCCL INFO MNNVL 1 cliqueId 7ffe cliqueSize 8 cliqueRank 6"
+    ],
+    "p2p_mnnvl_line_count": 1536,
+    "p2p_mnnvl_samples": [
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 02/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 03/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 04/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 05/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 06/0 : 1[1] -> 2[2] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[1] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484496:484496 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[1] via P2P/MNNVL",
+      "rdx-gb300-r01-c012:484497:484497 [1] NCCL INFO Channel 07/0 : 1[1] -> 2[2] via P2P/MNNVL"
+    ],
+    "reports": [
+      "raw/gb300_2node/traces/tp8_ep2_dp2_no_local_active_node0.nsys-rep",
+      "raw/gb300_2node/traces/tp8_ep2_dp2_no_local_active_node1.nsys-rep"
+    ]
+  },
+  "platforms": [
+    {
+      "adapter_modes": [
+        "active",
+        "base",
+        "mixed"
+      ],
+      "cases": 9,
+      "device": "NVIDIA GB300",
+      "graph_passes": 72,
+      "hosts": [
+        "rdx-gb300-r01-c012.rdx.local",
+        "rdx-gb300-r01-c018.rdx.local"
+      ],
+      "minimum_cosine": 0.9999998211860657,
+      "platform": "gb300_two_node_8rank",
+      "rank_reports": 72,
+      "route_modes": [
+        "all_local",
+        "mixed",
+        "no_local"
+      ],
+      "topologies": [
+        "tp8_ep2_dp2"
+      ],
+      "worst_max_abs": 3.0100636649876833e-07,
+      "worst_rel_l2": 0.00025541857982685004
+    },
+    {
+      "adapter_modes": [
+        "active",
+        "base",
+        "mixed"
+      ],
+      "cases": 15,
+      "device": "NVIDIA H200",
+      "graph_passes": 60,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "minimum_cosine": 0.9999995231628418,
+      "platform": "h200_single_node_4rank",
+      "rank_reports": 60,
+      "route_modes": [
+        "all_local",
+        "mixed",
+        "no_local",
+        "standard"
+      ],
+      "topologies": [
+        "tp4_ep1_dp1",
+        "tp4_ep1_dp4",
+        "tp4_ep4_dp1"
+      ],
+      "worst_max_abs": 1.1444208212196827e-06,
+      "worst_rel_l2": 0.0010664049630698497
+    },
+    {
+      "adapter_modes": [
+        "active",
+        "base",
+        "mixed"
+      ],
+      "cases": 9,
+      "device": "NVIDIA H200",
+      "graph_passes": 72,
+      "hosts": [
+        "sglang-29157-v0514-h200-exact"
+      ],
+      "minimum_cosine": 0.9999998211860657,
+      "platform": "h200_single_node_8rank",
+      "rank_reports": 72,
+      "route_modes": [
+        "all_local",
+        "mixed",
+        "no_local"
+      ],
+      "topologies": [
+        "tp8_ep2_dp2"
+      ],
+      "worst_max_abs": 3.0100636649876833e-07,
+      "worst_rel_l2": 0.00025541857982685004
+    }
+  ],
+  "rank_report_count": 204,
+  "schema_version": 1,
+  "scope": "distributed_d0_sgl_lora_moe_contract",
+  "source_provenance": {
+    "executed_harness_sha256": "5a2dc6b1ceca280934870f16d1c32ba3bd016ddbe1b5cae6d000410a457c507d",
+    "executed_snapshot_path": "source/bench_distributed_gpu_executed.py.txt",
+    "execution_base_revision_short": "8e4114e2c0",
+    "harness_path": "benchmark/kernels/lora_moe/bench_distributed.py",
+    "harness_sha256": "738a555590d0b05cbdf12bf274df21b05236882a6cb3e12e8dd04e5463838c60",
+    "isolated_execution_tree": "sglang-distributed-d0-8e4114",
+    "remote_hash_checks": {
+      "gb300:/data/home/yjiang/sglang-distributed-d0-8e4114": "5a2dc6b1ceca280934870f16d1c32ba3bd016ddbe1b5cae6d000410a457c507d",
+      "h200:/sgl-workspace/sglang-distributed-d0-8e4114": "5a2dc6b1ceca280934870f16d1c32ba3bd016ddbe1b5cae6d000410a457c507d"
+    },
+    "repository_harness_ast_matches_executed_snapshot": true
+  },
+  "status": "passed"
+}

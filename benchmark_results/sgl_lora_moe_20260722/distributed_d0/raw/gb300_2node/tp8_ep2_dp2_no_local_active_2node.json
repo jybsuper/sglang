@@ -1,0 +1,926 @@
+{
+  "adapter_mode": "active",
+  "command": "benchmark/kernels/lora_moe/bench_distributed.py --topology tp8_ep2_dp2 --route-mode no_local --adapter-mode active --graph-replay --output /data/home/yjiang/distributed_d0_artifacts/tp8_ep2_dp2_no_local_active_2node.json",
+  "cuda_version": "13.0",
+  "device": "NVIDIA GB300",
+  "ranks": [
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          3,
+          4,
+          6,
+          10
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 0,
+        "ep_rank": 0,
+        "moe_tp_rank": 0
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          0,
+          4
+        ],
+        "moe_ep": [
+          0,
+          2
+        ],
+        "moe_tp": [
+          0,
+          1
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c012.rdx.local",
+      "local_rank": 0,
+      "oracle": {
+        "cosine": 0.9999999403953552,
+        "max_abs": 1.4230317901819944e-07,
+        "rel_l2": 0.00020947105272894233
+      },
+      "origin_tokens": 3,
+      "rank": 0,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 595.4129761084914,
+        "ep_reverse_dispatch": 222.20974508672953,
+        "moe_dp_all_gather": 405.9973410330713,
+        "moe_tp_all_reduce": 300.5758351646364,
+        "post_dispatch_compute": 867.6705746911466
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 3,
+        "global_expert_min": 0,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 6,
+        "received_pairs": 4,
+        "recv_counts": [
+          0,
+          4
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          0,
+          6
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          3,
+          4,
+          6,
+          10
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 0,
+        "ep_rank": 0,
+        "moe_tp_rank": 1
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          1,
+          5
+        ],
+        "moe_ep": [
+          1,
+          3
+        ],
+        "moe_tp": [
+          0,
+          1
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c012.rdx.local",
+      "local_rank": 1,
+      "oracle": {
+        "cosine": 0.9999999403953552,
+        "max_abs": 1.4230317901819944e-07,
+        "rel_l2": 0.00020947105272894233
+      },
+      "origin_tokens": 3,
+      "rank": 1,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 599.07355485484,
+        "ep_reverse_dispatch": 174.19155593961477,
+        "moe_dp_all_gather": 425.3568476997316,
+        "moe_tp_all_reduce": 305.04700681194663,
+        "post_dispatch_compute": 833.6943839676678
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 3,
+        "global_expert_min": 0,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 6,
+        "received_pairs": 4,
+        "recv_counts": [
+          0,
+          4
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          0,
+          6
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          2,
+          6,
+          5,
+          12
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 0,
+        "ep_rank": 1,
+        "moe_tp_rank": 0
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          2,
+          6
+        ],
+        "moe_ep": [
+          0,
+          2
+        ],
+        "moe_tp": [
+          2,
+          3
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c012.rdx.local",
+      "local_rank": 2,
+      "oracle": {
+        "cosine": 1.0,
+        "max_abs": 1.1918018572032452e-07,
+        "rel_l2": 0.00018705453248067284
+      },
+      "origin_tokens": 2,
+      "rank": 2,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 595.2740320935845,
+        "ep_reverse_dispatch": 321.49787014350295,
+        "moe_dp_all_gather": 367.88124218583107,
+        "moe_tp_all_reduce": 263.72453616932034,
+        "post_dispatch_compute": 827.1488412283361
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 7,
+        "global_expert_min": 4,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 4,
+        "received_pairs": 6,
+        "recv_counts": [
+          6,
+          0
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          4,
+          0
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          2,
+          6,
+          5,
+          12
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 0,
+        "ep_rank": 1,
+        "moe_tp_rank": 1
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          3,
+          7
+        ],
+        "moe_ep": [
+          1,
+          3
+        ],
+        "moe_tp": [
+          2,
+          3
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c012.rdx.local",
+      "local_rank": 3,
+      "oracle": {
+        "cosine": 1.0,
+        "max_abs": 1.1918018572032452e-07,
+        "rel_l2": 0.00018705453248067284
+      },
+      "origin_tokens": 2,
+      "rank": 3,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 598.9873148500919,
+        "ep_reverse_dispatch": 273.31465715542436,
+        "moe_dp_all_gather": 429.67781191691756,
+        "moe_tp_all_reduce": 269.8760936036706,
+        "post_dispatch_compute": 816.6904309764504
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 7,
+        "global_expert_min": 4,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 4,
+        "received_pairs": 6,
+        "recv_counts": [
+          6,
+          0
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          4,
+          0
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          3,
+          4,
+          6,
+          10
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 1,
+        "ep_rank": 0,
+        "moe_tp_rank": 0
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          0,
+          4
+        ],
+        "moe_ep": [
+          4,
+          6
+        ],
+        "moe_tp": [
+          4,
+          5
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c018.rdx.local",
+      "local_rank": 0,
+      "oracle": {
+        "cosine": 1.0,
+        "max_abs": 1.437729224562645e-07,
+        "rel_l2": 0.0002046782060802823
+      },
+      "origin_tokens": 6,
+      "rank": 4,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 527.5748632848263,
+        "ep_reverse_dispatch": 321.0908407345414,
+        "moe_dp_all_gather": 421.25064181163907,
+        "moe_tp_all_reduce": 255.87689690291882,
+        "post_dispatch_compute": 856.1883349902928
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 3,
+        "global_expert_min": 0,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 12,
+        "received_pairs": 10,
+        "recv_counts": [
+          0,
+          10
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          0,
+          12
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          3,
+          4,
+          6,
+          10
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 1,
+        "ep_rank": 0,
+        "moe_tp_rank": 1
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          1,
+          5
+        ],
+        "moe_ep": [
+          5,
+          7
+        ],
+        "moe_tp": [
+          4,
+          5
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c018.rdx.local",
+      "local_rank": 1,
+      "oracle": {
+        "cosine": 1.0,
+        "max_abs": 1.437729224562645e-07,
+        "rel_l2": 0.0002046782060802823
+      },
+      "origin_tokens": 6,
+      "rank": 5,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 580.2133730612695,
+        "ep_reverse_dispatch": 321.09148101881146,
+        "moe_dp_all_gather": 376.1051301844418,
+        "moe_tp_all_reduce": 247.6339777931571,
+        "post_dispatch_compute": 814.4805231131613
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 3,
+        "global_expert_min": 0,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 12,
+        "received_pairs": 10,
+        "recv_counts": [
+          0,
+          10
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          0,
+          12
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          2,
+          6,
+          5,
+          12
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 1,
+        "ep_rank": 1,
+        "moe_tp_rank": 0
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          2,
+          6
+        ],
+        "moe_ep": [
+          4,
+          6
+        ],
+        "moe_tp": [
+          6,
+          7
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c018.rdx.local",
+      "local_rank": 2,
+      "oracle": {
+        "cosine": 0.9999999403953552,
+        "max_abs": 1.3707904145121574e-07,
+        "rel_l2": 0.00017978190208473046
+      },
+      "origin_tokens": 5,
+      "rank": 6,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 527.3654540069401,
+        "ep_reverse_dispatch": 190.53658423945308,
+        "moe_dp_all_gather": 373.7560398876667,
+        "moe_tp_all_reduce": 284.34920869767666,
+        "post_dispatch_compute": 878.8189478218555
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 7,
+        "global_expert_min": 4,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 10,
+        "received_pairs": 12,
+        "recv_counts": [
+          12,
+          0
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          10,
+          0
+        ]
+      }
+    },
+    {
+      "adapter_mode": "active",
+      "collective_evidence": {
+        "ep_all_to_all_world_size": 2,
+        "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        "moe_dp_all_gather_world_size": 2,
+        "moe_dp_gathered_counts": [
+          2,
+          6,
+          5,
+          12
+        ],
+        "moe_tp_all_reduce_world_size": 2
+      },
+      "coordinates": {
+        "dp_rank": 1,
+        "ep_rank": 1,
+        "moe_tp_rank": 1
+      },
+      "dimensions": {
+        "hidden": 128,
+        "intermediate": 128,
+        "intermediate_local": 64,
+        "num_adapters": 2,
+        "num_experts": 8,
+        "num_local_experts": 4,
+        "rank": 16,
+        "top_k": 2
+      },
+      "graph": {
+        "collectives_in_graph": false,
+        "replays": 1,
+        "scope": "post_dispatch_local_compute",
+        "status": "passed"
+      },
+      "groups": {
+        "moe_dp": [
+          3,
+          7
+        ],
+        "moe_ep": [
+          5,
+          7
+        ],
+        "moe_tp": [
+          6,
+          7
+        ],
+        "tp": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "host": "rdx-gb300-r01-c018.rdx.local",
+      "local_rank": 3,
+      "oracle": {
+        "cosine": 0.9999999403953552,
+        "max_abs": 1.3707904145121574e-07,
+        "rel_l2": 0.00017978190208473046
+      },
+      "origin_tokens": 5,
+      "rank": 7,
+      "route_mode": "no_local",
+      "status": "passed",
+      "timing_ms": {
+        "ep_dispatch": 580.132924951613,
+        "ep_reverse_dispatch": 190.5371597968042,
+        "moe_dp_all_gather": 411.61066526547074,
+        "moe_tp_all_reduce": 284.34978518635035,
+        "post_dispatch_compute": 853.8817097432911
+      },
+      "topology": {
+        "ep": 2,
+        "moe_dp": 2,
+        "name": "tp8_ep2_dp2",
+        "token_counts": [
+          5,
+          11
+        ],
+        "tp": 8
+      },
+      "transport": {
+        "global_expert_max": 7,
+        "global_expert_min": 4,
+        "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        "local_expert_max": 3,
+        "local_expert_min": 0,
+        "metadata_contract": [
+          "global_token_id",
+          "topk_slot",
+          "global_expert_id",
+          "adapter_id",
+          "origin_ep_rank"
+        ],
+        "nonlocal_send_pairs": 10,
+        "received_pairs": 12,
+        "recv_counts": [
+          12,
+          0
+        ],
+        "self_send_pairs": 0,
+        "send_counts": [
+          10,
+          0
+        ]
+      }
+    }
+  ],
+  "route_mode": "no_local",
+  "schema_version": 1,
+  "status": "passed",
+  "topology": {
+    "ep": 2,
+    "moe_dp": 2,
+    "name": "tp8_ep2_dp2",
+    "token_counts": [
+      5,
+      11
+    ],
+    "tp": 8
+  },
+  "torch_version": "2.11.0+cu130"
+}
