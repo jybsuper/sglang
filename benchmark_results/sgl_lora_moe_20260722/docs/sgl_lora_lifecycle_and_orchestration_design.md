@@ -1,11 +1,11 @@
 # SGLang LoRA lifecycle and orchestration design
 
-Date: 2026-07-22  
+Date: 2026-07-22<br>
 Repository snapshot: final `sgl-lora` campaign tip `f2f406e056`, also recorded by the
-repository-local benchmark manifest; historical design-review point `4ffaee0b41`  
-Status: **authoritative target design and migration contract**  
+repository-local benchmark manifest; historical design-review point `4ffaee0b41`<br>
+Status: **authoritative target design and migration contract**<br>
 Latest migration-order review: implemented through the Phase-1 MoE execution slice;
-Phase 2/3 remain target architecture.  
+Phase 2/3 remain target architecture.<br>
 Companion plans:
 
 - `sgl_lora_refactor_plan.md` — implementation order and provider roadmap

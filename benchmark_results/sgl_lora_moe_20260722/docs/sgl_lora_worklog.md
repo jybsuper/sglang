@@ -1,9 +1,9 @@
 # SGL LoRA refactor worklog
 
-Updated: 2026-07-22  
+Updated: 2026-07-22<br>
 Branch snapshot: active `sgl-lora` at `f2f406e056` after the final upstream rebase;
 archived post-Phase-1a prototype branch
-`sgl-lora-pre-redesign-backup-20260721` at `72055b46fd`  
+`sgl-lora-pre-redesign-backup-20260721` at `72055b46fd`<br>
 Current phase: **Phase 1 — MoE execution graduation candidate**
 
 Authoritative references:

@@ -1,8 +1,8 @@
 # SGL LoRA refactor plan
 
-Date: 2026-07-22  
-Public execution-engine name: `sgl_lora`  
-Current implementation phase: Phase 1 MoE execution graduation candidate  
+Date: 2026-07-22<br>
+Public execution-engine name: `sgl_lora`<br>
+Current implementation phase: Phase 1 MoE execution graduation candidate<br>
 Final rebased campaign head: `f2f406e056`
 
 Architecture and full lifecycle companion:

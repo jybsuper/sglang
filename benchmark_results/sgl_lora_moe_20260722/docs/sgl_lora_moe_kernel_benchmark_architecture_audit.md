@@ -1,10 +1,10 @@
 # SGL LoRA MoE kernel benchmark, architecture, and decision audit
 
-Evidence snapshot: 2026-07-22 final campaign  
-Design-review update: 2026-07-22 (review incorporated into code, evidence, and conclusions)  
-Active branch: `sgl-lora`  
-Final rebased campaign head: `f2f406e056`  
-Historical pre-review benchmark point: `4ffaee0b413fae1098054a0c98eeae02ab537c02`  
+Evidence snapshot: 2026-07-22 final campaign<br>
+Design-review update: 2026-07-22 (review incorporated into code, evidence, and conclusions)<br>
+Active branch: `sgl-lora`<br>
+Final rebased campaign head: `f2f406e056`<br>
+Historical pre-review benchmark point: `4ffaee0b413fae1098054a0c98eeae02ab537c02`<br>
 Archived pre-redesign branch: `sgl-lora-pre-redesign-backup-20260721` at `72055b46fd`
 
 This document is the audit-oriented answer to four questions:
