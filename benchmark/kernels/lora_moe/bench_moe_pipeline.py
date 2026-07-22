@@ -89,6 +89,7 @@ ROUTE_PATTERNS = (
     "uniform_iid_without_replacement",
     "skewed_iid_without_replacement",
 )
+PIPELINE_ORDERS = ("forward", "reverse")
 B_VARIANTS = ("production", "direct", "generic")
 _B_CONFIG_FIELDS = (
     "BLOCK_SIZE_M",
@@ -484,6 +485,39 @@ def _experimental_trtllm_environment(enabled: bool) -> Iterator[None]:
             os.environ.pop(name, None)
         else:
             os.environ[name] = previous
+
+
+@contextmanager
+def _host_contention(workers: int) -> Iterator[None]:
+    """Optionally keep host cores busy during an eager launch bracket.
+
+    This is a reproducible launch-sensitivity diagnostic, not a server-load
+    model.  E0 remains the authority for scheduler and request contention.
+    """
+    if workers < 0:
+        raise ValueError("host load workers must be non-negative")
+    processes: list[subprocess.Popen] = []
+    try:
+        for _ in range(workers):
+            processes.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", "while True: pass"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            )
+        if processes:
+            time.sleep(0.25)
+        yield
+    finally:
+        for process in processes:
+            process.terminate()
+        for process in processes:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def _make_routing(
@@ -1800,6 +1834,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
+    parser.add_argument(
+        "--cache-state",
+        choices=("hot", "cold"),
+        default="hot",
+        help=(
+            "working-set state before every measured M0 invocation; cold evicts "
+            "the complete block working set outside the timing events"
+        ),
+    )
+    parser.add_argument(
+        "--pipeline-order",
+        choices=PIPELINE_ORDERS,
+        default="forward",
+        help="counterbalance provider-local pipeline timing order across processes",
+    )
+    parser.add_argument(
+        "--host-load-workers",
+        type=int,
+        default=0,
+        help=(
+            "launch-sensitivity diagnostic: number of independent busy host "
+            "processes; use only with eager timing"
+        ),
+    )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--samples", type=int, default=30)
     parser.add_argument("--profile-iterations", type=int, default=1)
@@ -1819,6 +1877,7 @@ def _benchmark_pipeline(
     b_schedules: BScheduleOverrides = BScheduleOverrides(),
     neutral_baseline: str | None = None,
     expect_active_lora: bool = True,
+    cache_control=None,
 ) -> dict[str, object]:
     from sglang.srt.model_executor.runner_utils.capture_mode import model_capture_mode
 
@@ -1951,6 +2010,9 @@ def _benchmark_pipeline(
         "two_stream_policy": two_stream,
         "c1_route_prewarm": route_prewarm,
         "logical_invocations_per_batch": 1,
+        "cache_control": (
+            cache_control.metadata() if cache_control is not None else {"state": "hot"}
+        ),
     }
 
     if run_config.execution == "cuda_graph" and check:
@@ -1981,12 +2043,17 @@ def _benchmark_pipeline(
             result["graph_correctness"]["active_delta"] = active_delta_checks
 
     if run_config.mode == "time":
+        def prepare_sample() -> None:
+            fixture.reset_hidden()
+            if cache_control is not None:
+                cache_control.evict()
+
         timing = time_cuda_events(
             batch.run,
             launches_per_batch=1,
             warmup=run_config.warmup,
             samples=run_config.samples,
-            before_sample=fixture.reset_hidden,
+            before_sample=prepare_sample,
         )
         result["timing"] = asdict(timing)
         print(
@@ -2059,6 +2126,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if not torch.cuda.is_available():
         raise RuntimeError("This benchmark requires CUDA")
+    if args.host_load_workers < 0:
+        raise ValueError("--host-load-workers must be non-negative")
+    if args.host_load_workers and (
+        args.mode != "time" or args.execution != "eager"
+    ):
+        raise ValueError("--host-load-workers is an eager timing diagnostic only")
+    if args.cache_state == "cold" and args.mode != "time":
+        raise ValueError("cold M0 profiling is not supported; profile the timed winner")
 
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
@@ -2082,6 +2157,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         down_config=_parse_b_config(args.down_b_config),
     )
     pipelines = _resolve_pipelines(args.pipeline, case)
+    if args.pipeline_order == "reverse":
+        pipelines = tuple(reversed(pipelines))
     _validate_all_base_sentinel(
         case,
         enabled=args.all_base_sgl_c0_sentinel,
@@ -2122,6 +2199,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             _experimental_trtllm_environment("experimental_trtllm" in neutral_baselines)
         )
         stack.enter_context(_single_rank_runtime())
+        stack.enter_context(_host_contention(args.host_load_workers))
+        from benchmark.kernels.lora_moe.bench_shrink_schedules import (
+            _make_cache_control,
+        )
+
+        cache_control = _make_cache_control(args.cache_state, torch.device("cuda"))
         need_lora = any(pipeline != "N0" for pipeline in pipelines) or (
             args.all_base_sgl_c0_sentinel
         )
@@ -2256,6 +2339,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "pipeline": "C1",
                 "benchmarked": "C1" in pipelines,
             },
+            "measurement_conditions": {
+                "cache": cache_control.metadata(),
+                "pipeline_order": args.pipeline_order,
+                "resolved_pipeline_order": list(pipelines),
+                "host_load_workers": args.host_load_workers,
+                "host_load_scope": (
+                    "synthetic_cpu_launch_contention_diagnostic"
+                    if args.host_load_workers
+                    else "quiet_host"
+                ),
+                "e0_still_required": True,
+            },
             "phase_semantics": (
                 "synthetic_fixed_local_token_shape; phase is metadata and is not "
                 "passed to the M0 runner"
@@ -2385,6 +2480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 check=not args.skip_check,
                 a_provider=args.a_provider,
                 b_schedules=b_schedules,
+                cache_control=cache_control,
             )
         result["matched_latency"] = _matched_latency_summary(pipeline_results)
 
@@ -2396,6 +2492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 case,
                 check=not args.skip_check,
                 expect_active_lora=False,
+                cache_control=cache_control,
             )
             sentinel_section = result["all_base_sgl_c0_sentinel"]
             assert isinstance(sentinel_section, dict)
@@ -2412,6 +2509,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             baseline_pipelines = _resolve_baseline_pipelines(
                 baseline, args.pipeline, case
             )
+            if args.pipeline_order == "reverse":
+                baseline_pipelines = tuple(reversed(baseline_pipelines))
             timed: dict[str, object] = {}
             for pipeline in baseline_pipelines:
                 timed[pipeline] = _benchmark_pipeline(
@@ -2421,6 +2520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     case,
                     check=not args.skip_check,
                     neutral_baseline=baseline,
+                    cache_control=cache_control,
                 )
             requested_for_case = _resolve_pipelines(args.pipeline, case)
             unsupported = [
