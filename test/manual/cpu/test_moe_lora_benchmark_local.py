@@ -17,6 +17,48 @@ def _fixture(n=1024, rank=64, slices=2):
     )
 
 
+def test_benchmark_server_args_initialized_when_absent(monkeypatch):
+    sentinel = object()
+    published = []
+
+    def missing():
+        raise ValueError(local._MISSING_SERVER_ARGS_ERROR)
+
+    modules = {
+        "sglang.srt.runtime_context": SimpleNamespace(
+            get_server_args=missing,
+            get_context=lambda: SimpleNamespace(set_server_args=published.append),
+        ),
+        "sglang.srt.server_args": SimpleNamespace(
+            ServerArgs=lambda *, model_path: (
+                sentinel if model_path == "dummy" else None
+            )
+        ),
+    }
+    monkeypatch.setattr(local, "import_module", lambda name: modules[name])
+
+    local._ensure_benchmark_server_args()
+
+    assert published == [sentinel]
+
+
+def test_benchmark_server_args_preserves_existing_context(monkeypatch):
+    sentinel = object()
+    imports = []
+    runtime_context = SimpleNamespace(get_server_args=lambda: sentinel)
+
+    def import_one(name):
+        imports.append(name)
+        assert name == "sglang.srt.runtime_context"
+        return runtime_context
+
+    monkeypatch.setattr(local, "import_module", import_one)
+
+    local._ensure_benchmark_server_args()
+
+    assert imports == ["sglang.srt.runtime_context"]
+
+
 def test_b_config_cli_default_and_explicit_fields():
     default = local.parse_args([])
     fields = (
@@ -61,6 +103,15 @@ def test_b_config_selectors(monkeypatch, selector, lookup_m, held):
     assert selected.resolved_config["BLOCK_SIZE_K"] == 32
 
 
+def test_missing_server_context_is_not_treated_as_config_fallback(monkeypatch):
+    def fail(*_):
+        raise ValueError(local._MISSING_SERVER_ARGS_ERROR)
+
+    monkeypatch.setattr(local, "_resolve_production_b_config", fail)
+    with pytest.raises(ValueError, match="Global server args is not set yet"):
+        local._select_b_config(_fixture(), "logical-t", local.ExplicitBConfig())
+
+
 def test_effective_config_records_direct_only_ignored_fields():
     config = {
         "BLOCK_SIZE_M": 32,
@@ -82,6 +133,22 @@ def test_effective_config_records_direct_only_ignored_fields():
     assert local._effective_b_config(_fixture(), direct=False, resolved=config) == {
         "kernel_family": "generic_fused_moe",
         **config,
+    }
+
+
+def test_effective_generic_config_materializes_triton_launch_defaults():
+    resolved = {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_K": 32,
+        "GROUP_SIZE_M": 8,
+    }
+
+    assert local._effective_b_config(_fixture(), direct=False, resolved=resolved) == {
+        "kernel_family": "generic_fused_moe",
+        **resolved,
+        "num_warps": 4,
+        "num_stages": 3,
     }
 
 

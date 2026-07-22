@@ -31,6 +31,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 
@@ -65,6 +66,23 @@ TARGETS = (
 )
 VARIANTS = ("production", "direct", "generic")
 B_CONFIG_SELECTORS = ("logical-t", "flat-tk", "explicit")
+_MISSING_SERVER_ARGS_ERROR = "Global server args is not set yet!"
+
+
+def _ensure_benchmark_server_args() -> None:
+    """Publish the minimal scheduler context required by production MoE code."""
+    runtime_context = import_module("sglang.srt.runtime_context")
+
+    try:
+        runtime_context.get_server_args()
+    except ValueError as exc:
+        if str(exc) != _MISSING_SERVER_ARGS_ERROR:
+            raise
+        server_args = import_module("sglang.srt.server_args")
+
+        runtime_context.get_context().set_server_args(
+            server_args.ServerArgs(model_path="dummy")
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +175,8 @@ def _select_b_config(
         status = "production_resolver"
         error = None
     except ValueError as exc:
+        if str(exc) == _MISSING_SERVER_ARGS_ERROR:
+            raise
         resolved = _local_b_fallback(merged_shape)
         status = "local_fallback_after_value_error"
         error = f"{type(exc).__name__}: {exc}"
@@ -204,7 +224,10 @@ def _effective_b_config(
     if resolved is None:
         return None
     if not direct:
-        return {"kernel_family": "generic_fused_moe", **resolved}
+        effective = dict(resolved)
+        effective.setdefault("num_warps", 4)
+        effective.setdefault("num_stages", 3)
+        return {"kernel_family": "generic_fused_moe", **effective}
 
     n = fixture.lora_b.shape[2]
     rank = fixture.lora_b.shape[3]
@@ -848,6 +871,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if not torch.cuda.is_available():
         raise RuntimeError("This benchmark requires CUDA")
+    _ensure_benchmark_server_args()
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
     if args.inner_iterations is None:
