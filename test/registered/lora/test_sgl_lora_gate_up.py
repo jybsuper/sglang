@@ -129,5 +129,57 @@ def test_gate_up_a_b_matches_reference_and_reuses_routing(rank: int):
     torch.testing.assert_close(output, expected, rtol=3e-2, atol=3e-2)
 
 
+def test_generic_gate_up_b_uses_matching_rank_slice():
+    """R128 oracle: the up half must not reuse the zero gate-half input."""
+    device = "cuda"
+    rank = intermediate_size = 128
+    hidden_states = torch.zeros((1, 1), dtype=torch.bfloat16, device=device)
+    lora_a = torch.zeros((1, 1, 2 * rank, 1), dtype=torch.bfloat16, device=device)
+    lora_b = torch.zeros(
+        (1, 1, 2 * intermediate_size, rank),
+        dtype=torch.bfloat16,
+        device=device,
+    )
+    identity = torch.eye(rank, dtype=torch.bfloat16, device=device)
+    lora_b[0, 0, :intermediate_size].copy_(identity)
+    lora_b[0, 0, intermediate_size:].copy_(identity)
+    intermediate = torch.cat(
+        (
+            torch.zeros(rank, dtype=torch.bfloat16, device=device),
+            torch.ones(rank, dtype=torch.bfloat16, device=device),
+        )
+    ).view(1, 1, 2 * rank)
+    output = torch.empty(
+        (1, 1, 2 * intermediate_size), dtype=torch.bfloat16, device=device
+    )
+
+    merged_experts_fused_moe_lora_add(
+        output=output,
+        hidden_states=hidden_states,
+        lora_a=lora_a,
+        lora_b=lora_b,
+        topk_ids=torch.zeros((1, 1), dtype=torch.int32, device=device),
+        topk_weights=torch.ones((1, 1), dtype=torch.float32, device=device),
+        token_lora_mapping=torch.zeros(1, dtype=torch.int32, device=device),
+        mul_routed_weight=False,
+        experts_shared_outer_loras_a=False,
+        experts_shared_outer_loras_b=False,
+        fuse_add_to_output=False,
+        use_direct_expand_add=False,
+        num_output_slices=2,
+        stage="expand",
+        intermediate_buffer=intermediate,
+    )
+    torch.cuda.synchronize()
+
+    expected = torch.cat(
+        (
+            torch.zeros(intermediate_size, dtype=torch.bfloat16, device=device),
+            torch.ones(intermediate_size, dtype=torch.bfloat16, device=device),
+        )
+    ).view_as(output)
+    torch.testing.assert_close(output, expected, rtol=0, atol=0)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
