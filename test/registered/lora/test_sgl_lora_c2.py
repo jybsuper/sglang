@@ -16,11 +16,13 @@ register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 @pytest.mark.parametrize(
     ("inter", "rank", "block_size_n", "local_expert_offset", "schedule"),
     [
+        (37, 8, 16, 0, "pair"),
         (37, 16, 16, 0, "pair"),
         (192, 32, 64, 0, "pair"),
         (192, 64, 32, 0, "pair"),
         (192, 128, 16, 0, "pair"),
         (64, 16, 32, 5, "pair"),
+        (37, 8, 16, 0, "aligned"),
         (37, 16, 16, 0, "aligned"),
         (192, 64, 64, 0, "aligned"),
         (192, 128, 16, 0, "aligned"),

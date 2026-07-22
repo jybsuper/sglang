@@ -450,8 +450,11 @@ def fused_gate_up_b_swiglu_down_a(
         max_loras=gate_up_lora_b.shape[0],
         local_expert_offset=local_expert_offset,
         BLOCK_N=block_size_n,
-        BLOCK_GATE_R=triton.next_power_of_2(gate_rank),
-        BLOCK_DOWN_R=triton.next_power_of_2(down_rank),
+        # Logical rank 8 is represented by a masked physical-16 tensor-core
+        # tile.  Tail lanes read zero, so factor storage remains logical-rank
+        # sized while Triton's dot-product K dimension stays compile-legal.
+        BLOCK_GATE_R=max(16, triton.next_power_of_2(gate_rank)),
+        BLOCK_DOWN_R=max(16, triton.next_power_of_2(down_rank)),
         num_warps=num_warps,
         num_stages=1,
     )
@@ -561,8 +564,8 @@ def fused_gate_up_b_swiglu_down_a_aligned(
         local_expert_offset=local_expert_offset,
         BLOCK_M=route_block_size_m,
         BLOCK_N=block_size_n,
-        BLOCK_GATE_R=triton.next_power_of_2(gate_rank),
-        BLOCK_DOWN_R=triton.next_power_of_2(down_rank),
+        BLOCK_GATE_R=max(16, triton.next_power_of_2(gate_rank)),
+        BLOCK_DOWN_R=max(16, triton.next_power_of_2(down_rank)),
         num_warps=num_warps,
         num_stages=1,
     )
