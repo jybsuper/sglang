@@ -19,6 +19,9 @@ Examples::
     python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
       --case-id p0-qwen3.5-35b-a3b-cap1-h200 --pipeline all \
       --execution cuda_graph --json-output result.json
+    python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
+      --case-id p0-qwen3.5-35b-a3b-cap1-h200 --pipeline C1 \
+      --a-provider indexed --execution cuda_graph
 
 For a trace, choose exactly one pipeline and wrap this script with Nsight using
 the CUDA-profiler capture range, as in ``bench_local.py``.
@@ -33,11 +36,11 @@ import platform
 import socket
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import TYPE_CHECKING, Iterator, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -59,6 +62,34 @@ from benchmark.kernels.lora_moe.profiling import (
 )
 
 PIPELINES = ("N0", "C0", "C1")
+
+_INDEXED_AUTO_CONFIG_KEYS = {
+    "h200": {
+        "gate": "bn32-bk128-w4",
+        "down": "bn16-bk128-w8",
+    },
+    "gb300": {
+        "gate": "bn32-bk128-w8",
+        "down": "bn8-bk128-w8",
+    },
+}
+
+if TYPE_CHECKING:
+    from benchmark.kernels.lora_moe.bench_indexed_shrink import IndexedShrinkConfig
+
+
+@dataclass(frozen=True, slots=True)
+class IndexedAConfigs:
+    gate: IndexedShrinkConfig
+    down: IndexedShrinkConfig
+    gate_source: str
+    down_source: str
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "gate": {"selection": self.gate_source, **asdict(self.gate)},
+            "down": {"selection": self.down_source, **asdict(self.down)},
+        }
 
 
 def _smoke_case(device: str) -> MoeLoraBenchCase:
@@ -194,6 +225,38 @@ def _list_cases(device: str) -> None:
         )
 
 
+def _resolve_indexed_a_configs(
+    device: str, gate_key: str, down_key: str
+) -> IndexedAConfigs:
+    from benchmark.kernels.lora_moe.bench_indexed_shrink import INDEXED_CONFIGS
+
+    configs_by_key = {config.key: config for config in INDEXED_CONFIGS}
+
+    def resolve(site: str, requested: str):
+        if requested == "auto":
+            key = _INDEXED_AUTO_CONFIG_KEYS[device][site]
+            source = "auto_cold_cache_shortlist"
+        else:
+            key = requested
+            source = "explicit"
+        try:
+            return configs_by_key[key], source
+        except KeyError as exc:
+            choices = ", ".join(("auto", *configs_by_key))
+            raise ValueError(
+                f"unknown indexed {site} config {key!r}; choose from {choices}"
+            ) from exc
+
+    gate, gate_source = resolve("gate", gate_key)
+    down, down_source = resolve("down", down_key)
+    return IndexedAConfigs(
+        gate=gate,
+        down=down,
+        gate_source=gate_source,
+        down_source=down_source,
+    )
+
+
 def _make_routing(
     case: MoeLoraBenchCase, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -247,6 +310,7 @@ class PipelineFixture:
     lora_info: object | None
     base_weights: tuple[torch.Tensor, torch.Tensor]
     lora_weights: tuple[torch.Tensor, ...]
+    indexed_down_intermediate: torch.Tensor | None = None
     last_output: torch.Tensor | None = None
 
     def reset_hidden(self) -> None:
@@ -288,7 +352,9 @@ class PipelineFixture:
         self.last_output = result.hidden_states
 
 
-def _build_fixture(case: MoeLoraBenchCase, *, need_lora: bool) -> PipelineFixture:
+def _build_fixture(
+    case: MoeLoraBenchCase, *, need_lora: bool, need_indexed_a: bool = False
+) -> PipelineFixture:
     from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
     from sglang.srt.layers.moe.moe_runner.deep_gemm import DeepGemmMoeQuantInfo
     from sglang.srt.layers.moe.moe_runner.runner import MoeRunner
@@ -350,6 +416,7 @@ def _build_fixture(case: MoeLoraBenchCase, *, need_lora: bool) -> PipelineFixtur
     sgl_base = None
     lora_info = None
     lora_weights: tuple[torch.Tensor, ...] = ()
+    indexed_down_intermediate = None
     if need_lora:
         from sglang.srt.lora.lora_moe_runners import LoRAInfo
         from sglang.srt.lora.sgl_lora.base_gemm import resolve_base_gemm
@@ -406,6 +473,16 @@ def _build_fixture(case: MoeLoraBenchCase, *, need_lora: bool) -> PipelineFixtur
             hidden_size=case.model.h_moe,
         )
         sgl_base = resolve_base_gemm(sgl_quant_info, config)
+        if need_indexed_a:
+            indexed_down_intermediate = torch.empty(
+                (
+                    case.t_local,
+                    case.model.top_k,
+                    down_a.shape[2],
+                ),
+                dtype=hidden_seed.dtype,
+                device=device,
+            )
 
     return PipelineFixture(
         case=case,
@@ -420,7 +497,72 @@ def _build_fixture(case: MoeLoraBenchCase, *, need_lora: bool) -> PipelineFixtur
         lora_info=lora_info,
         base_weights=(w13, w2),
         lora_weights=lora_weights,
+        indexed_down_intermediate=indexed_down_intermediate,
     )
+
+
+@contextmanager
+def _indexed_a_override(
+    fixture: PipelineFixture, configs: IndexedAConfigs
+) -> Iterator[None]:
+    """Replace only LoRA-A inside the production A+B entrypoint.
+
+    C1's ``stage="routing"`` call deliberately stays production-equivalent. It
+    therefore retains the now-unused production A route prewarm as conservative
+    overhead, while the subsequent ``stage="all"`` call uses indexed A followed
+    by the unchanged production B ``stage="expand"`` path.
+    """
+    from benchmark.kernels.lora_moe.bench_indexed_shrink import (
+        invoke_indexed_lora_a,
+    )
+    from sglang.srt.lora.sgl_lora.triton_ops import virtual_experts
+
+    down_intermediate = fixture.indexed_down_intermediate
+    if down_intermediate is None:
+        raise RuntimeError("indexed A requires a retained down intermediate")
+
+    production_ab = virtual_experts.merged_experts_fused_moe_lora_add
+
+    def indexed_a_production_b(*args, **kwargs):
+        if args:
+            raise TypeError("indexed A benchmark wrapper requires keyword arguments")
+        if kwargs.get("stage", "all") != "all":
+            return production_ab(**kwargs)
+        if kwargs["experts_shared_outer_loras_a"]:
+            raise NotImplementedError("indexed A supports per-expert factors only")
+
+        num_output_slices = kwargs["num_output_slices"]
+        if num_output_slices == 2:
+            site = "gate"
+            intermediate = kwargs.get("intermediate_buffer")
+            if intermediate is None:
+                raise RuntimeError("indexed gate A requires the runner intermediate")
+        elif num_output_slices == 1:
+            site = "down"
+            intermediate = down_intermediate
+        else:
+            raise ValueError(f"unsupported indexed A output slices {num_output_slices}")
+
+        invoke_indexed_lora_a(
+            kwargs["hidden_states"],
+            kwargs["lora_a"],
+            kwargs["topk_ids"],
+            kwargs["token_lora_mapping"],
+            intermediate,
+            config=configs.gate if site == "gate" else configs.down,
+            local_expert_offset=kwargs.get("local_expert_offset", 0),
+        )
+
+        expand_kwargs = dict(kwargs)
+        expand_kwargs["stage"] = "expand"
+        expand_kwargs["intermediate_buffer"] = intermediate
+        return production_ab(**expand_kwargs)
+
+    virtual_experts.merged_experts_fused_moe_lora_add = indexed_a_production_b
+    try:
+        yield
+    finally:
+        virtual_experts.merged_experts_fused_moe_lora_add = production_ab
 
 
 def _run_checked(fixture: PipelineFixture, pipeline: str) -> torch.Tensor:
@@ -438,7 +580,10 @@ def _max_abs_diff(lhs: torch.Tensor, rhs: torch.Tensor) -> float:
 
 
 def _check_pipelines(
-    fixture: PipelineFixture, pipelines: tuple[str, ...]
+    fixture: PipelineFixture,
+    pipelines: tuple[str, ...],
+    *,
+    production_c0_reference: torch.Tensor | None = None,
 ) -> dict[str, object]:
     checks: dict[str, object] = {
         "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
@@ -468,6 +613,15 @@ def _check_pipelines(
         torch.testing.assert_close(base_reference, sgl_base_only, rtol=6e-2, atol=6e-2)
 
         serial = _run_checked(fixture, "C0")
+        if production_c0_reference is not None:
+            checks["production_c0_indexed_c0_max_abs"] = _max_abs_diff(
+                production_c0_reference, serial
+            )
+            checks["production_c0_indexed_c0_rtol"] = 6e-2
+            checks["production_c0_indexed_c0_atol"] = 6e-2
+            torch.testing.assert_close(
+                production_c0_reference, serial, rtol=6e-2, atol=6e-2
+            )
         overlap = _run_checked(fixture, "C1")
         checks["c0_c1_max_abs"] = _max_abs_diff(serial, overlap)
         checks["c0_c1_rtol"] = 6e-2
@@ -546,6 +700,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", choices=("auto", "h200", "gb300"), default="auto")
     parser.add_argument("--case-id")
     parser.add_argument("--pipeline", choices=(*PIPELINES, "all"), default="all")
+    parser.add_argument(
+        "--a-provider",
+        choices=("production", "indexed"),
+        default="production",
+        help="LoRA-A implementation; production remains the default",
+    )
+    parser.add_argument(
+        "--indexed-gate-config",
+        default="auto",
+        metavar="AUTO_OR_KEY",
+        help="indexed gate-A schedule (default: device-specific cold-cache shortlist)",
+    )
+    parser.add_argument(
+        "--indexed-down-config",
+        default="auto",
+        metavar="AUTO_OR_KEY",
+        help="indexed down-A schedule (default: device-specific cold-cache shortlist)",
+    )
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument("--warmup", type=int, default=10)
@@ -563,8 +735,11 @@ def _benchmark_pipeline(
     case: MoeLoraBenchCase,
     *,
     check: bool,
+    a_provider: str = "production",
 ) -> dict[str, object]:
     from sglang.srt.model_executor.runner_utils.capture_mode import model_capture_mode
+
+    effective_a_provider = "not_applicable" if pipeline == "N0" else a_provider
 
     # Compile/JIT and initialize all lazy resources before timing or capture.
     fixture.reset_hidden()
@@ -592,11 +767,30 @@ def _benchmark_pipeline(
         "pipeline": pipeline,
         "description": {
             "N0": "matched_base_only_deepgemm",
-            "C0": "sgl_lora_serial",
-            "C1": "sgl_lora_two_stream_requested",
+            "C0": f"sgl_lora_serial_{a_provider}_a",
+            "C1": f"sgl_lora_two_stream_requested_{a_provider}_a",
         }[pipeline],
+        "a_provider": effective_a_provider,
+        "retained_components": (
+            None
+            if pipeline == "N0"
+            else [
+                "production_lora_b",
+                "production_swiglu_activation",
+                "production_deepgemm_base",
+            ]
+        ),
         "two_stream_requested": pipeline == "C1",
         "two_stream_overlap_effective": pipeline == "C1" and case.t_local <= 256,
+        "c1_route_prewarm": (
+            "production_a_and_b_routes_including_conservative_unused_a_overhead"
+            if pipeline == "C1" and a_provider == "indexed" and case.t_local <= 256
+            else (
+                "not_run_two_stream_threshold_fallback"
+                if pipeline == "C1" and case.t_local > 256
+                else "production" if pipeline == "C1" else None
+            )
+        ),
         "logical_invocations_per_batch": 1,
     }
 
@@ -632,7 +826,7 @@ def _benchmark_pipeline(
     else:
         fixture.reset_hidden()
         label = (
-            f"sgl_lora_moe::M0::{pipeline}::{case.case_id}::"
+            f"sgl_lora_moe::M0::{pipeline}::{case.case_id}::A={effective_a_provider}::"
             f"{run_config.execution}::pdl=auto"
         )
         with cuda_profile_range(label):
@@ -659,6 +853,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
     _validate_case(case)
+    indexed_configs = None
+    if args.a_provider == "indexed":
+        if case.adapters.shared_outer:
+            raise NotImplementedError(
+                "indexed A is a per-expert benchmark candidate and does not support "
+                "shared-outer factors"
+            )
+        indexed_configs = _resolve_indexed_a_configs(
+            device, args.indexed_gate_config, args.indexed_down_config
+        )
     pipelines = _resolve_pipelines(args.pipeline, case)
     if args.mode != "time" and len(pipelines) != 1:
         raise ValueError("Nsight capture requires one explicit --pipeline")
@@ -681,14 +885,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         profile_iterations=args.profile_iterations,
     )
 
-    with _single_rank_runtime():
-        fixture = _build_fixture(
-            case, need_lora=any(pipeline != "N0" for pipeline in pipelines)
+    with ExitStack() as stack:
+        stack.enter_context(_single_rank_runtime())
+        need_lora = any(pipeline != "N0" for pipeline in pipelines)
+        indexed_applied = args.a_provider == "indexed" and need_lora
+        effective_indexed_c1 = (
+            indexed_applied and "C1" in pipelines and case.t_local <= 256
         )
+        fixture = _build_fixture(
+            case,
+            need_lora=need_lora,
+            need_indexed_a=indexed_applied,
+        )
+
+        # Establish the active-adapter production result before installing the
+        # module-symbol wrapper. This catches any chain-level indexed-A drift in
+        # addition to the existing base-only and C0/C1 checks.
+        production_c0_reference = None
+        if indexed_applied and not args.skip_check:
+            production_c0_reference = _run_checked(fixture, "C0")
+
+        if indexed_applied:
+            assert indexed_configs is not None
+            stack.enter_context(_indexed_a_override(fixture, indexed_configs))
+
         correctness = (
             {"skipped": True}
             if args.skip_check
-            else _check_pipelines(fixture, pipelines)
+            else _check_pipelines(
+                fixture,
+                pipelines,
+                production_c0_reference=production_c0_reference,
+            )
         )
         torch.cuda.synchronize()
 
@@ -696,8 +924,54 @@ def main(argv: Sequence[str] | None = None) -> int:
             "environment": _environment(args),
             "case": _case_summary(case),
             "scope": "M0",
-            "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1",
-            "route_inclusion": "full_pipeline_including_lora_route_planning",
+            "comparison": (
+                "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A"
+                if indexed_applied
+                else "matched DeepGEMM N0 versus SGL LoRA C0/C1"
+            ),
+            "a_provider": {
+                "name": args.a_provider,
+                "applied": indexed_applied,
+                "configs": (
+                    indexed_configs.metadata() if indexed_configs is not None else None
+                ),
+                "substitution_scope": (
+                    "gate_and_down_lora_a_only" if indexed_applied else "none"
+                ),
+                "retained_components": (
+                    [
+                        "production_lora_b",
+                        "production_swiglu_activation",
+                        "production_deepgemm_base",
+                    ]
+                    if need_lora
+                    else []
+                ),
+                "production_policy_changed": False,
+                "c1_route_overhead": (
+                    "not_applicable"
+                    if "C1" not in pipelines
+                    else (
+                        "not_run_two_stream_threshold_fallback"
+                        if case.t_local > 256
+                        else (
+                            "conservative unused production A route prewarm retained"
+                            if effective_indexed_c1
+                            else "production"
+                        )
+                    )
+                ),
+            },
+            "route_inclusion": (
+                "raw_route_indexed_a_plus_production_b_routing; effective C1 "
+                "retains conservative unused production A route prewarm"
+                if effective_indexed_c1
+                else (
+                    "raw_route_indexed_a_plus_production_b_routing"
+                    if indexed_applied
+                    else "full_pipeline_including_lora_route_planning"
+                )
+            ),
             "correctness": correctness,
             "base_weight_bytes": sum(
                 tensor.numel() * tensor.element_size()
@@ -723,6 +997,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "tp1_ep1_moe_dp1_only",
                 "non_gated_models_pending",
                 "fp8_nvfp4_w4a16_pending",
+                *(
+                    [
+                        "indexed_a_per_expert_only",
+                        "indexed_effective_c1_retains_unused_production_a_route_prewarm",
+                    ]
+                    if effective_indexed_c1
+                    else ["indexed_a_per_expert_only"] if indexed_applied else []
+                ),
             ],
             "e0_server_driver": "sglang.benchmark.one_batch_server",
             "pipelines": {},
@@ -736,6 +1018,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_config,
                 case,
                 check=not args.skip_check,
+                a_provider=args.a_provider,
             )
 
         if args.json_output is not None:
