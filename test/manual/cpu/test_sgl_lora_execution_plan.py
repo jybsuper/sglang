@@ -118,6 +118,13 @@ def test_eager_and_fallback_policy_stay_in_measured_envelope():
     assert _plan(phase="other").path is PLAN.MoeLoraExecutionPath.C0_SERIAL
     assert _plan(fused_supported=False).path is PLAN.MoeLoraExecutionPath.C0_SERIAL
 
+    quantized = _plan(
+        fused_supported=False,
+        provider_key="deepgemm_fp8_w8a8",
+    )
+    assert quantized.provider_key == "deepgemm_fp8_w8a8"
+    assert "provider-neutral serial topology" in quantized.reason
+
 
 def test_rank_tiers_and_mixed_schedule_are_explicit_plan_fields():
     r16 = _plan(num_tokens=1, rank=16)

@@ -340,9 +340,7 @@ def dispatch_sgl_lora_moe(
     output_dtype: torch.dtype | None = None,
 ):
     """Route one MoE-LoRA forward (see module docstring for the policy)."""
-    from sglang.srt.lora.sgl_lora.bf16_execution import (
-        run_sgl_lora_moe_bf16_plan,
-    )
+    from sglang.srt.lora.sgl_lora.execution import run_sgl_lora_moe_plan
     from sglang.srt.lora.sgl_lora.execution_plan import (
         build_moe_lora_execution_plan,
     )
@@ -392,8 +390,9 @@ def dispatch_sgl_lora_moe(
             and lora_info.lora_use_virtual_experts
             and not lora_info.fully_sharded
         ),
+        provider_key=wrapper._sgl_lora_base_gemm.contract.key,
     )
-    return run_sgl_lora_moe_bf16_plan(
+    return run_sgl_lora_moe_plan(
         dispatch_output,
         wrapper._quant_info,
         base_layer.moe_runner_config,
