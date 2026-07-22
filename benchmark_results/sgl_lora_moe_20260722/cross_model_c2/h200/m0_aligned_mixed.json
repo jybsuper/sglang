@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "scope": "M0_local_bf16_c2_consumer_partial_experimental",
+  "contract": {
+    "w13_layout": "masked_gate_first_contiguous",
+    "activation": "ordinary_swiglu",
+    "elided_bridges": [
+      "gate_up_delta_TK2I",
+      "activation_TKI"
+    ],
+    "destinations": [
+      "masked_bf16_w2_input",
+      "canonical_TKR_down_b_input"
+    ],
+    "remaining_unfused_boundary": "base_finalize_then_existing_down_b_expand_add",
+    "planned_full_c2_completed": false,
+    "routing_fairness": "shared_whole_forward_cache_matching_c0",
+    "consumer_schedule": "aligned",
+    "scaling_semantics": "topk_weight_times_routed_scaling_applied_exactly_once_to_base_and_lora;harness_factor_is_1",
+    "production_dispatch_changed": false
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-mixed-h200",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 1,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:53:35.990580+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "cross-model-working-tree",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "experimental_lora_master_effective": "0",
+    "cli": {
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-mixed-h200",
+      "list_cases": false,
+      "variant": "all",
+      "consumer_schedule": "aligned",
+      "block_n": "64",
+      "num_warps": "4",
+      "execution": "cuda_graph",
+      "mode": "time",
+      "warmup": 5,
+      "samples": 20,
+      "counterbalance_repeats": 2,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_cross_model/h200_gpu6/m0_aligned_mixed.json"
+    }
+  },
+  "correctness": {
+    "bn64-w4": {
+      "c0_c2p_max_abs": 0.00018310546875,
+      "c0_c2p_rtol": 0.0,
+      "c0_c2p_atol": 0.003,
+      "reference_delta_max_abs": 0.0035495758056640625,
+      "candidate_delta_max_abs": 0.0035505294799804688,
+      "delta_max_abs_error": 0.00018310546875,
+      "delta_error_over_signal": 0.05158516926383665,
+      "delta_rtol": 0.02,
+      "delta_atol": 0.00035495758056640624
+    }
+  },
+  "runs": [
+    {
+      "variant": "C0",
+      "schedule": "not_applicable",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 439.50719237327576,
+        "p50_us": 441.1199986934662,
+        "p80_us": 442.03519225120544,
+        "min_us": 438.33601474761963,
+        "max_us": 448.4480023384094,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0001220703125,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 0,
+      "pair_order": [
+        "C0",
+        "C2P"
+      ]
+    },
+    {
+      "variant": "C2P",
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 438.1247937679291,
+        "p50_us": 438.57599794864655,
+        "p80_us": 439.60959911346436,
+        "min_us": 435.32800674438477,
+        "max_us": 442.6240026950836,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0003662109375,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 0,
+      "pair_order": [
+        "C0",
+        "C2P"
+      ]
+    },
+    {
+      "variant": "C2P",
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 436.8895888328552,
+        "p50_us": 437.9040002822876,
+        "p80_us": 439.9296045303345,
+        "min_us": 436.0319972038269,
+        "max_us": 441.3119852542877,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 1,
+      "pair_order": [
+        "C2P",
+        "C0"
+      ]
+    },
+    {
+      "variant": "C0",
+      "schedule": "not_applicable",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 444.5888042449951,
+        "p50_us": 445.99999487400055,
+        "p80_us": 446.69440388679504,
+        "min_us": 444.2560076713562,
+        "max_us": 449.66399669647217,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000152587890625,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 1,
+      "pair_order": [
+        "C2P",
+        "C0"
+      ]
+    }
+  ],
+  "counterbalanced_comparisons": [
+    {
+      "pair_index": 0,
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P"
+      ],
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "c0_p50_us": 441.1199986934662,
+      "c2p_p50_us": 438.57599794864655,
+      "c2p_vs_c0_pct": -0.5767139899244156
+    },
+    {
+      "pair_index": 1,
+      "repeat": 1,
+      "order": [
+        "C2P",
+        "C0"
+      ],
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "c0_p50_us": 445.99999487400055,
+      "c2p_p50_us": 437.9040002822876,
+      "c2p_vs_c0_pct": -1.815245445013991
+    }
+  ],
+  "counterbalanced_summary": [
+    {
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "num_pairs": 2,
+      "median_paired_pct": -1.1959797174692033,
+      "min_paired_pct": -1.815245445013991,
+      "max_paired_pct": -0.5767139899244156
+    }
+  ]
+}

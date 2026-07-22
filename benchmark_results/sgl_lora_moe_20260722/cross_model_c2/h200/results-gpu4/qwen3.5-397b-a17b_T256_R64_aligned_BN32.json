@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:39:46.166184+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "qwen3.5-397b-a17b",
+      "tokens": "256",
+      "ranks": "64",
+      "schedules": "aligned",
+      "block_n": "32",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_cross_model/h200_gpu4/isolated_full_v4/results/qwen3.5-397b-a17b_T256_R64_aligned_BN32.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "qwen3.5-397b-a17b"
+      ],
+      "tokens": [
+        256
+      ],
+      "ranks": [
+        64
+      ],
+      "schedules": [
+        "aligned"
+      ],
+      "block_n": [
+        32
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "qwen3.5-397b-a17b",
+        "activation": "swiglu",
+        "logical_i": 1024,
+        "physical_i": 1024,
+        "experts": 512,
+        "top_k": 10,
+        "tokens": 256,
+        "rank": 64
+      },
+      "semantic_contract": {
+        "activation": "swiglu",
+        "logical_slices": [
+          "gate",
+          "up"
+        ],
+        "lora_target_slices": [
+          "gate",
+          "up"
+        ],
+        "logical_intermediate_size": 1024,
+        "physical_intermediate_size": 1024,
+        "provider_slice_order": [
+          "gate",
+          "up"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "gated_swiglu_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "4ce9a67afc25c2c66974e0acd4cc62a432dacf575e180d30c6a30465d4f4ec13",
+        "route_block_m": 16,
+        "pairs": 2560,
+        "pairs_post_padded": 16336
+      },
+      "checks": {
+        "aligned-bn32": {
+          "sampled_pair_indices": [
+            0,
+            9,
+            10,
+            1280,
+            2519,
+            2529,
+            2559
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.00506591796875,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 0.0,
+          "down_rank_signal_max_abs": 0.0016326904296875,
+          "down_rank_error_over_signal": 0.0,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 37,
+          "base_only_tokens": 51
+        }
+      },
+      "runs": [
+        {
+          "schedule": "aligned",
+          "block_n": 32,
+          "timing": {
+            "p20_us": 199.7631937265396,
+            "p50_us": 200.44799894094467,
+            "p80_us": 200.7423996925354,
+            "min_us": 199.5519995689392,
+            "max_us": 205.4080069065094,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 7.62939453125e-06
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "aligned",
+        "block_n": 32,
+        "p50_us": 200.44799894094467,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}

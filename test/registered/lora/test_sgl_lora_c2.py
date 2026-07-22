@@ -73,8 +73,17 @@ def test_fused_c2_consumer_matches_materialized_bf16_contract(
         local_topk_ids + local_expert_offset,
         local_topk_ids,
     )
+    # A positive global ID can still be outside this EP shard. Give it an OOB
+    # provider destination so the aligned kernel must apply the local contract
+    # before reading ``src2dst``.
+    if local_expert_offset:
+        topk_ids = topk_ids.clone()
+        topk_ids.view(-1)[2] = local_expert_offset - 1
     token_lora_mapping = torch.tensor([0, -1, 1], dtype=torch.int32, device=device)
     src2dst = torch.tensor([0, 3, 0, 1, 4, 6], dtype=torch.int32, device=device)
+    if local_expert_offset:
+        src2dst = src2dst.clone()
+        src2dst[2] = 999
 
     sentinel = -123.0
     act_out = torch.full_like(gateup[..., :inter], sentinel)
@@ -88,9 +97,9 @@ def test_fused_c2_consumer_matches_materialized_bf16_contract(
     expected_act_flat = expected_act.view(-1, inter)
     for pair_idx in range(num_tokens * top_k):
         global_expert = int(topk_ids.view(-1)[pair_idx])
-        if global_expert < 0:
-            continue
         expert = global_expert - local_expert_offset
+        if not 0 <= expert < num_experts:
+            continue
         adapter = int(token_lora_mapping[pair_idx // top_k])
         dst = int(src2dst[pair_idx])
         gate = gateup_flat[dst, :inter].float()
@@ -147,7 +156,8 @@ def test_fused_c2_consumer_matches_materialized_bf16_contract(
                 if adapter >= 0 and global_expert >= 0
                 else -1
             )
-            buckets.setdefault(virtual_expert, []).append(pair_idx)
+            if virtual_expert >= 0:
+                buckets.setdefault(virtual_expert, []).append(pair_idx)
 
         sorted_pairs: list[int] = []
         route_experts: list[int] = []
@@ -180,6 +190,8 @@ def test_fused_c2_consumer_matches_materialized_bf16_contract(
             virtual_expert_ids,
             num_pairs_post_padded,
             route_block_size_m=route_block_m,
+            token_lora_mapping=token_lora_mapping,
+            local_expert_offset=local_expert_offset,
             block_size_n=block_size_n,
         )
     torch.cuda.synchronize()
