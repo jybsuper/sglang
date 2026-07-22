@@ -1,0 +1,108 @@
+{
+  "compute_capability": [
+    9,
+    0
+  ],
+  "contract": {
+    "activation": "swiglu",
+    "borrowed_buffers": [
+      "hidden_states",
+      "topk_ids",
+      "topk_weights",
+      "packed_topk_ids",
+      "base_weights"
+    ],
+    "gate_first": true,
+    "gate_up_output_dtype": "torch.bfloat16",
+    "gate_up_slices": [
+      "gate",
+      "up"
+    ],
+    "interleaved": false,
+    "key": "marlin_w4a16",
+    "lora_activation_dtype": "torch.bfloat16",
+    "lora_delta_dtype": "torch.bfloat16",
+    "packed_topk_policy": "preserve_if_present",
+    "provider_owned_buffers": [
+      "src2dst_identity",
+      "sorted_token_ids",
+      "expert_ids",
+      "num_tokens_post_padded",
+      "marlin_workspace",
+      "marlin_internal_scratch"
+    ],
+    "row_domain": "routed_pair",
+    "runner_owned_buffers": [
+      "gate_up_output",
+      "activation_bf16",
+      "activation_lora_input",
+      "down_output",
+      "final_output"
+    ],
+    "supported_output_dtypes": [
+      "torch.bfloat16",
+      "torch.float32"
+    ],
+    "w2_input_dtype": "torch.bfloat16",
+    "w2_scale_format": "marlin_group_scale",
+    "weight_format": "marlin_w4_packed"
+  },
+  "correctness": {
+    "active_delta_max_abs": 0.006998702883720398,
+    "base_rows_vs_provider_n0_max_abs": 0.006998702883720398,
+    "base_tolerance": 0.05,
+    "finite": true,
+    "graph_tolerance": 0.12,
+    "graph_vs_eager_max_abs": 0.0
+  },
+  "device": "NVIDIA H200",
+  "execution": "eager",
+  "iterations": 5,
+  "latency_ms": {
+    "plan_over_n0_ratio": 3.7064765820207097,
+    "production_plan": 0.6622079849243164,
+    "provider_matched_n0": 0.17866239547729493
+  },
+  "lora_pdl_policy": "auto",
+  "output_dtype": "torch.float32",
+  "plan": {
+    "consumer_block_size_n": 64,
+    "consumer_num_warps": 4,
+    "consumer_schedule": "pair",
+    "finalize_block_size_h": 64,
+    "finalize_num_warps": 2,
+    "graph_mode": false,
+    "has_base_rows": true,
+    "path": "c0_serial",
+    "phase": "decode",
+    "provider_key": "marlin_w4a16",
+    "reason": "marlin_w4a16 uses the provider-neutral serial topology; the fused tail is BF16-specific"
+  },
+  "provider": "marlin",
+  "provider_setup_ms_excluded": 235.41947454214096,
+  "python": "3.12.3",
+  "schema": "sgl_lora_quantized_production_plan_v1",
+  "semantics": {
+    "activation_lora_bridge_dtype": "torch.bfloat16",
+    "lora_arithmetic_dtype": "torch.bfloat16",
+    "packed_topk_identity_preserved": true,
+    "production_plan_entrypoint": "run_sgl_lora_moe_plan",
+    "provider_w2_input_dtype": "torch.bfloat16",
+    "virtual_experts": true
+  },
+  "shape": {
+    "adapters": 2,
+    "experts_local": 8,
+    "hidden": 2048,
+    "intermediate": 512,
+    "occupancy": "base",
+    "phase": "decode",
+    "rank": 64,
+    "tokens": 32,
+    "top_k": 8
+  },
+  "status": "pass",
+  "torch": "2.11.0+cu129",
+  "wall_seconds": 0.9719746112823486,
+  "warmups": 2
+}

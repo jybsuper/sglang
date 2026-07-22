@@ -1,8 +1,8 @@
 """SGLang-native LoRA execution engine.
 
 Phase 1a provides ``moe_lora_runner.run_sgl_lora_moe`` over a pluggable
-``base_gemm.MoeLoraBaseGemm``. The current provider envelope is deliberately
-narrow: unquantized BF16 MoE on Hopper or Blackwell through DeepGEMM.
+``base_gemm.MoeLoraBaseGemm``. Providers expose BF16, FP8 W8A8, native NVFP4
+W4A4, and Marlin W4A16 base stages while keeping LoRA arithmetic BF16.
 
 Standard SGLang weight layouts are used throughout. The engine requires
 ``--enable-lora`` and enables virtual-expert semantics internally. Dense and

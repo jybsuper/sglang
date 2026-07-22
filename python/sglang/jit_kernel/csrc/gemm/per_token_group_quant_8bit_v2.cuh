@@ -175,9 +175,14 @@ struct MaskedLayoutScheduler {
       int& subwarps_per_block,
       dim3& grid,
       dim3& block) {
-    subwarps_per_block = SUBWARPS_PER_BLOCK;
-    host::RuntimeCheck(hidden_dim_num_groups % subwarps_per_block == 0, "hidden_dim_num_groups not divisible by 16");
-    grid = dim3(hidden_dim_num_groups / subwarps_per_block, TOKEN_DIM_BLOCK_NUM_PER_EXPERT, num_local_experts);
+    subwarps_per_block =
+        (hidden_dim_num_groups % SUBWARPS_PER_BLOCK == 0) ? SUBWARPS_PER_BLOCK
+        : (hidden_dim_num_groups % 8 == 0)                ? 8
+        : (hidden_dim_num_groups % 4 == 0)                ? 4
+        : (hidden_dim_num_groups % 2 == 0)                ? 2
+                                                          : 1;
+    grid = dim3(
+        hidden_dim_num_groups / subwarps_per_block, TOKEN_DIM_BLOCK_NUM_PER_EXPERT, num_local_experts);
     block = dim3(subwarps_per_block * threads_per_subwarp);
   }
 
@@ -192,7 +197,8 @@ struct MaskedLayoutScheduler {
     const int lane_id = threadIdx.x % THREADS_PER_SUBWARP;
     const int expert_idx = blockIdx.z;
     const int token_idx_start = blockIdx.y;
-    const int64_t hidden_dim_group_idx = static_cast<int64_t>(blockIdx.x) * SUBWARPS_PER_BLOCK + subwarp_id;
+    const int64_t hidden_dim_group_idx =
+        static_cast<int64_t>(blockIdx.x) * subwarps_per_block + subwarp_id;
     const int curr_expert_token_num = masked_m[expert_idx];
     for (int token_idx = token_idx_start; token_idx < curr_expert_token_num;
          token_idx += TOKEN_DIM_BLOCK_NUM_PER_EXPERT) {
@@ -461,16 +467,28 @@ struct PerTokenGroupQuant8bitV2Kernel {
           else
             launch_with_config(TypeTag<NaiveScheduler>{}, std::true_type{}, std::true_type{}, std::true_type{});
         } else {
-          launch_with_config(TypeTag<NaiveScheduler>{}, std::true_type{}, std::true_type{}, std::false_type{});
+          if (masked_layout)
+            launch_with_config(TypeTag<MaskedLayoutScheduler>{}, std::true_type{}, std::true_type{}, std::false_type{});
+          else
+            launch_with_config(TypeTag<NaiveScheduler>{}, std::true_type{}, std::true_type{}, std::false_type{});
         }
       } else {
-        launch_with_config(TypeTag<NaiveScheduler>{}, std::true_type{}, std::false_type{}, std::false_type{});
+        if (masked_layout)
+          launch_with_config(TypeTag<MaskedLayoutScheduler>{}, std::true_type{}, std::false_type{}, std::false_type{});
+        else
+          launch_with_config(TypeTag<NaiveScheduler>{}, std::true_type{}, std::false_type{}, std::false_type{});
       }
     } else {
       if (scale_ue8m0) {
-        launch_with_config(TypeTag<NaiveScheduler>{}, std::false_type{}, std::true_type{}, std::false_type{});
+        if (masked_layout)
+          launch_with_config(TypeTag<MaskedLayoutScheduler>{}, std::false_type{}, std::true_type{}, std::false_type{});
+        else
+          launch_with_config(TypeTag<NaiveScheduler>{}, std::false_type{}, std::true_type{}, std::false_type{});
       } else {
-        launch_with_config(TypeTag<NaiveScheduler>{}, std::false_type{}, std::false_type{}, std::false_type{});
+        if (masked_layout)
+          launch_with_config(TypeTag<MaskedLayoutScheduler>{}, std::false_type{}, std::false_type{}, std::false_type{});
+        else
+          launch_with_config(TypeTag<NaiveScheduler>{}, std::false_type{}, std::false_type{}, std::false_type{});
       }
     }
   }

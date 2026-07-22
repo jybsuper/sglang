@@ -228,15 +228,16 @@ class TopKConfig:
 class TopKOutputChecker:
 
     @staticmethod
-    def format_is_standard(topk_output: TopKOutput) -> TypeGuard[StandardTopKOutput]:
-        # ===== TO BE REFACTORED ====
-        # The experimental fused topk+pack carrier only exists under the master switch.
-        if _SGLANG_EXPERIMENTAL_LORA_OPTI:
-            return isinstance(
-                topk_output, (StandardTopKOutput, StandardTopKOutputPacked)
-            )
-        # ===== END TO BE REFACTORED ====
-        return isinstance(topk_output, StandardTopKOutput)
+    def format_is_standard(
+        topk_output: TopKOutput,
+    ) -> TypeGuard[StandardTopKOutput | StandardTopKOutputPacked]:
+        # Packed top-k is still the standard semantic format: it adds one
+        # provider-owned representation without changing ids or weights.  The
+        # producer remains feature-gated; consumers must not reject an already
+        # constructed carrier merely because they do not read the packed view.
+        return isinstance(
+            topk_output, (StandardTopKOutput, StandardTopKOutputPacked)
+        )
 
     @staticmethod
     def format_is_triton_kernels(

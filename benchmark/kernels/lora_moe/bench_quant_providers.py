@@ -52,11 +52,26 @@ def _make_fp8_weight(weight: torch.Tensor):
         quantized.append(quant)
         scales.append(scale)
         references.append(_block_dequant_fp8(quant, scale, 128, 128))
-    return (
-        torch.stack(quantized),
-        torch.stack(scales),
-        torch.stack(references).to(weight.dtype),
-    )
+    quantized_weight = torch.stack(quantized)
+    weight_scale = torch.stack(scales)
+    from sglang.srt.layers import deep_gemm_wrapper
+
+    if deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0:
+        # Match Fp8MoEMethod's Blackwell post-load representation.  DeepGEMM
+        # consumes packed UE8M0 weight scales on SM100; ordinary block-FP32
+        # scales are a different ABI even though the FP8 values have the same
+        # logical [E,N,K] shape.
+        from sglang.srt.layers.quantization.fp8_utils import (
+            requant_weight_ue8m0,
+        )
+
+        quantized_weight, weight_scale = requant_weight_ue8m0(
+            quantized_weight, weight_scale, [128, 128]
+        )
+        reference = weight
+    else:
+        reference = torch.stack(references).to(weight.dtype)
+    return quantized_weight, weight_scale, reference
 
 
 def _make_marlin_weight(weight: torch.Tensor):

@@ -1,0 +1,108 @@
+{
+  "compute_capability": [
+    10,
+    3
+  ],
+  "contract": {
+    "activation": "swiglu",
+    "borrowed_buffers": [
+      "hidden_states",
+      "topk_ids",
+      "topk_weights",
+      "packed_topk_ids",
+      "base_weights"
+    ],
+    "gate_first": true,
+    "gate_up_output_dtype": "torch.bfloat16",
+    "gate_up_slices": [
+      "gate",
+      "up"
+    ],
+    "interleaved": false,
+    "key": "deepgemm_fp8_w8a8",
+    "lora_activation_dtype": "torch.bfloat16",
+    "lora_delta_dtype": "torch.bfloat16",
+    "packed_topk_policy": "preserve_if_present",
+    "provider_owned_buffers": [
+      "masked_m",
+      "src2dst",
+      "hidden_permuted_fp8",
+      "hidden_scale",
+      "activation_quant_fp8",
+      "activation_scale"
+    ],
+    "row_domain": "expert_masked",
+    "runner_owned_buffers": [
+      "gate_up_output",
+      "activation_bf16",
+      "activation_lora_input",
+      "down_output",
+      "final_output"
+    ],
+    "supported_output_dtypes": [
+      "torch.bfloat16",
+      "torch.float32"
+    ],
+    "w2_input_dtype": "torch.float8_e4m3fn",
+    "w2_scale_format": "per_token_group_fp32_or_packed_ue8m0",
+    "weight_format": "fp8_e4m3_block_scaled_e_n_k"
+  },
+  "correctness": {
+    "active_delta_max_abs": 0.6275327205657959,
+    "base_rows_vs_provider_n0_max_abs": 0.0,
+    "base_tolerance": 0.05,
+    "finite": true,
+    "graph_tolerance": 0.12,
+    "graph_vs_eager_max_abs": 0.020326780155301094
+  },
+  "device": "NVIDIA GB300",
+  "execution": "cuda_graph",
+  "iterations": 5,
+  "latency_ms": {
+    "plan_over_n0_ratio": 1.352875562351804,
+    "production_plan": 0.13971199989318847,
+    "provider_matched_n0": 0.10327039957046509
+  },
+  "lora_pdl_policy": "auto",
+  "output_dtype": "torch.float32",
+  "plan": {
+    "consumer_block_size_n": 64,
+    "consumer_num_warps": 4,
+    "consumer_schedule": "aligned",
+    "finalize_block_size_h": 64,
+    "finalize_num_warps": 2,
+    "graph_mode": true,
+    "has_base_rows": true,
+    "path": "c0_serial",
+    "phase": "decode",
+    "provider_key": "deepgemm_fp8_w8a8",
+    "reason": "deepgemm_fp8_w8a8 uses the provider-neutral serial topology; the fused tail is BF16-specific"
+  },
+  "provider": "fp8",
+  "provider_setup_ms_excluded": 218.0343579966575,
+  "python": "3.12.3",
+  "schema": "sgl_lora_quantized_production_plan_v1",
+  "semantics": {
+    "activation_lora_bridge_dtype": "torch.bfloat16",
+    "lora_arithmetic_dtype": "torch.bfloat16",
+    "packed_topk_identity_preserved": true,
+    "production_plan_entrypoint": "run_sgl_lora_moe_plan",
+    "provider_w2_input_dtype": "torch.float8_e4m3fn",
+    "virtual_experts": true
+  },
+  "shape": {
+    "adapters": 2,
+    "experts_local": 8,
+    "hidden": 7168,
+    "intermediate": 2048,
+    "occupancy": "mixed",
+    "phase": "decode",
+    "rank": 64,
+    "tokens": 16,
+    "top_k": 8
+  },
+  "status": "pass",
+  "torch": "2.11.0+cu130",
+  "wall_seconds": 3.9153287410736084,
+  "warmups": 2
+}

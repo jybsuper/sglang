@@ -127,12 +127,10 @@ def test_v2_jit_matches_aot(dtype, num_tokens, hidden, fuse_silu_and_mul, scale_
 #      covered by test_v2_jit_matches_aot above.
 
 
-# Masked (EP-MoE) path: the v2 op only has a masked scheduler for the
-# column-major + ue8m0 + fused-silu+mul + masked combination. Input is 3D
-# [num_experts, tokens_padded, hidden*2]; only tokens < masked_m[e] are processed
-# (padding left untouched → zeros in both). Compare JIT vs AOT bit-exact.
+# Masked (EP-MoE) fused path. Input is 3D [num_experts, tokens_padded,
+# hidden*2]; only tokens < masked_m[e] are processed (padding remains zero in
+# the pre-zeroed outputs). Compare JIT vs AOT bit-exact.
 MASKED_V2_CASES = get_ci_test_range(
-    # MaskedLayoutScheduler requires hidden / group_size to be divisible by 16.
     list(itertools.product([2, 5], [2048, 4096, 8192], [128, 384])),
     [(2, 2048, 128), (5, 4096, 384), (2, 8192, 128)],
 )
@@ -183,6 +181,65 @@ def test_v2_jit_masked_matches_aot(num_experts, hidden, tokens_pad):
         x_q.view(torch.int8), q_ref.view(torch.int8)
     ), "masked fp8 differ"
     assert torch.equal(x_s, s_ref), "masked scales differ"
+
+
+@pytest.mark.parametrize(
+    "num_experts,hidden,tokens_pad",
+    get_ci_test_range(
+        list(itertools.product([2, 5], [512, 2048, 7168], [37, 128])),
+        [(2, 512, 37), (5, 2048, 128), (2, 7168, 37)],
+    ),
+)
+def test_v2_jit_masked_already_activated_matches_valid_rows(
+    num_experts, hidden, tokens_pad
+):
+    """The non-fused masked path must not quantize provider padding.
+
+    Compare each valid expert slice with the same v2 kernel's 2-D scheduler;
+    padding is pre-zeroed and must remain untouched.  ``hidden=512`` also
+    covers a four-group output, below the former 16-subwarp assumption.
+    """
+    torch.manual_seed(num_experts * 1000 + hidden + tokens_pad + 17)
+    x = torch.randn(
+        num_experts, tokens_pad, hidden, device="cuda", dtype=torch.bfloat16
+    )
+    masked_m = torch.randint(
+        1, tokens_pad + 1, (num_experts,), device="cuda", dtype=torch.int32
+    )
+    q_masked, s_masked = _alloc(x.shape, scale_ue8m0=True)
+    per_token_group_quant_8bit_v2(
+        x,
+        q_masked,
+        s_masked,
+        G,
+        1e-10,
+        float(fp8_min),
+        float(fp8_max),
+        scale_ue8m0=True,
+        fuse_silu_and_mul=False,
+        masked_m=masked_m,
+    )
+
+    for expert in range(num_experts):
+        valid_m = int(masked_m[expert].item())
+        q_ref, s_ref = _alloc((valid_m, hidden), scale_ue8m0=True)
+        per_token_group_quant_8bit_v2(
+            x[expert, :valid_m],
+            q_ref,
+            s_ref,
+            G,
+            1e-10,
+            float(fp8_min),
+            float(fp8_max),
+            scale_ue8m0=True,
+        )
+        torch.cuda.synchronize()
+        assert torch.equal(
+            q_masked[expert, :valid_m].view(torch.int8), q_ref.view(torch.int8)
+        )
+        assert torch.equal(s_masked[expert, :valid_m], s_ref)
+        assert torch.count_nonzero(q_masked[expert, valid_m:]) == 0
+        assert torch.count_nonzero(s_masked[expert, valid_m:]) == 0
 
 
 if __name__ == "__main__":

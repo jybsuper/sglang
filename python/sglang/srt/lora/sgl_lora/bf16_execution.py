@@ -667,53 +667,18 @@ def run_sgl_lora_moe_bf16_plan(
     *,
     output_dtype: torch.dtype | None = None,
 ) -> StandardCombineInput:
-    """Execute an already-resolved host plan without re-deciding policy."""
-    from sglang.srt.lora.sgl_lora.execution_plan import MoeLoraExecutionPath
-    from sglang.srt.lora.sgl_lora.moe_lora_runner import run_sgl_lora_moe
+    """Compatibility alias for callers predating provider-neutral dispatch."""
+    from sglang.srt.lora.sgl_lora.execution import run_sgl_lora_moe_plan
 
-    if plan.path is MoeLoraExecutionPath.C0_SERIAL:
-        return run_sgl_lora_moe(
-            dispatch_output,
-            quant_info,
-            runner_config,
-            lora_info,
-            base,
-            two_stream_enabled=False,
-            output_dtype=output_dtype,
-        )
-    kwargs = dict(
-        consumer_schedule=plan.consumer_schedule,
-        consumer_block_size_n=plan.consumer_block_size_n,
-        consumer_num_warps=plan.consumer_num_warps,
-        has_base_rows=plan.has_base_rows,
+    return run_sgl_lora_moe_plan(
+        dispatch_output,
+        quant_info,
+        runner_config,
+        lora_info,
+        base,
+        plan,
         output_dtype=output_dtype,
     )
-    if plan.path is MoeLoraExecutionPath.C2_PARTIAL:
-        return run_sgl_lora_moe_c2_partial(
-            dispatch_output,
-            quant_info,
-            runner_config,
-            lora_info,
-            base,
-            consumer_schedule=plan.consumer_schedule,
-            block_size_n=plan.consumer_block_size_n,
-            num_warps=plan.consumer_num_warps,
-            has_base_rows=plan.has_base_rows,
-            output_dtype=output_dtype,
-        )
-    kwargs.update(
-        finalize_block_size_h=plan.finalize_block_size_h,
-        finalize_num_warps=plan.finalize_num_warps,
-    )
-    if plan.path is MoeLoraExecutionPath.C2_FULL:
-        return run_sgl_lora_moe_c2_full(
-            dispatch_output, quant_info, runner_config, lora_info, base, **kwargs
-        )
-    if plan.path is MoeLoraExecutionPath.C3_OVERLAP:
-        return run_sgl_lora_moe_c3(
-            dispatch_output, quant_info, runner_config, lora_info, base, **kwargs
-        )
-    raise AssertionError(f"unhandled SGL-LoRA execution path {plan.path!r}")
 
 
 __all__ = [

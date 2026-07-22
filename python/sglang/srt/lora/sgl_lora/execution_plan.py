@@ -1,4 +1,4 @@
-"""Host-side execution planning for the BF16 SGL-LoRA MoE pipeline.
+"""Host-side execution planning for the SGL-LoRA MoE pipeline.
 
 The planner consumes explicit orchestration metadata.  In particular, a token
 count never decides whether a forward is decode or prefill: that distinction is
@@ -40,6 +40,7 @@ class MoeLoraExecutionPlan:
     consumer_num_warps: int = 4
     finalize_block_size_h: int = 32
     finalize_num_warps: int = 4
+    provider_key: str = "deepgemm_bf16"
     reason: str = ""
 
     @property
@@ -116,6 +117,7 @@ def build_moe_lora_execution_plan(
     has_base_rows: bool,
     two_stream_requested: bool,
     fused_supported: bool = True,
+    provider_key: str = "deepgemm_bf16",
 ) -> MoeLoraExecutionPlan:
     """Return one immutable production plan for a resolved forward shape."""
     if phase not in {"decode", "prefill", "other"}:
@@ -141,9 +143,20 @@ def build_moe_lora_execution_plan(
         consumer_num_warps=4,
         finalize_block_size_h=finalizer_block_h,
         finalize_num_warps=finalizer_warps,
+        provider_key=provider_key,
     )
 
-    if not fused_supported or phase == "other" or rank <= 0 or rank > 128:
+    if not fused_supported:
+        return MoeLoraExecutionPlan(
+            path=MoeLoraExecutionPath.C0_SERIAL,
+            reason=(
+                f"{provider_key} uses the provider-neutral serial topology; "
+                "the fused tail is BF16-specific"
+            ),
+            **common,
+        )
+
+    if phase == "other" or rank <= 0 or rank > 128:
         return MoeLoraExecutionPlan(
             path=MoeLoraExecutionPath.C0_SERIAL,
             reason="outside the measured fused BF16 phase/rank envelope",
