@@ -1087,6 +1087,9 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             tp_rank=self.tp_rank,
             hidden_size=getattr(self.base_layer, "hidden_size", 0),
             lora_use_virtual_experts=self.lora_use_virtual_experts,
+            forward_phase=getattr(batch_info, "forward_phase", "other"),
+            use_cuda_graph=bool(batch_info.use_cuda_graph),
+            has_base_rows=bool(getattr(batch_info, "has_base_rows", True)),
         )
 
     def forward(self, hidden_states: torch.Tensor, topk_output: TopKOutput, **kwargs):
@@ -1130,7 +1133,12 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
                 dispatch_sgl_lora_moe,
             )
 
-            combine_input = dispatch_sgl_lora_moe(dispatch_output, self, lora_info)
+            combine_input = dispatch_sgl_lora_moe(
+                dispatch_output,
+                self,
+                lora_info,
+                output_dtype=kwargs.get("output_dtype"),
+            )
         elif self._lora_runner_backend.is_experimental_sgl_trtllm():
             from sglang.srt.lora.trtllm_lora_temp.lora_layer import (
                 dispatch_experimental_sgl_trtllm_lora,

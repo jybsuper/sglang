@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-22",
+  "workload": {
+    "model": "Qwen/Qwen1.5-MoE-A2.7B",
+    "adapter": "jonahbernard/sglang-lora-moe-test-qwen1.5-MoE-A2.7B",
+    "parallelism": {"tp": 1, "ep": 1, "moe_dp": 1},
+    "input_length": 128,
+    "output_length": 32,
+    "batch_sizes": [1, 16, 32],
+    "adapter_repetitions": 3,
+    "decode_cuda_graph": true,
+    "prefill_cuda_graph": false
+  },
+  "policy": {
+    "captured_decode_max_c2f_tokens": 128,
+    "captured_decode_c3_requires_two_stream": true,
+    "eager_decode_max_c2f_tokens": 256,
+    "prefill": "c2_partial",
+    "fallback": "c0_serial",
+    "measured_rank_min": 1,
+    "measured_rank_max": 128
+  },
+  "median_tokens_per_second": {
+    "gb300": {
+      "c2": {
+        "lora_input": [2073.94, 28024.23, 50797.83],
+        "lora_output": [368.38, 3142.36, 5318.59],
+        "base_input": [2751.85, 38311.33, 68537.35],
+        "base_output": [456.42, 3437.42, 5915.09]
+      },
+      "c3": {
+        "lora_input": [2045.53, 28291.07, 53194.60],
+        "lora_output": [385.89, 3277.41, 5313.18],
+        "base_input_one_repetition": [2774.37, 37703.03, 69890.71],
+        "base_output_one_repetition": [457.77, 3466.10, 5918.58]
+      }
+    },
+    "h200": {
+      "c2": {
+        "lora_input": [2217.56, 32831.34, 61218.24],
+        "lora_output": [315.17, 2230.93, 3633.45],
+        "base_input": [3665.81, 50482.59, 65796.46],
+        "base_output": [398.05, 2512.92, 4170.75]
+      },
+      "c3": {
+        "lora_input": [2347.36, 34059.78, 61094.11],
+        "lora_output": [322.32, 2248.50, 3719.50]
+      }
+    }
+  },
+  "gb300_baselines": {
+    "pre_planner_sgl_lora_input": [1965.80, 27853.65, 50039.21],
+    "pre_planner_sgl_lora_output": [346.90, 2966.59, 5190.14],
+    "experimental_trtllm_bf16_output": [406.73, 3469.76, 5935.44]
+  },
+  "comparisons_percent": {
+    "gb300_c2_vs_pre_planner_input": [5.50, 0.61, 1.52],
+    "gb300_c2_vs_pre_planner_output": [6.19, 5.92, 2.47],
+    "gb300_c3_vs_pre_planner_output": [11.24, 10.48, 2.37],
+    "gb300_c2_vs_experimental_trtllm_output": [-9.43, -9.44, -10.39],
+    "gb300_c3_vs_experimental_trtllm_output": [-5.12, -5.54, -10.48],
+    "gb300_c3_vs_c2_output": [4.75, 4.30, -0.10],
+    "h200_c3_vs_c2_output": [2.27, 0.79, 2.37]
+  },
+  "correctness": {
+    "gb300": {"base": "pass", "adapter": "pass", "mixed": "pass"},
+    "h200": {"base": "pass", "adapter": "pass", "mixed": "pass"}
+  },
+  "final_integrated_tests": {
+    "gb300": {"passed": 36, "failed": 0},
+    "h200": {"passed": 36, "failed": 0}
+  },
+  "production_nsys_trace": {
+    "device": "NVIDIA H200",
+    "case": "p0-qwen3.5-35b-a3b-cap1-h200",
+    "tokens": 32,
+    "rank": 64,
+    "execution": "cuda_graph",
+    "paths": ["c2_full", "c3_overlap"],
+    "iterations_each": 10,
+    "kernel_count": 220,
+    "stream_count": 2,
+    "primary_stream_overlap_us": 150.463,
+    "c2_eager_graph_max_abs": 0.0001220703125,
+    "c3_eager_graph_max_abs": 0.0001220703125,
+    "c2_graph_resources": 0,
+    "c3_graph_resources": 1
+  },
+  "source_sha256": {
+    "lora_layer.py": "07b9e1840b3caef2fad0d37b497be8cf8da5c72c15f646e6d98b762aae1a02ac",
+    "bf16_execution.py": "9bdcfc5db86c65de8801c03892c2f4ab0af1a30116bfca056be3531a0cd9230b",
+    "execution_plan.py": "b1ad881bc7e1264c69a2bc2c3662209bbb6bc97e82e3ee88cf4f608c662cbe72",
+    "fused_c2.py": "c8778f71ff9c74e1e3127e6a634dbf7be2643744f7c46ade350491da2c4eeb31"
+  }
+}

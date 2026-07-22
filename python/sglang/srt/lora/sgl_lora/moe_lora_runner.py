@@ -4,8 +4,8 @@ ONE function for all quants: the per-quant base GEMM stages live behind
 :class:`MoeLoraBaseGemm` (constructed once at LoRA-attach time); this runner
 owns the pipeline, the two-stream overlap, and every buffer allocation.
 
-The caller (``lora_layer.dispatch_sgl_lora_moe``) routes eager no-adapter
-batches to the stock Triton strategy. The current vertical slice uses the
+The caller (``lora_layer.dispatch_sgl_lora_moe``) routes no-adapter batches to
+the layer's resident stock base provider. The current vertical slice uses the
 virtual-expert store and standard local expert IDs; the broader support matrix
 is tracked in the refactor worklog.
 
@@ -26,10 +26,10 @@ Serial (non-overlap) batches run the same pipeline with the gate_up LoRA
 inline on the main stream before S1 — numerically equivalent (modulo the
 pre-existing shrink split-K bf16-atomic nondeterminism).
 
-``two_stream_enabled`` is an already-resolved execution decision. Production
-dispatch applies the current ``num_tokens <= 256`` auto policy before entering
-this runner; benchmark callers may therefore compare another resolved policy
-without changing the production default or copying the pipeline.
+``two_stream_enabled`` is an already-resolved execution decision. The BF16
+production planner uses this runner for its C0 fallback and owns C2/C3 policy
+separately; benchmark and compatibility callers can still exercise the older
+C0/C1 topology without copying the pipeline.
 
 Invariants carried over from the trtllm path (review-confirmed load-bearing):
   * NO device allocation inside the side-stream context — the stage="routing"
@@ -54,14 +54,13 @@ if TYPE_CHECKING:
     from sglang.srt.lora.sgl_lora.base_gemm import MoeLoraBaseGemm
     from sglang.srt.lora.sgl_lora.quant_info import SglLoraQuantInfo
 
-# Production auto-policy boundary. Keep policy selection outside the runner so
-# the execution function obeys one explicit decision under eager execution and
-# CUDA graph capture alike.
+# Compatibility policy for direct C0/C1 callers. The production BF16 planner
+# has its own evidence-bounded C2/C3 policy in execution_plan.py.
 LORA_TWO_STREAM_AUTO_MAX_TOKENS = 256
 
 
 def resolve_lora_two_stream_auto(*, requested: bool, num_tokens: int) -> bool:
-    """Resolve the production two-stream request for one fixed-shape forward."""
+    """Resolve the compatibility C0/C1 two-stream request for one forward."""
     return requested and num_tokens <= LORA_TWO_STREAM_AUTO_MAX_TOKENS
 
 
