@@ -87,13 +87,14 @@ def test_p0_cells_are_exact_resolved_runs():
         (256, 3, 0, 8, 64),
         (257, 3, 0, 8, 64),
         (2048, 3, 0, 8, 64),
+        (2048, 4, 0, 4, 128),
         (256, 8, 0, 8, 128),
     )
-    assert len({case.case_id for case in cases}) == 16
+    assert len({case.case_id for case in cases}) == 17
     assert cases[1].pipeline == "N0"
     assert all(case.pipeline == "C0" for i, case in enumerate(cases) if i != 1)
     assert cases[-1].cache_state == "hot"
-    assert all(case.phase == "prefill" for case in cases[11:15])
+    assert all(case.phase == "prefill" for case in cases[11:16])
 
 
 def test_local_geometry_and_factor_shapes_are_derived():
