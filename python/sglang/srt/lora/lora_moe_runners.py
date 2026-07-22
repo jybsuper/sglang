@@ -190,6 +190,13 @@ class LoRAInfo:
     hidden_size: int = 0
     lora_use_virtual_experts: bool = False
 
+    # Host-resolved execution context. ``use_cuda_graph`` identifies the
+    # topology being captured/replayed; ``forward_phase`` remains independent
+    # of token count; ``has_base_rows`` controls optional mixed-row work.
+    forward_phase: str = "other"
+    use_cuda_graph: bool = False
+    has_base_rows: bool = True
+
 
 @dataclass
 class LoRAHooks:

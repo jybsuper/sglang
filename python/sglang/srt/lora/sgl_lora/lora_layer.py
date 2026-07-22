@@ -340,9 +340,11 @@ def dispatch_sgl_lora_moe(
     output_dtype: torch.dtype | None = None,
 ):
     """Route one MoE-LoRA forward (see module docstring for the policy)."""
-    from sglang.srt.lora.sgl_lora.moe_lora_runner import (
-        resolve_lora_two_stream_auto,
-        run_sgl_lora_moe,
+    from sglang.srt.lora.sgl_lora.bf16_execution import (
+        run_sgl_lora_moe_bf16_plan,
+    )
+    from sglang.srt.lora.sgl_lora.execution_plan import (
+        build_moe_lora_execution_plan,
     )
     from sglang.srt.model_executor.runner_utils.capture_mode import (
         get_capture_lora_variant,
@@ -378,15 +380,25 @@ def dispatch_sgl_lora_moe(
             dispatch_output=dispatch_output,
         )
 
-    return run_sgl_lora_moe(
+    plan = build_moe_lora_execution_plan(
+        phase=lora_info.forward_phase,
+        graph_mode=lora_info.use_cuda_graph,
+        num_tokens=dispatch_output.hidden_states.shape[0],
+        rank=lora_info.max_lora_rank,
+        has_base_rows=lora_info.has_base_rows,
+        two_stream_requested=wrapper._sgl_lora_two_stream,
+        fused_supported=(
+            wrapper._sgl_lora_base_gemm.contract.key == "deepgemm_bf16"
+            and lora_info.lora_use_virtual_experts
+            and not lora_info.fully_sharded
+        ),
+    )
+    return run_sgl_lora_moe_bf16_plan(
         dispatch_output,
         wrapper._quant_info,
         base_layer.moe_runner_config,
         lora_info,
         wrapper._sgl_lora_base_gemm,
-        two_stream_enabled=resolve_lora_two_stream_auto(
-            requested=wrapper._sgl_lora_two_stream,
-            num_tokens=dispatch_output.hidden_states.shape[0],
-        ),
+        plan,
         output_dtype=output_dtype,
     )

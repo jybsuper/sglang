@@ -1,9 +1,12 @@
 # BF16 C3 gate-A/base overlap checkpoint
 
-This directory is the durable evidence bundle for the benchmark-only C3
-execution prototype. C3 retains the complete C2 fused consumers and changes
-only the producer schedule: gate/up LoRA-A shrink runs concurrently with base
-prepare plus gate/up GEMM. Production dispatch is unchanged.
+This directory is the durable evidence bundle that graduated the C3 execution
+prototype into the production BF16 planner. C3 retains the complete C2 fused
+consumers and changes only the producer schedule: gate/up LoRA-A shrink runs
+concurrently with base prepare plus gate/up GEMM. Serving dispatch now selects
+C3 only for captured decode with at most 128 tokens when two-stream execution
+is explicitly enabled; the default production path is serial C2F in that
+range. Prefill and larger captured decode use the scalable C2P tail.
 
 ## Topology
 
@@ -162,13 +165,15 @@ GB300 C3 traces are present, and all unprofiled GB300 timing results are valid.
 
 ## Decision
 
-1. Keep C3 benchmark-only for now; do not change serving dispatch.
-2. C3 is a viable CUDA-graph decode candidate for `T<=128`, pending broader
-   model/provider validation and a real selector.
-3. Do not select complete C3 at T>=256 or for prefill. Use C2P/C0/C1 until the
-   down finalizer has a size-aware fallback or a scalable implementation.
-4. Do not adopt a general eager C3 rule from this checkpoint; H200 and GB300
-   disagree at important anchors.
+1. Select C3 only for CUDA-graph decode at `T<=128` when two-stream execution
+   is explicitly requested; keep it opt-in because eager and larger-shape
+   results are not portable across H200 and GB300.
+2. Use serial C2F by default for captured decode at `T<=128` and eager decode
+   at `T<=256`.
+3. Use C2P for prefill and for captured decode above 128 tokens; never select
+   complete C3/C2F for the large-T prefill topology.
+4. Retain C0 as the explicit fallback outside the measured BF16 rank and
+   execution envelope.
 
 ## Artifact map and provenance
 

@@ -408,9 +408,27 @@ class LoRAManager:
             scalings=scalings,
             use_cuda_graph=use_cuda_graph,
         )
-        self.lora_backend.batch_info.has_active_lora = any(
-            lora_ranks[wi] > 0 for wi in weight_indices
-        )
+        batch_info = self.lora_backend.batch_info
+        batch_info.has_active_lora = any(lora_ranks[wi] > 0 for wi in weight_indices)
+        if self.lora_execution_engine == "sgl_lora":
+            from sglang.srt.lora.sgl_lora.execution_plan import (
+                classify_forward_phase,
+                resolve_static_has_base_rows,
+            )
+            from sglang.srt.model_executor.runner_utils.capture_mode import (
+                get_capture_lora_variant,
+            )
+
+            capture_variant = get_capture_lora_variant() if use_cuda_graph else None
+            batch_info.forward_phase = classify_forward_phase(
+                forward_batch.forward_mode
+            )
+            batch_info.has_base_rows = resolve_static_has_base_rows(
+                weight_indices=weight_indices,
+                lora_ranks=lora_ranks,
+                graph_mode=use_cuda_graph,
+                capture_variant=capture_variant,
+            )
 
     def update_lora_info(self):
         """

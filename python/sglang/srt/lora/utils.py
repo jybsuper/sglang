@@ -64,6 +64,14 @@ class LoRABatchInfo:
     # Computed from Python lists in prepare_lora_batch to avoid GPU sync.
     has_active_lora: bool = False
 
+    # SGL-LoRA execution metadata resolved from ForwardBatch on the host.
+    # ``forward_phase`` is semantic (decode/prefill/other), not inferred from
+    # the token count. ``has_base_rows`` is a static topology property for the
+    # current eager call or captured graph and must never be derived by scanning
+    # token_lora_mapping on the device during replay.
+    forward_phase: str = "other"
+    has_base_rows: bool = True
+
     # Per-request segment indptrs, shape (bs + 1,). Required by MoE virtual
     # experts which map tokens to requests regardless of the dense-LoRA
     # backend's internal segmentation.  For the triton backend these are
