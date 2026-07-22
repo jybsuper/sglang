@@ -129,7 +129,8 @@ def test_gate_up_a_b_matches_reference_and_reuses_routing(rank: int):
     torch.testing.assert_close(output, expected, rtol=3e-2, atol=3e-2)
 
 
-def test_generic_gate_up_b_uses_matching_rank_slice():
+@pytest.mark.parametrize("use_direct_expand_add", [True, False])
+def test_gate_up_b_uses_matching_rank_slice(use_direct_expand_add: bool):
     """R128 oracle: the up half must not reuse the zero gate-half input."""
     device = "cuda"
     rank = intermediate_size = 128
@@ -165,7 +166,7 @@ def test_generic_gate_up_b_uses_matching_rank_slice():
         experts_shared_outer_loras_a=False,
         experts_shared_outer_loras_b=False,
         fuse_add_to_output=False,
-        use_direct_expand_add=False,
+        use_direct_expand_add=use_direct_expand_add,
         num_output_slices=2,
         stage="expand",
         intermediate_buffer=intermediate,

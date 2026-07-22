@@ -61,6 +61,7 @@ def test_benchmark_server_args_preserves_existing_context(monkeypatch):
 
 def test_b_config_cli_default_and_explicit_fields():
     default = local.parse_args([])
+    synthetic = local.parse_args(["--b-input-source", "synthetic"])
     fields = (
         "b_block_m",
         "b_block_n",
@@ -69,7 +70,12 @@ def test_b_config_cli_default_and_explicit_fields():
         "b_num_warps",
         "b_num_stages",
     )
-    assert (default.b_config_selector, default.skip_check) == ("logical-t", False)
+    assert (
+        default.b_config_selector,
+        default.b_input_source,
+        default.skip_check,
+    ) == ("logical-t", "production-a", False)
+    assert synthetic.b_input_source == "synthetic"
     assert tuple(getattr(default, field) for field in fields) == (64, 64, 64, 1, 4, 4)
 
 
@@ -222,6 +228,68 @@ def test_generic_gate_check_uses_direct_oracle_and_tight_tolerance(monkeypatch):
         ("expand", False),
     ]
     assert tolerances == [(3e-2, 2e-4), (3e-2, 2e-4)]
+
+
+@pytest.mark.parametrize("target", ["gate_b", "down_b"])
+@pytest.mark.parametrize("variant", ["direct", "generic"])
+def test_synthetic_b_input_skips_a_and_uses_opposite_family_oracle(
+    monkeypatch, target, variant
+):
+    calls = []
+
+    class Fixture:
+        case = SimpleNamespace(adapters=SimpleNamespace(rank=128))
+        num_slices = 2
+        is_down = target == "down_b"
+        routing_cache = {}
+        output, intermediate = torch.tensor([3.0]), torch.tensor([2.0])
+
+        def invoke(self, stage, *, direct):
+            calls.append((stage, direct))
+
+        def reset_output(self):
+            self.output.fill_(3.0)
+
+    monkeypatch.setattr(local.torch.cuda, "synchronize", lambda: None)
+    fixture = Fixture()
+    reference = local._production_config_reference(
+        fixture,
+        target=target,
+        variant=variant,
+        b_input_source="synthetic",
+    )
+    op = local._build_op(
+        fixture,
+        target=target,
+        variant=variant,
+        scope="K0",
+        b_input_source="synthetic",
+    )
+
+    timed_direct = variant == "direct"
+    assert reference is not None
+    assert calls == [
+        ("routing", not timed_direct),
+        ("expand", not timed_direct),
+        ("routing", timed_direct),
+    ]
+    op.launch()
+    assert calls[-1] == ("expand", timed_direct)
+    assert all(stage != "shrink" for stage, _ in calls)
+
+
+def test_synthetic_b_input_fill_is_deterministic_and_validated():
+    first = torch.empty(2, 3, 8)
+    second = torch.empty_like(first)
+    local._fill_synthetic_b_intermediate(first)
+    local._fill_synthetic_b_intermediate(second)
+    assert torch.equal(first, second)
+    assert not torch.equal(first[..., :4], first[..., 4:])
+
+    for target in ("gate_b", "down_b"):
+        local._validate_b_input_source(target, "synthetic")
+    with pytest.raises(ValueError, match="only valid for gate_b or down_b"):
+        local._validate_b_input_source("gate_ab", "synthetic")
 
 
 def test_o0_b_clears_prewarm_before_rebuilding_b(monkeypatch):
