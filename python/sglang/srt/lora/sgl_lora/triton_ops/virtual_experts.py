@@ -337,14 +337,15 @@ def _invoke_moe_lora_shrink_splitk(
     N = weight.shape[1]
     K = weight.shape[2]
     BLOCK_SIZE_M = config["BLOCK_SIZE_M"]
-    BLOCK_SIZE_N = triton.next_power_of_2(N)
+    # Tile the rank axis instead of requiring the complete rank to live in one
+    # CTA.  The lower bound keeps R=8 tensor-core legal; the upper bound keeps
+    # each software-pipelined B tile within Hopper/Blackwell shared memory.
+    BLOCK_SIZE_N = max(16, min(128, triton.next_power_of_2(N)))
     BLOCK_SIZE_K = 256
     GROUP_SIZE_M = config.get("GROUP_SIZE_M", 1)
 
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], BLOCK_SIZE_M)
-    num_n_blocks = triton.cdiv(
-        N, BLOCK_SIZE_N
-    )  # == 1, BLOCK_SIZE_N == next_pow2(N) >= N
+    num_n_blocks = triton.cdiv(N, BLOCK_SIZE_N)
     base_grid = num_m_blocks * num_n_blocks
     # Single source of truth shared with the caller's zero-intermediate decision:
     # split-K accumulation REQUIRES a pre-zeroed output, so the predicted and
@@ -400,15 +401,17 @@ def _get_moe_lora_shrink_split_k(
     this heuristic lands within ~5% of the per-shape tuned optimum across the
     decode regime.
 
-    Block sizes must mirror _invoke_moe_lora_shrink_splitk (BLOCK_SIZE_N =
-    next_pow2(N) -> one N block; BLOCK_SIZE_K = 256).
+    Block sizes must mirror _invoke_moe_lora_shrink_splitk (BLOCK_SIZE_N is
+    clamped to [16, 128]; BLOCK_SIZE_K = 256).
     """
     N = weight.shape[1]
     K = weight.shape[2]
     block_size_m = config["BLOCK_SIZE_M"]
+    block_size_n = max(16, min(128, triton.next_power_of_2(N)))
     block_size_k = 256
     num_m_blocks = triton.cdiv(sorted_token_ids.shape[0], block_size_m)
-    base_grid = num_m_blocks  # num_n_blocks == 1: BLOCK_SIZE_N == next_pow2(N) >= N
+    num_n_blocks = triton.cdiv(N, block_size_n)
+    base_grid = num_m_blocks * num_n_blocks
     target = 512 if N <= 16 else 384 if N <= 32 else 256
     max_split_k = max(1, K // block_size_k)
     return max(1, min(triton.cdiv(target, base_grid), max_split_k, 8))
@@ -795,7 +798,12 @@ def _merged_experts_fused_moe_lora_add_impl(
             return {
                 "BLOCK_SIZE_M": 16,
                 "num_warps": 4 if (M <= 4 or N >= 32) else 2,
-                "num_stages": 3,
+                # Gate/up R=128 has N=2R=256.  Its former one-CTA output tile
+                # requested 278,528 bytes on Hopper/Blackwell and failed
+                # compilation.  Rank tiling plus two software stages keeps
+                # wider outputs legal without perturbing the established
+                # N<=128 schedule.
+                "num_stages": 2 if N > 128 else 3,
             }
         return {"BLOCK_SIZE_M": 32, "num_warps": 2, "num_stages": 2}  # prefill
 
