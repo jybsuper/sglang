@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "scope": "bf16_c2_down_b_finalize_experimental",
+  "contract": {
+    "production_dispatch_changed": false,
+    "base_layout": "masked_E_mmax_H",
+    "lora_input_layout": "canonical_T_K_R",
+    "owner": "token_and_hidden_tile",
+    "accumulation": "fp32_base_plus_lora_then_requested_output_dtype",
+    "scaling": "topk_weight_times_routed_scaling_exactly_once_both_branches",
+    "shared_outer_specialization": "weighted_rank_reduce_then_one_shared_B_load",
+    "current_full_c2_limits": "bf16_gate_first_contiguous_gated_swiglu_offset_zero",
+    "tail_input_source": "c2_producer_snapshot"
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-mixed-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 1,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "environment": {
+    "timestamp_utc": "2026-07-22T08:54:11.427322+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "experimental_lora_master_effective": "0",
+    "cli": {
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-mixed-gb300",
+      "list_cases": false,
+      "scope": "M0",
+      "variant": "all",
+      "rank": null,
+      "shared_outer": false,
+      "routed_scaling_factor": 1.75,
+      "tail_source": "auto",
+      "consumer_schedule": "pair",
+      "consumer_block_n": 32,
+      "consumer_warps": 4,
+      "finalize_block_h": "64",
+      "finalize_warps": "2",
+      "execution": "cuda_graph",
+      "mode": "time",
+      "warmup": 20,
+      "samples": 100,
+      "counterbalance_repeats": 2,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p1/c2_down_finalize/gb300/qwen_mixed_r64/m0_graph.json"
+    }
+  },
+  "correctness": {
+    "tail": {
+      "tail-bh64-w2": {
+        "oracle": "independent_token_topk_fp32_base_plus_lora",
+        "base_output_max_abs": 0.6953125,
+        "lora_rank_max_abs": 0.047607421875,
+        "routed_scaling_factor": 1.75,
+        "mixed_base_rows": true,
+        "fused_fp32_max_abs_error": 7.450580596923828e-09,
+        "split_bf16_max_abs_error": 0.0004173852503299713,
+        "fused_rtol": 0.0003,
+        "fused_atol": 0.0003,
+        "split_rtol": 0.08,
+        "split_atol": 0.008
+      }
+    },
+    "M0": {
+      "c0_c2p_max_abs": 0.00030517578125,
+      "c2p_c2f_max_abs": 0.00048828125,
+      "c0_delta_max_abs": 0.0059814453125,
+      "c2f_delta_max_abs": 0.005889892578125,
+      "rtol": 0.08,
+      "atol": 0.008
+    }
+  },
+  "M0_unsupported": null,
+  "runs": [
+    {
+      "scope": "M0",
+      "variant": "C0",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 316.864013671875,
+        "p50_us": 318.2080090045929,
+        "p80_us": 320.2303886413574,
+        "min_us": 312.00000643730164,
+        "max_us": 325.5999982357025,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.00030517578125,
+        "atol": 0.003
+      },
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P",
+        "C2F"
+      ]
+    },
+    {
+      "scope": "M0",
+      "variant": "C2P",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 321.30560874938965,
+        "p50_us": 323.0080008506775,
+        "p80_us": 325.1840054988861,
+        "min_us": 319.16800141334534,
+        "max_us": 331.5199911594391,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000732421875,
+        "atol": 0.003
+      },
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P",
+        "C2F"
+      ]
+    },
+    {
+      "scope": "M0",
+      "variant": "C2F",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 314.10560607910156,
+        "p50_us": 316.1599934101105,
+        "p80_us": 318.1760013103485,
+        "min_us": 312.032014131546,
+        "max_us": 328.6080062389374,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "atol": 0.003
+      },
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P",
+        "C2F"
+      ]
+    },
+    {
+      "scope": "M0",
+      "variant": "C2F",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 319.2000091075897,
+        "p50_us": 320.68800926208496,
+        "p80_us": 322.9759931564331,
+        "min_us": 316.864013671875,
+        "max_us": 342.8800106048584,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "atol": 0.003
+      },
+      "repeat": 1,
+      "order": [
+        "C2F",
+        "C2P",
+        "C0"
+      ]
+    },
+    {
+      "scope": "M0",
+      "variant": "C2P",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 326.4000117778778,
+        "p50_us": 328.44799757003784,
+        "p80_us": 330.49601316452026,
+        "min_us": 324.3519961833954,
+        "max_us": 338.6879861354828,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0003662109375,
+        "atol": 0.003
+      },
+      "repeat": 1,
+      "order": [
+        "C2F",
+        "C2P",
+        "C0"
+      ]
+    },
+    {
+      "scope": "M0",
+      "variant": "C0",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 322.30401039123535,
+        "p50_us": 324.3519961833954,
+        "p80_us": 325.3760039806366,
+        "min_us": 320.25599479675293,
+        "max_us": 333.24798941612244,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.00030517578125,
+        "atol": 0.003
+      },
+      "repeat": 1,
+      "order": [
+        "C2F",
+        "C2P",
+        "C0"
+      ]
+    }
+  ],
+  "paired_comparisons": [
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P",
+        "C2F"
+      ],
+      "control": "C0",
+      "candidate": "C2P",
+      "control_p50_us": 318.2080090045929,
+      "candidate_p50_us": 323.0080008506775,
+      "candidate_vs_control_pct": 1.5084446997735146
+    },
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P",
+        "C2F"
+      ],
+      "control": "C0",
+      "candidate": "C2F",
+      "control_p50_us": 318.2080090045929,
+      "candidate_p50_us": 316.1599934101105,
+      "candidate_vs_control_pct": -0.6436090659342475
+    },
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "repeat": 1,
+      "order": [
+        "C2F",
+        "C2P",
+        "C0"
+      ],
+      "control": "C0",
+      "candidate": "C2P",
+      "control_p50_us": 324.3519961833954,
+      "candidate_p50_us": 328.44799757003784,
+      "candidate_vs_control_pct": 1.2628260145889358
+    },
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "repeat": 1,
+      "order": [
+        "C2F",
+        "C2P",
+        "C0"
+      ],
+      "control": "C0",
+      "candidate": "C2F",
+      "control_p50_us": 324.3519961833954,
+      "candidate_p50_us": 320.68800926208496,
+      "candidate_vs_control_pct": -1.1296329186883503
+    }
+  ],
+  "paired_summary": [
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "candidate": "C2F",
+      "num_pairs": 2,
+      "median_paired_pct": -0.8866209923112989,
+      "min_paired_pct": -1.1296329186883503,
+      "max_paired_pct": -0.6436090659342475
+    },
+    {
+      "scope": "M0",
+      "block_h": 64,
+      "num_warps": 2,
+      "candidate": "C2P",
+      "num_pairs": 2,
+      "median_paired_pct": 1.3856353571812252,
+      "min_paired_pct": 1.2628260145889358,
+      "max_paired_pct": 1.5084446997735146
+    }
+  ]
+}

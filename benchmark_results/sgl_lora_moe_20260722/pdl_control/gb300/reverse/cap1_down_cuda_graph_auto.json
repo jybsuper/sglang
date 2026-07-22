@@ -1,0 +1,121 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T10:10:45.983690+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-cap1-gb300",
+      "site": "down",
+      "config": "production",
+      "block_m": null,
+      "block_n": null,
+      "block_k": null,
+      "split_k": null,
+      "num_warps": null,
+      "num_stages": null,
+      "mode": "time",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "pdl": "auto",
+      "cache_state": "hot",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_pdl/gb300_reverse/cap1_down_cuda_graph_auto.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-cap1-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "site": "down",
+  "scope": "K0",
+  "route_storage": "prebuilt",
+  "scope_note": "A routing is prebuilt outside the measured shrink",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "pdl_policy": "auto",
+  "cache_control": {
+    "state": "hot",
+    "method": "none_hot_working_set",
+    "flush_bytes": 0,
+    "detected_l2_bytes": 135528448,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "results": [
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "production",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "resolved production launcher"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 5.936000123620033,
+        "p50_us": 5.942400172352791,
+        "p80_us": 6.135040149092674,
+        "min_us": 5.929600074887276,
+        "max_us": 7.017599791288376,
+        "num_samples": 100,
+        "launches_per_batch": 10
+      },
+      "timing_domain": "cuda_event_device"
+    }
+  ]
+}
