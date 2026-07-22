@@ -75,6 +75,9 @@ def test_b_config_cli_default_and_explicit_fields():
         default.b_input_source,
         default.skip_check,
     ) == ("logical-t", "production-a", False)
+    assert (default.routing_pattern, default.routing_seed) == ("lattice", 17)
+    iid = local.parse_args(["--routing-pattern", "iid", "--routing-seed", "29"])
+    assert (iid.routing_pattern, iid.routing_seed) == ("iid", 29)
     assert synthetic.b_input_source == "synthetic"
     assert tuple(getattr(default, field) for field in fields) == (64, 64, 64, 1, 4, 4)
 

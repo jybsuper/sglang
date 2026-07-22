@@ -131,7 +131,7 @@ def p0_cases(
                 stage="M0",
                 pipeline="N0" if active == 0 else "C0",
                 graph_mode="eager",
-                routing="seeded_iid",
+                routing="deterministic_lattice",
                 cache_state=cache,
             )
         )
@@ -163,7 +163,7 @@ def model_shape_cases(device: Device) -> tuple[MoeLoraBenchCase, ...]:
                 stage="M0",
                 pipeline="C0",
                 graph_mode="eager",
-                routing="seeded_iid",
+                routing="deterministic_lattice",
                 cache_state="cold",
             )
         )
