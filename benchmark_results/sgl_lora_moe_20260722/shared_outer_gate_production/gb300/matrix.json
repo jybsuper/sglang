@@ -1,0 +1,1060 @@
+{
+  "schema": "sgl_lora_shared_outer_gate_dispatch_v1",
+  "device": "NVIDIA GB300",
+  "capability": [
+    10,
+    3
+  ],
+  "results": [
+    {
+      "case": {
+        "case_id": "selected-t32-r128-active",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 281.1129570007324,
+      "selected_us": 136.63344383239746,
+      "selected_speedup_pct": 105.74242229125245,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-active",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 26.638240814208984,
+      "selected_us": 14.363360404968262,
+      "selected_speedup_pct": 85.459670043473,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-fragmented",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 32,
+          "max_segment_len": 1
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 284.21295166015625,
+      "selected_us": 137.0248031616211,
+      "selected_speedup_pct": 107.4171574068429,
+      "max_abs_vs_generic": 0.00048828125
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-fragmented",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 32,
+          "max_segment_len": 1
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 26.63599967956543,
+      "selected_us": 16.398719549179077,
+      "selected_speedup_pct": 62.42731391121834,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          0,
+          3,
+          4,
+          0,
+          5,
+          6
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 281.9113540649414,
+      "selected_us": 136.23408317565918,
+      "selected_speedup_pct": 106.93158972666707,
+      "max_abs_vs_generic": 0.00048828125
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          0,
+          3,
+          4,
+          0,
+          5,
+          6
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 24.603359699249268,
+      "selected_us": 14.351840019226074,
+      "selected_speedup_pct": 71.43000246860338,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t256-r64-active",
+        "tokens": 256,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          64,
+          64,
+          64,
+          64
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 256,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 64
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 318.6460876464844,
+      "selected_us": 144.38495635986328,
+      "selected_speedup_pct": 120.6920275352612,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t256-r64-active",
+        "tokens": 256,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          64,
+          64,
+          64,
+          64
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 256,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 64
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 35.959839820861816,
+      "selected_us": 18.45136046409607,
+      "selected_speedup_pct": 94.88991010085654,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r64-h4096",
+        "tokens": 32,
+        "hidden_size": 4096,
+        "rank": 64,
+        "top_k": 10,
+        "num_experts": 512,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 4096,
+          "rank": 64,
+          "top_k": 10,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 325.89054107666016,
+      "selected_us": 148.20207595825195,
+      "selected_speedup_pct": 119.89607026048846,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r64-h4096",
+        "tokens": 32,
+        "hidden_size": 4096,
+        "rank": 64,
+        "top_k": 10,
+        "num_experts": 512,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 4096,
+          "rank": 64,
+          "top_k": 10,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 30.73535919189453,
+      "selected_us": 18.453919887542725,
+      "selected_speedup_pct": 66.55192706587158,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-noisy",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 310.8291244506836,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-noisy",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 22.543840408325195,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          0,
+          2,
+          0
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 305.64992904663086,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          0,
+          2,
+          0
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 22.542400360107422,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-wide",
+        "tokens": 32,
+        "hidden_size": 7168,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 384,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 7168,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "wide or unknown hidden size keeps the generic path"
+      },
+      "generic_us": 325.10704040527344,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-wide",
+        "tokens": 32,
+        "hidden_size": 7168,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 384,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 7168,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "wide or unknown hidden size keeps the generic path"
+      },
+      "generic_us": 24.617760181427002,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t1-r32-tiny",
+        "tokens": 1,
+        "hidden_size": 2048,
+        "rank": 32,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1
+        ],
+        "segment_adapter_ids": [
+          1
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 1,
+          "hidden_size": 2048,
+          "rank": 32,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 1,
+          "max_segment_len": 1
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "tiny token domains keep the latency-tuned generic path"
+      },
+      "generic_us": 297.06384658813477,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t1-r32-tiny",
+        "tokens": 1,
+        "hidden_size": 2048,
+        "rank": 32,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1
+        ],
+        "segment_adapter_ids": [
+          1
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "blackwell",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 1,
+          "hidden_size": 2048,
+          "rank": 32,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 1,
+          "max_segment_len": 1
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "tiny token domains keep the latency-tuned generic path"
+      },
+      "generic_us": 16.40879988670349,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    }
+  ]
+}

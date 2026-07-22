@@ -23,6 +23,11 @@ class MoELoRABatchInfo:
     # If a token has no lora adapter, the value is -1.
     token_lora_mapping: torch.Tensor
 
+    # Host-resolved upper bound for one request segment. Shared-outer gate A
+    # uses it to form a static segmented grid without reading an indptr back to
+    # the CPU or constructing a per-forward tile descriptor.
+    max_segment_len: int = 0
+
 
 @dataclass
 class LoRABatchInfo:

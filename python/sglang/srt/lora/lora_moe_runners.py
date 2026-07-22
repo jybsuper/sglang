@@ -196,6 +196,7 @@ class LoRAInfo:
     forward_phase: str = "other"
     use_cuda_graph: bool = False
     has_base_rows: bool = True
+    max_segment_len: int = 0
 
 
 @dataclass

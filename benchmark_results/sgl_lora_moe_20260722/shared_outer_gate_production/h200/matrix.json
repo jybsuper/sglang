@@ -1,0 +1,1060 @@
+{
+  "schema": "sgl_lora_shared_outer_gate_dispatch_v1",
+  "device": "NVIDIA H200",
+  "capability": [
+    9,
+    0
+  ],
+  "results": [
+    {
+      "case": {
+        "case_id": "selected-t32-r128-active",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 248.30816268920898,
+      "selected_us": 145.1484775543213,
+      "selected_speedup_pct": 71.07183407850803,
+      "max_abs_vs_generic": 0.000732421875
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-active",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 26.208961009979248,
+      "selected_us": 13.909120559692383,
+      "selected_speedup_pct": 88.4300369495028,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-fragmented",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 32,
+          "max_segment_len": 1
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 251.13103866577148,
+      "selected_us": 144.14079666137695,
+      "selected_speedup_pct": 74.22620415769003,
+      "max_abs_vs_generic": 0.000732421875
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-fragmented",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 32,
+          "max_segment_len": 1
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 26.37183904647827,
+      "selected_us": 15.302720069885254,
+      "selected_speedup_pct": 72.33432308793464,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          0,
+          3,
+          4,
+          0,
+          5,
+          6
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 259.0496063232422,
+      "selected_us": 144.8840045928955,
+      "selected_speedup_pct": 78.7979335960078,
+      "max_abs_vs_generic": 0.000732421875
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r128-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 128,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          0,
+          3,
+          4,
+          0,
+          5,
+          6
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 128,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 8,
+          "max_segment_len": 4
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 25.369598865509033,
+      "selected_us": 12.860959768295288,
+      "selected_speedup_pct": 97.26054137926718,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t256-r64-active",
+        "tokens": 256,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          64,
+          64,
+          64,
+          64
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 256,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 64
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 253.02623748779297,
+      "selected_us": 145.9985637664795,
+      "selected_speedup_pct": 73.30734697671491,
+      "max_abs_vs_generic": 0.00048828125
+    },
+    {
+      "case": {
+        "case_id": "selected-t256-r64-active",
+        "tokens": 256,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          64,
+          64,
+          64,
+          64
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 256,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 64
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 36.489601135253906,
+      "selected_us": 16.775200366973877,
+      "selected_speedup_pct": 117.52110458896632,
+      "max_abs_vs_generic": 0.00048828125
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r64-h4096",
+        "tokens": 32,
+        "hidden_size": 4096,
+        "rank": 64,
+        "top_k": 10,
+        "num_experts": 512,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 4096,
+          "rank": 64,
+          "top_k": 10,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 251.78735733032227,
+      "selected_us": 146.3100814819336,
+      "selected_speedup_pct": 72.09159804986716,
+      "max_abs_vs_generic": 0.0009765625
+    },
+    {
+      "case": {
+        "case_id": "selected-t32-r64-h4096",
+        "tokens": 32,
+        "hidden_size": 4096,
+        "rank": 64,
+        "top_k": 10,
+        "num_experts": 512,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 4096,
+          "rank": 64,
+          "top_k": 10,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "token_dedup_pair_output",
+        "config_key": "bm16-bn32-bk64-w4",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3,
+        "reason": "shared gate/up A removes repeated top-k GEMMs while preserving the pair-major consumer contract in one launch"
+      },
+      "generic_us": 30.07200002670288,
+      "selected_us": 18.408000469207764,
+      "selected_speedup_pct": 63.363750870205784,
+      "max_abs_vs_generic": 0.00146484375
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-noisy",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 248.63168716430664,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-noisy",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 21.308319568634033,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          0,
+          2,
+          0
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 247.48048782348633,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-mixed",
+        "tokens": 32,
+        "hidden_size": 2048,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          0,
+          2,
+          0
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 2048,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": true,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "shape is in a tiny, mixed, or cross-device noisy cell"
+      },
+      "generic_us": 21.215200424194336,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-wide",
+        "tokens": 32,
+        "hidden_size": 7168,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 384,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 32,
+          "hidden_size": 7168,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "wide or unknown hidden size keeps the generic path"
+      },
+      "generic_us": 252.42975234985352,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t32-r64-wide",
+        "tokens": 32,
+        "hidden_size": 7168,
+        "rank": 64,
+        "top_k": 8,
+        "num_experts": 384,
+        "segment_lengths": [
+          8,
+          8,
+          8,
+          8
+        ],
+        "segment_adapter_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 32,
+          "hidden_size": 7168,
+          "rank": 64,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 4,
+          "max_segment_len": 8
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "wide or unknown hidden size keeps the generic path"
+      },
+      "generic_us": 24.549601078033447,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t1-r32-tiny",
+        "tokens": 1,
+        "hidden_size": 2048,
+        "rank": 32,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1
+        ],
+        "segment_adapter_ids": [
+          1
+        ],
+        "phase": "decode"
+      },
+      "execution": "eager",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": false,
+          "num_tokens": 1,
+          "hidden_size": 2048,
+          "rank": 32,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 1,
+          "max_segment_len": 1
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "tiny token domains keep the latency-tuned generic path"
+      },
+      "generic_us": 247.24016189575195,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    },
+    {
+      "case": {
+        "case_id": "fallback-t1-r32-tiny",
+        "tokens": 1,
+        "hidden_size": 2048,
+        "rank": 32,
+        "top_k": 8,
+        "num_experts": 256,
+        "segment_lengths": [
+          1
+        ],
+        "segment_adapter_ids": [
+          1
+        ],
+        "phase": "decode"
+      },
+      "execution": "cuda_graph",
+      "selector": {
+        "key": {
+          "site": "gate_a",
+          "device_family": "hopper",
+          "phase": "decode",
+          "graph_mode": true,
+          "num_tokens": 1,
+          "hidden_size": 2048,
+          "rank": 32,
+          "top_k": 8,
+          "has_base_rows": false,
+          "num_segments": 1,
+          "max_segment_len": 1
+        },
+        "kernel": "generic_virtual_expert",
+        "config_key": "generic",
+        "block_m": 0,
+        "block_n": 0,
+        "block_k": 0,
+        "num_warps": 0,
+        "num_stages": 0,
+        "reason": "tiny token domains keep the latency-tuned generic path"
+      },
+      "generic_us": 16.493279933929443,
+      "selected_us": null,
+      "selected_speedup_pct": null,
+      "max_abs_vs_generic": 0.0
+    }
+  ]
+}

@@ -4,9 +4,16 @@ from pathlib import Path
 
 
 def _load_plan_module():
-    path = (
-        Path(__file__).parents[3] / "python/sglang/srt/lora/sgl_lora/execution_plan.py"
-    )
+    directory = Path(__file__).parents[3] / "python/sglang/srt/lora/sgl_lora"
+    policy_path = directory / "shared_outer_gate_policy.py"
+    policy_name = "sglang.srt.lora.sgl_lora.shared_outer_gate_policy"
+    policy_spec = importlib.util.spec_from_file_location(policy_name, policy_path)
+    assert policy_spec is not None and policy_spec.loader is not None
+    policy_module = importlib.util.module_from_spec(policy_spec)
+    sys.modules[policy_name] = policy_module
+    policy_spec.loader.exec_module(policy_module)
+
+    path = directory / "execution_plan.py"
     spec = importlib.util.spec_from_file_location("_test_sgl_lora_execution_plan", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

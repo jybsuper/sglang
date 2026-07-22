@@ -105,6 +105,7 @@ def run_sgl_lora_moe_c2_partial(
     down_finalize: Callable[..., None] | None = None,
     has_base_rows: bool = True,
     output_dtype: torch.dtype | None = None,
+    shared_outer_gate_a_plan=None,
 ) -> StandardCombineInput:
     """Run the serial BF16 C2-consumer partial.
 
@@ -179,6 +180,10 @@ def run_sgl_lora_moe_c2_partial(
         local_expert_offset=0,
         local_num_experts=quant_info.num_local_experts,
         stage="routing",
+        shared_outer_gate_a_plan=shared_outer_gate_a_plan,
+        segment_indptr=getattr(lora_info, "seg_indptr", None),
+        segment_lora_ids=getattr(lora_info, "req_to_lora", None),
+        max_segment_len=getattr(lora_info, "max_segment_len", 0),
     )
 
     # Gate/up A remains a standalone producer in C2.  Its 2R output is the
@@ -209,6 +214,10 @@ def run_sgl_lora_moe_c2_partial(
         local_num_experts=quant_info.num_local_experts,
         stage="shrink",
         intermediate_buffer=gate_up_intermediate,
+        shared_outer_gate_a_plan=shared_outer_gate_a_plan,
+        segment_indptr=getattr(lora_info, "seg_indptr", None),
+        segment_lora_ids=getattr(lora_info, "req_to_lora", None),
+        max_segment_len=getattr(lora_info, "max_segment_len", 0),
     )
 
     ws = base.prepare(
@@ -371,6 +380,7 @@ def run_sgl_lora_moe_c2_full(
     finalize_num_warps: int = 4,
     has_base_rows: bool = True,
     output_dtype: torch.dtype | None = None,
+    shared_outer_gate_a_plan=None,
 ) -> StandardCombineInput:
     """Run complete serial C2 with a fused down-B/base finalizer."""
     from sglang.srt.lora.sgl_lora.triton_ops.fused_down_finalize import (
@@ -420,6 +430,7 @@ def run_sgl_lora_moe_c2_full(
         down_finalize=down_finalize,
         has_base_rows=has_base_rows,
         output_dtype=output_dtype,
+        shared_outer_gate_a_plan=shared_outer_gate_a_plan,
     )
 
 
@@ -437,6 +448,7 @@ def run_sgl_lora_moe_c3(
     finalize_num_warps: int = 4,
     has_base_rows: bool = True,
     output_dtype: torch.dtype | None = None,
+    shared_outer_gate_a_plan=None,
 ) -> StandardCombineInput:
     """Run complete C2 while overlapping gate/up LoRA-A with base GEMM1."""
     from sglang.srt.distributed import get_tp_group
@@ -512,6 +524,10 @@ def run_sgl_lora_moe_c3(
             local_num_experts=quant_info.num_local_experts,
             stage=stage,
             intermediate_buffer=(gate_up_intermediate if stage == "shrink" else None),
+            shared_outer_gate_a_plan=shared_outer_gate_a_plan,
+            segment_indptr=getattr(lora_info, "seg_indptr", None),
+            segment_lora_ids=getattr(lora_info, "req_to_lora", None),
+            max_segment_len=getattr(lora_info, "max_segment_len", 0),
         )
 
     # Every allocation and route plan belongs to the main stream before fork.

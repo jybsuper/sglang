@@ -57,6 +57,7 @@ def run_sgl_lora_moe_plan(
             base,
             two_stream_enabled=False,
             output_dtype=output_dtype,
+            shared_outer_gate_a_plan=plan.shared_outer_gate_a_plan,
         )
 
     if base.contract.key != "deepgemm_bf16":
@@ -77,6 +78,7 @@ def run_sgl_lora_moe_plan(
         consumer_num_warps=plan.consumer_num_warps,
         has_base_rows=plan.has_base_rows,
         output_dtype=output_dtype,
+        shared_outer_gate_a_plan=plan.shared_outer_gate_a_plan,
     )
     if plan.path is MoeLoraExecutionPath.C2_PARTIAL:
         return run_sgl_lora_moe_c2_partial(
@@ -90,6 +92,7 @@ def run_sgl_lora_moe_plan(
             num_warps=plan.consumer_num_warps,
             has_base_rows=plan.has_base_rows,
             output_dtype=output_dtype,
+            shared_outer_gate_a_plan=plan.shared_outer_gate_a_plan,
         )
     kwargs.update(
         finalize_block_size_h=plan.finalize_block_size_h,

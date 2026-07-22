@@ -73,6 +73,7 @@ def run_sgl_lora_moe(
     *,
     two_stream_enabled: bool,
     output_dtype: torch.dtype | None = None,
+    shared_outer_gate_a_plan=None,
 ) -> StandardCombineInput:
     from sglang.srt.distributed import get_tp_group
     from sglang.srt.distributed.device_communicators.pynccl_allocator import (
@@ -176,6 +177,10 @@ def run_sgl_lora_moe(
             intermediate_buffer=(
                 gate_up_lora_intermediate if stage != "routing" else None
             ),
+            shared_outer_gate_a_plan=shared_outer_gate_a_plan,
+            segment_indptr=getattr(lora_info, "seg_indptr", None),
+            segment_lora_ids=getattr(lora_info, "req_to_lora", None),
+            max_segment_len=getattr(lora_info, "max_segment_len", 0),
         )
 
     lora_event = None

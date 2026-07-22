@@ -785,6 +785,10 @@ def _merged_experts_fused_moe_lora_add_impl(
     expert_id_map: torch.Tensor | None = None,
     stage: str = "all",
     intermediate_buffer: torch.Tensor | None = None,
+    shared_outer_gate_a_plan=None,
+    segment_indptr: torch.Tensor | None = None,
+    segment_lora_ids: torch.Tensor | None = None,
+    max_segment_len: int = 0,
 ) -> "torch.Tensor | None":
     """
     1. Prepare virtual expert routing metadata from topk_ids + token_lora_mapping * num_experts.
@@ -1009,6 +1013,18 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_experts_b = lora_b.shape[1]
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
     enable_pdl, _ = _get_pdl_launch_metadata()
+    use_shared_outer_gate_a = bool(
+        experts_shared_outer_loras_a
+        and shared_outer_gate_a_plan is not None
+        and shared_outer_gate_a_plan.uses_token_dedup
+    )
+    if use_shared_outer_gate_a and (
+        segment_indptr is None or segment_lora_ids is None or max_segment_len <= 0
+    ):
+        raise ValueError(
+            "selected shared-outer gate A requires segment indptr, adapter IDs, "
+            "and a positive max segment length"
+        )
 
     if stage == "routing":
         # Pre-warm the routing cache on the CALLER'S (main) stream so the
@@ -1018,14 +1034,17 @@ def _merged_experts_fused_moe_lora_add_impl(
         # allocator's stream tracking is disabled while capturing), corrupting
         # replays. Routing needs only topk_ids + token_lora_mapping, which are
         # both ready before the side-stream fork, so it can run on main.
-        a_cfg = _get_shrink_stage_config(lora_a_virtual, token_lora_mapping.shape[0])
-        _get_routing(
-            topk_ids,
-            token_lora_mapping,
-            num_experts_a,
-            experts_shared_outer_loras_a,
-            a_cfg["BLOCK_SIZE_M"],
-        )
+        if not use_shared_outer_gate_a:
+            a_cfg = _get_shrink_stage_config(
+                lora_a_virtual, token_lora_mapping.shape[0]
+            )
+            _get_routing(
+                topk_ids,
+                token_lora_mapping,
+                num_experts_a,
+                experts_shared_outer_loras_a,
+                a_cfg["BLOCK_SIZE_M"],
+            )
         _get_routing(
             topk_ids,
             token_lora_mapping,
@@ -1037,66 +1056,92 @@ def _merged_experts_fused_moe_lora_add_impl(
 
     intermediate = intermediate_buffer
     if stage != "expand":
-        a_stage_config = _get_shrink_stage_config(
-            lora_a_virtual, token_lora_mapping.shape[0]
-        )
-        (
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            token_lora_mask,
-        ) = _get_routing(
-            topk_ids,
-            token_lora_mapping,
-            num_experts_a,
-            experts_shared_outer_loras_a,
-            a_stage_config["BLOCK_SIZE_M"],
-        )
         intermediate_shape = [
             token_lora_mapping.shape[0],
             topk_ids.shape[1],
             max_lora_rank,
         ]
-        intermediate_split_k = _get_moe_lora_shrink_split_k(
-            lora_a_virtual, sorted_token_ids, a_stage_config
-        )
-        # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert expand skips
-        # non-owned blocks (never reads them), but a shared-outer expand routes by lora id
-        # and would read them into the real (all-reduced) output -> must zero. split_k > 1
-        # also needs a zeroed buffer for its accumulation.
-        zero_intermediate = intermediate_split_k > 1 or (
-            ep_local and experts_shared_outer_loras_b
-        )
-        if intermediate is None:
-            intermediate = (
-                torch.zeros(
+        if use_shared_outer_gate_a:
+            if intermediate is None:
+                intermediate = torch.empty(
                     intermediate_shape,
                     dtype=hidden_states.dtype,
                     device=hidden_states.device,
                 )
-                if zero_intermediate
-                else torch.empty(
-                    intermediate_shape,
-                    dtype=hidden_states.dtype,
-                    device=hidden_states.device,
-                )
+            from sglang.srt.lora.sgl_lora.shared_outer_gate import (
+                invoke_shared_outer_gate_a_token_dedup,
             )
-        elif zero_intermediate:
-            # Caller-provided buffer (allocated on the consumer stream): zero it in-stream.
-            intermediate.zero_()
 
-        _invoke_moe_lora_shrink_splitk(
-            hidden_states,
-            lora_a_virtual,
-            intermediate.view(-1, max_lora_rank),
-            topk_ids,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            input_top_k,
-            a_stage_config,
-            signal_expand_pdl=(stage == "all" and use_direct_expand_add and enable_pdl),
-        )
+            invoke_shared_outer_gate_a_token_dedup(
+                hidden_states,
+                lora_a,
+                intermediate,
+                segment_indptr,
+                segment_lora_ids,
+                max_segment_len,
+                shared_outer_gate_a_plan,
+                signal_expand_pdl=(
+                    stage == "all" and use_direct_expand_add and enable_pdl
+                ),
+            )
+        else:
+            a_stage_config = _get_shrink_stage_config(
+                lora_a_virtual, token_lora_mapping.shape[0]
+            )
+            (
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                token_lora_mask,
+            ) = _get_routing(
+                topk_ids,
+                token_lora_mapping,
+                num_experts_a,
+                experts_shared_outer_loras_a,
+                a_stage_config["BLOCK_SIZE_M"],
+            )
+            intermediate_split_k = _get_moe_lora_shrink_split_k(
+                lora_a_virtual, sorted_token_ids, a_stage_config
+            )
+            # EP leaves non-owned [token, k] shrink slots unwritten. A per-expert expand skips
+            # non-owned blocks (never reads them), but a shared-outer expand routes by lora id
+            # and would read them into the real (all-reduced) output -> must zero. split_k > 1
+            # also needs a zeroed buffer for its accumulation.
+            zero_intermediate = intermediate_split_k > 1 or (
+                ep_local and experts_shared_outer_loras_b
+            )
+            if intermediate is None:
+                intermediate = (
+                    torch.zeros(
+                        intermediate_shape,
+                        dtype=hidden_states.dtype,
+                        device=hidden_states.device,
+                    )
+                    if zero_intermediate
+                    else torch.empty(
+                        intermediate_shape,
+                        dtype=hidden_states.dtype,
+                        device=hidden_states.device,
+                    )
+                )
+            elif zero_intermediate:
+                # Caller-provided buffer (allocated on the consumer stream): zero it in-stream.
+                intermediate.zero_()
+
+            _invoke_moe_lora_shrink_splitk(
+                hidden_states,
+                lora_a_virtual,
+                intermediate.view(-1, max_lora_rank),
+                topk_ids,
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                input_top_k,
+                a_stage_config,
+                signal_expand_pdl=(
+                    stage == "all" and use_direct_expand_add and enable_pdl
+                ),
+            )
 
         if stage == "shrink":
             # Routing allocations belong on the caller's main stream.  A
@@ -1180,6 +1225,10 @@ def merged_experts_fused_moe_lora_add(
     expert_id_map: torch.Tensor | None = None,
     stage: str = "all",
     intermediate_buffer: torch.Tensor | None = None,
+    shared_outer_gate_a_plan=None,
+    segment_indptr: torch.Tensor | None = None,
+    segment_lora_ids: torch.Tensor | None = None,
+    max_segment_len: int = 0,
 ) -> "torch.Tensor | None":
     """Run the explicit virtual-expert LoRA pipeline."""
     return _merged_experts_fused_moe_lora_add_impl(
@@ -1203,4 +1252,8 @@ def merged_experts_fused_moe_lora_add(
         expert_id_map=expert_id_map,
         stage=stage,
         intermediate_buffer=intermediate_buffer,
+        shared_outer_gate_a_plan=shared_outer_gate_a_plan,
+        segment_indptr=segment_indptr,
+        segment_lora_ids=segment_lora_ids,
+        max_segment_len=max_segment_len,
     )

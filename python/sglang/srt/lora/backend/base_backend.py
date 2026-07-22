@@ -281,7 +281,7 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
             if forward_batch.forward_mode.is_extend()
             else forward_batch.batch_size
         )
-        max_len = (
+        request_max_len = (
             max(forward_batch.extend_seq_lens_cpu)
             if forward_batch.forward_mode.is_extend()
             else 1
@@ -296,10 +296,16 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
             num_moe_segments = batch_info.bs
             seg_indptr = batch_info.req_seg_indptr[: num_moe_segments + 1]
             req_to_lora = batch_info.req_weight_indices[:num_moe_segments]
+            max_len = request_max_len
         else:
             num_moe_segments = batch_info.num_segments
             seg_indptr = batch_info.seg_indptr[: num_moe_segments + 1]
             req_to_lora = batch_info.weight_indices[:num_moe_segments]
+            # TorchNative merges consecutive requests that use the same
+            # adapter.  Its selected segment can therefore be longer than any
+            # individual request, and the segmented launch grid must use the
+            # bound that was built with this indptr.
+            max_len = int(batch_info.max_len)
 
         adapter_enabled, token_lora_mapping = _compute_moe_lora_info(
             num_tokens,
@@ -316,6 +322,7 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
             req_to_lora=req_to_lora,
             adapter_enabled=adapter_enabled,
             token_lora_mapping=token_lora_mapping,
+            max_segment_len=max_len,
         )
 
         return batch_info

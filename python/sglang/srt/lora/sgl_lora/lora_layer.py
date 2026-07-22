@@ -70,6 +70,17 @@ def _phase1a_contract_violations(base_layer) -> list[str]:
         violations.append("no_combine=True is unsupported")
     if cfg.use_tp_all_gather_activation:
         violations.append("TP all-gather activation input is unsupported")
+    if getattr(cfg, "num_fused_shared_experts", 0):
+        from sglang.srt.layers.moe.utils import uses_per_rank_fused_shared_slots
+
+        if isinstance(base_layer.dispatcher, StandardDispatcher) and (
+            uses_per_rank_fused_shared_slots()
+            and int(getattr(base_layer, "moe_ep_size", 1)) > 1
+        ):
+            violations.append(
+                "per-rank physical shared slots with EP>1 are not supported: "
+                "the Standard dispatcher remaps them before LoRA expert-ID mapping"
+            )
 
     return violations
 
@@ -385,6 +396,12 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
     layer._sgl_lora_runner_config = _effective_sgl_lora_runner_config(base_layer)
     layer._lora_runner = None
     layer._quant_info = build_sgl_lora_quant_info(base_layer)
+    resident_device = layer._quant_info.w13_weight.device
+    layer._sgl_lora_device_capability = (
+        torch.cuda.get_device_capability(resident_device)
+        if resident_device.type == "cuda"
+        else None
+    )
     # Every MoE layer executes sequentially through one backend.  Sharing the
     # planner makes one admission decision per device/shape instead of issuing
     # a host memory query at every decoder layer.
@@ -466,10 +483,11 @@ def dispatch_sgl_lora_moe(
             return type(result)(hidden_states=result.hidden_states.to(output_dtype))
         return result
 
+    hidden_states = dispatch_output.hidden_states
     plan = build_moe_lora_execution_plan(
         phase=lora_info.forward_phase,
         graph_mode=lora_info.use_cuda_graph,
-        num_tokens=dispatch_output.hidden_states.shape[0],
+        num_tokens=hidden_states.shape[0],
         rank=lora_info.max_lora_rank,
         has_base_rows=lora_info.has_base_rows,
         two_stream_requested=wrapper._sgl_lora_two_stream,
@@ -482,6 +500,12 @@ def dispatch_sgl_lora_moe(
             base_layer.moe_runner_config.num_fused_shared_experts
         ),
         provider_key=wrapper._sgl_lora_base_gemm.contract.key,
+        shared_outer=lora_info.experts_shared_outer_loras,
+        device_capability=wrapper._sgl_lora_device_capability,
+        hidden_size=hidden_states.shape[1],
+        top_k=base_layer.moe_runner_config.top_k,
+        num_segments=lora_info.req_to_lora.numel(),
+        max_segment_len=lora_info.max_segment_len,
     )
     return run_sgl_lora_moe_plan(
         dispatch_output,
