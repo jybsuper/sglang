@@ -42,12 +42,19 @@ def _moe_lora_expand_add_flat_kernel(
     BLOCK_SIZE_R: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     GATED_A_HALF: tl.constexpr,
+    WAIT_FOR_SHRINK_PDL: tl.constexpr = False,
 ):
     """Flat-N reference and non-gated expand kernel.
 
     ``GATED_A_HALF`` enables the midpoint-safe gate/up schedule.  Its launcher
     guarantees that no tile crosses the midpoint.
     """
+    if WAIT_FOR_SHRINK_PDL:
+        # Paired with the shrink kernel's gdc_launch_dependents().  Waiting at
+        # the consumer boundary permits early launch without reading a
+        # partially accumulated LoRA-A intermediate.
+        tl.extra.cuda.gdc_wait()
+
     pid = tl.program_id(0)
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
     num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
@@ -143,8 +150,12 @@ def _moe_lora_expand_add_two_slice_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_R: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
+    WAIT_FOR_SHRINK_PDL: tl.constexpr = False,
 ):
     """Gate/up expand with an independent N grid for each output slice."""
+    if WAIT_FOR_SHRINK_PDL:
+        tl.extra.cuda.gdc_wait()
+
     pid = tl.program_id(0)
     slice_id = tl.program_id(1)
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
@@ -259,6 +270,7 @@ def _invoke_flat(
     *,
     gated_midpoint: bool,
     force_block_size_n: int | None = None,
+    wait_for_shrink_pdl: bool = False,
 ) -> None:
     n = weight.shape[1]
     rank = weight.shape[2]
@@ -300,8 +312,10 @@ def _invoke_flat(
         BLOCK_SIZE_R=max(16, triton.next_power_of_2(rank)),
         GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
         GATED_A_HALF=n // 2 if gated_midpoint else 0,
+        WAIT_FOR_SHRINK_PDL=wait_for_shrink_pdl,
         num_warps=config.get("num_warps", 4),
         num_stages=1,
+        **({"launch_pdl": True} if wait_for_shrink_pdl else {}),
     )
 
 
@@ -319,6 +333,7 @@ def _invoke_two_slice(
     fuse_sum_all_reduce: bool,
     *,
     force_block_size_n: int | None = None,
+    wait_for_shrink_pdl: bool = False,
 ) -> None:
     n = weight.shape[1]
     rank = weight.shape[2]
@@ -354,8 +369,10 @@ def _invoke_two_slice(
         BLOCK_SIZE_N=block_n,
         BLOCK_SIZE_R=max(16, triton.next_power_of_2(rank)),
         GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
+        WAIT_FOR_SHRINK_PDL=wait_for_shrink_pdl,
         num_warps=config.get("num_warps", 4),
         num_stages=1,
+        **({"launch_pdl": True} if wait_for_shrink_pdl else {}),
     )
 
 
@@ -373,6 +390,7 @@ def invoke_moe_lora_expand_add(
     fuse_sum_all_reduce: bool,
     *,
     num_output_slices: int,
+    wait_for_shrink_pdl: bool = False,
 ) -> None:
     """Launch the direct expand used by ``sgl_lora`` for ranks up to 64.
 
@@ -397,6 +415,7 @@ def invoke_moe_lora_expand_add(
                 mul_routed_weight,
                 fuse_sum_all_reduce,
                 gated_midpoint=True,
+                wait_for_shrink_pdl=wait_for_shrink_pdl,
             )
         else:
             _invoke_two_slice(
@@ -411,6 +430,7 @@ def invoke_moe_lora_expand_add(
                 config,
                 mul_routed_weight,
                 fuse_sum_all_reduce,
+                wait_for_shrink_pdl=wait_for_shrink_pdl,
             )
         return
     _invoke_flat(
@@ -426,6 +446,7 @@ def invoke_moe_lora_expand_add(
         mul_routed_weight,
         fuse_sum_all_reduce,
         gated_midpoint=False,
+        wait_for_shrink_pdl=wait_for_shrink_pdl,
     )
 
 

@@ -268,6 +268,7 @@ def _moe_lora_shrink_splitk_kernel(
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     SPLIT_K: tl.constexpr,
+    SIGNAL_EXPAND_PDL: tl.constexpr = False,
     ENABLE_PDL: tl.constexpr = False,
 ):
     """Split-K grouped GEMM for the LoRA A (shrink) stage with few virtual experts."""
@@ -333,8 +334,11 @@ def _moe_lora_shrink_splitk_kernel(
         a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
 
-    # All input reads are done; hint the runtime to launch the dependent kernel.
-    if ENABLE_PDL:
+    # A direct expand can be launched early, but it must pair this signal with
+    # a device-side wait before reading ``c_ptr``.  Runtime-general expand uses
+    # an existing fused-MoE kernel that has no such wait, so it deliberately
+    # retains ordinary stream ordering.
+    if ENABLE_PDL and SIGNAL_EXPAND_PDL:
         tl.extra.cuda.gdc_launch_dependents()
 
     accumulator = accumulator.to(c_ptr.dtype.element_ty)
@@ -359,6 +363,8 @@ def _invoke_moe_lora_shrink_splitk(
     num_tokens_post_padded: torch.Tensor,
     top_k: int,
     config: dict[str, Any],
+    *,
+    signal_expand_pdl: bool,
 ) -> None:
     """Launch split-K shrink kernel for LoRA A with few virtual experts."""
     N = weight.shape[1]
@@ -405,6 +411,7 @@ def _invoke_moe_lora_shrink_splitk(
         BLOCK_SIZE_K=BLOCK_SIZE_K,
         GROUP_SIZE_M=GROUP_SIZE_M,
         SPLIT_K=SPLIT_K,
+        SIGNAL_EXPAND_PDL=signal_expand_pdl,
         ENABLE_PDL=enable_pdl,
         num_warps=config.get("num_warps", 4),
         num_stages=config.get("num_stages", 4),
@@ -957,6 +964,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_experts_a = lora_a.shape[1]
     num_experts_b = lora_b.shape[1]
     b_stage_config = _get_stage_config(lora_b_virtual, 1)
+    enable_pdl, _ = _get_pdl_launch_metadata()
 
     if stage == "routing":
         # Pre-warm the routing cache on the CALLER'S (main) stream so the
@@ -1043,6 +1051,9 @@ def _merged_experts_fused_moe_lora_add_impl(
             num_tokens_post_padded,
             input_top_k,
             a_stage_config,
+            signal_expand_pdl=(
+                stage == "all" and use_direct_expand_add and enable_pdl
+            ),
         )
 
         if stage == "shrink":
@@ -1084,6 +1095,7 @@ def _merged_experts_fused_moe_lora_add_impl(
             mul_routed_weight,
             fuse_sum_all_reduce,
             num_output_slices=num_output_slices,
+            wait_for_shrink_pdl=(stage == "all" and enable_pdl),
         )
     else:
         _invoke_generic_moe_lora_expand_add(
