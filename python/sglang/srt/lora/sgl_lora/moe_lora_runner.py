@@ -35,8 +35,8 @@ Invariants carried over from the trtllm path (review-confirmed load-bearing):
   * NO device allocation inside the side-stream context — the stage="routing"
     pre-warm seeds both the A(shrink)- and B(expand)-stage routing-cache keys
     on the main stream, and the shrink intermediate is pre-allocated here.
-  * lora_event keep-alive during cuda-graph capture (torch does NOT manage
-    event lifetime under capture; see _LORA_OVERLAP_EVENTS in moe_overlap.py).
+  * graph-recorded event lifetime is owned by the captured graph backend and
+    released by backend cleanup/recapture, rather than a process-global list.
 """
 
 from __future__ import annotations
@@ -53,9 +53,6 @@ if TYPE_CHECKING:
     )
     from sglang.srt.lora.sgl_lora.base_gemm import MoeLoraBaseGemm
     from sglang.srt.lora.sgl_lora.quant_info import SglLoraQuantInfo
-
-# Keep events recorded during cuda-graph capture alive until graph teardown.
-_LORA_EVENTS_KEEPALIVE: list = []
 
 # Production auto-policy boundary. Keep policy selection outside the runner so
 # the execution function obeys one explicit decision under eager execution and
@@ -174,7 +171,11 @@ def run_sgl_lora_moe(
             _run_gate_up_lora()
             lora_event.record()
         if torch.cuda.is_current_stream_capturing():
-            _LORA_EVENTS_KEEPALIVE.append(lora_event)
+            from sglang.srt.model_executor.runner_utils.capture_resources import (
+                keep_cuda_graph_capture_resource,
+            )
+
+            keep_cuda_graph_capture_resource(lora_event)
     else:
         # Serial: inline on the main stream.
         _run_gate_up_lora()

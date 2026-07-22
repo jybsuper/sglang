@@ -30,6 +30,9 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
 from sglang.srt.model_executor.runner_backend.base_cuda_graph_backend import (
     BaseCudaGraphBackend,
 )
+from sglang.srt.model_executor.runner_utils.capture_resources import (
+    cuda_graph_capture_resource_scope,
+)
 from sglang.srt.model_executor.runner_utils.pool import (
     get_or_create_global_graph_memory_pool,
 )
@@ -57,6 +60,7 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
     ) -> None:
         self._graphs: Dict[Any, torch.cuda.CUDAGraph] = {}
         self._outputs: Dict[Any, Any] = {}
+        self._capture_resources: Dict[Any, list[Any]] = {}
         self._pool = None
         self._device_module = cuda_graph_runner.device_module
         self._tp_group = cuda_graph_runner.model_runner.tp_group
@@ -107,11 +111,15 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         else:
             graph_ctx = self._device_module.graph
 
-        with graph_ctx(cuda_graph=graph, pool=self._pool, stream=self._capture_stream):
-            out = forward_fn()
+        with cuda_graph_capture_resource_scope() as resources:
+            with graph_ctx(
+                cuda_graph=graph, pool=self._pool, stream=self._capture_stream
+            ):
+                out = forward_fn()
 
         self._graphs[shape_key] = graph
         self._outputs[shape_key] = out
+        self._capture_resources[shape_key] = resources
 
     def can_run(self, forward_batch: ForwardBatch, shape_key: ShapeKey) -> bool:
         return shape_key in self._graphs
@@ -132,4 +140,5 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
     def cleanup(self) -> None:
         self._graphs.clear()
         self._outputs.clear()
+        self._capture_resources.clear()
         self._pool = None
