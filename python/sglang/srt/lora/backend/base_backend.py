@@ -189,8 +189,18 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         base = moe_layer.base_layer
         top_k = base.top_k
         qinfo = moe_layer._quant_info
-        E, N, _ = qinfo.w13_weight.shape
-        hidden_dim = qinfo.w2_weight.shape[1]
+        # Packed quant providers (NVFP4 and Marlin) do not encode semantic N/K
+        # directly in their physical tensor shapes.  Prefer the explicit SGL
+        # LoRA provider dimensions while retaining compatibility with legacy
+        # quant-info payloads that only expose canonical [E, N, K] weights.
+        E = getattr(qinfo, "num_local_experts", qinfo.w13_weight.shape[0])
+        intermediate_dim = getattr(qinfo, "intermediate_size", None)
+        N = (
+            2 * intermediate_dim
+            if intermediate_dim is not None
+            else qinfo.w13_weight.shape[1]
+        )
+        hidden_dim = getattr(qinfo, "hidden_size", qinfo.w2_weight.shape[1])
         device = qinfo.w13_weight.device
         dtype = compute_dtype
         num_experts = base.num_experts

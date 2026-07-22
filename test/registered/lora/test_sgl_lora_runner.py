@@ -28,18 +28,40 @@ class _FakeBaseGemm:
         self.inter = inter
         self.routed_scaling_factor = routed_scaling_factor
         self.calls = []
+        self.contract = SimpleNamespace(
+            lora_delta_dtype=torch.bfloat16,
+            lora_activation_dtype=torch.bfloat16,
+            gate_up_output_dtype=torch.bfloat16,
+        )
+
+    def validate_runtime_inputs(self, hidden_states, *, output_dtype):
+        assert hidden_states.dtype == torch.bfloat16
+        assert output_dtype in (torch.bfloat16, torch.float32)
 
     def admit_workspace(self, **kwargs):
         self.calls.append("admit")
         assert kwargs["num_tokens"] == self.num_tokens
         assert kwargs["top_k"] == self.top_k
-        assert kwargs["dtype"] == torch.bfloat16
+        assert kwargs["dtype"] == torch.float32
         assert kwargs["memory_query_safe"]
 
-    def prepare(self, hidden_states, topk_ids, top_k):
+    def prepare(
+        self,
+        hidden_states,
+        topk_ids,
+        top_k,
+        *,
+        topk_weights=None,
+        packed_topk_ids=None,
+    ):
         self.calls.append("prepare")
         assert top_k == self.top_k
-        return SimpleNamespace(hidden_permuted=hidden_states.clone())
+        assert topk_weights is not None
+        return SimpleNamespace(
+            hidden_permuted=hidden_states.clone(),
+            hidden_permuted_owned=True,
+            packed_topk_ids=packed_topk_ids,
+        )
 
     def gateup_out_shape(self, _ws):
         return (self.num_tokens, self.top_k, 2 * self.inter)
@@ -202,12 +224,14 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
         lora_info,
         base,
         two_stream_enabled=False,
+        output_dtype=torch.float32,
     )
 
     assert base.calls == ["admit", "prepare", "gateup", "act", "down", "finalize"]
     assert len(calls) == 2
     assert calls[0]["token_lora_mapping"].data_ptr() == token_lora_mapping.data_ptr()
     assert calls[1]["token_lora_mapping"].data_ptr() == token_lora_mapping.data_ptr()
+    assert result.hidden_states.dtype == torch.float32
     torch.testing.assert_close(
         result.hidden_states,
         torch.full_like(result.hidden_states, 3.0),
@@ -224,6 +248,7 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
             lora_info,
             base,
             two_stream_enabled=False,
+            output_dtype=torch.float32,
         )
 
 

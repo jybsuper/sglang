@@ -1,0 +1,28 @@
+{
+  "device": "NVIDIA H200",
+  "gpu": 7,
+  "python": "3.12.3",
+  "checks": {
+    "black": "8 files would be left unchanged",
+    "temporary_trtllm_imports": 0
+  },
+  "runs": [
+    {
+      "command": "SGLANG_JIT_DEEPGEMM_PRECOMPILE=0 CUDA_VISIBLE_DEVICES=7 PYTHONPATH=python python -m pytest -q test/registered/lora/test_sgl_lora_runner.py test/manual/cpu/test_sgl_lora_quant_providers.py",
+      "name": "provider_commit",
+      "passed": 10,
+      "warnings": 19,
+      "wall_seconds": 7.95
+    },
+    {
+      "command": "SGLANG_JIT_DEEPGEMM_PRECOMPILE=0 CUDA_VISIBLE_DEVICES=7 PYTHONPATH=python python -m pytest -q test/registered/lora/test_sgl_lora_runner.py test/manual/cpu/test_sgl_lora_quant_providers.py test/manual/cpu/test_sgl_lora_execution_plan.py test/registered/lora/test_sgl_lora_production_plan.py",
+      "name": "integrated_execution_plan",
+      "passed": 28,
+      "warnings": 19,
+      "wall_seconds": 9.15
+    }
+  ],
+  "schema": "sgl_lora_quant_provider_test_v1",
+  "status": "pass",
+  "tree": "/workspace/sglang_quant_provider_lane"
+}
