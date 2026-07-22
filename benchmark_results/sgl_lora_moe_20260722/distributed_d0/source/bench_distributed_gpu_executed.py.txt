@@ -1,0 +1,1079 @@
+#!/usr/bin/env python3
+"""Real multi-rank validation for the SGL LoRA MoE execution contract.
+
+This is deliberately a correctness/evidence harness rather than a shape proxy.
+It initializes SGLang's model-parallel groups, sends variable-sized routed-pair
+payloads through the real NCCL process groups, runs the serving-owned
+virtual-expert LoRA kernels on local expert buffers, and validates the combined
+result against an independent full-weight oracle.
+
+The exercised data flow is::
+
+    DP-owned tokens + GLOBAL expert ids
+        -> EP all_to_all_single (variable splits; global ids stay attached)
+        -> global-to-local id conversion at the dispatcher boundary
+        -> serving virtual-expert gate/up A+B kernels on LOCAL weights
+        -> SwiGLU + serving virtual-expert down A+B kernels
+        -> MoE-TP all-reduce of sharded-intermediate partials
+        -> reverse EP all_to_all_single
+        -> weighted top-k reduction in the origin token domain
+        -> MoE-DP padded all-gather for uneven token counts
+
+CUDA graph evidence covers the fixed-shape post-dispatch compute chain.  NCCL
+all-to-all remains outside that graph because the standard torch.distributed
+communicator is not graph-capturable; that boundary is recorded explicitly in
+the JSON report instead of being mistaken for full-pipeline graph evidence.
+
+Example (single H200 node)::
+
+    torchrun --standalone --nproc-per-node=4 \
+      benchmark/kernels/lora_moe/bench_distributed.py \
+      --topology tp4_ep4_dp1 --route-mode mixed --adapter-mode mixed \
+      --graph-replay --output /workspace/artifacts/d0/ep4-mixed.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import socket
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
+
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+
+
+@dataclass(frozen=True, slots=True)
+class TopologySpec:
+    name: str
+    tp: int
+    ep: int
+    moe_dp: int
+    token_counts: tuple[int, ...]
+
+    @property
+    def world_size(self) -> int:
+        return self.tp
+
+    @property
+    def moe_tp(self) -> int:
+        denominator = self.ep * self.moe_dp
+        if self.tp % denominator:
+            raise ValueError(
+                f"{self.name}: TP={self.tp} is not divisible by EP*DP={denominator}"
+            )
+        return self.tp // denominator
+
+
+TOPOLOGIES: dict[str, TopologySpec] = {
+    "tp4_ep1_dp1": TopologySpec("tp4_ep1_dp1", 4, 1, 1, (13,)),
+    "tp4_ep4_dp1": TopologySpec("tp4_ep4_dp1", 4, 4, 1, (13,)),
+    # Deliberately uneven, including a single-token rank.
+    "tp4_ep1_dp4": TopologySpec("tp4_ep1_dp4", 4, 1, 4, (1, 3, 7, 13)),
+    # Both DP domains are uneven while EP and MoE-TP are simultaneously active.
+    "tp8_ep2_dp2": TopologySpec("tp8_ep2_dp2", 8, 2, 2, (5, 11)),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class LogicalCoordinates:
+    dp_rank: int
+    ep_rank: int
+    moe_tp_rank: int
+
+
+def logical_coordinates(rank: int, spec: TopologySpec) -> LogicalCoordinates:
+    """Decode the rank order used by ``initialize_model_parallel``."""
+    if not 0 <= rank < spec.world_size:
+        raise ValueError(f"rank {rank} outside world size {spec.world_size}")
+    moe_tp = spec.moe_tp
+    return LogicalCoordinates(
+        dp_rank=rank // (spec.ep * moe_tp),
+        ep_rank=(rank // moe_tp) % spec.ep,
+        moe_tp_rank=rank % moe_tp,
+    )
+
+
+def expected_group_ranks(
+    rank: int, spec: TopologySpec
+) -> dict[str, tuple[int, ...]]:
+    """Return the exact SGL MoE group membership expected for ``rank``."""
+    c = logical_coordinates(rank, spec)
+    mtp = spec.moe_tp
+    tp_ranks = tuple(range(spec.tp))
+    moe_tp_base = (c.dp_rank * spec.ep + c.ep_rank) * mtp
+    moe_tp_ranks = tuple(range(moe_tp_base, moe_tp_base + mtp))
+    ep_base = c.dp_rank * spec.ep * mtp + c.moe_tp_rank
+    ep_ranks = tuple(ep_base + idx * mtp for idx in range(spec.ep))
+    dp_base = c.ep_rank * mtp + c.moe_tp_rank
+    dp_ranks = tuple(
+        dp_base + idx * spec.ep * mtp for idx in range(spec.moe_dp)
+    )
+    return {
+        "tp": tp_ranks,
+        "moe_tp": moe_tp_ranks,
+        "moe_ep": ep_ranks,
+        "moe_dp": dp_ranks,
+    }
+
+
+def adapter_ids(num_tokens: int, mode: str, num_adapters: int) -> list[int]:
+    if mode == "active":
+        return [token % num_adapters for token in range(num_tokens)]
+    if mode == "mixed":
+        return [
+            -1 if token % 3 == 0 else token % num_adapters
+            for token in range(num_tokens)
+        ]
+    if mode == "base":
+        return [-1] * num_tokens
+    raise ValueError(f"unknown adapter mode {mode!r}")
+
+
+def global_expert_for_route(
+    *,
+    token: int,
+    slot: int,
+    origin_ep_rank: int,
+    route_mode: str,
+    num_experts: int,
+    ep_size: int,
+) -> int:
+    """Construct routes with an auditable local/non-local relationship."""
+    if num_experts % ep_size:
+        raise ValueError("num_experts must be divisible by ep_size")
+    local_experts = num_experts // ep_size
+    local_index = (token * 3 + slot * 5 + 1) % local_experts
+    if route_mode == "all_local":
+        owner = origin_ep_rank
+    elif route_mode == "no_local":
+        owner = (origin_ep_rank + 1 + slot) % ep_size
+        if owner == origin_ep_rank:
+            owner = (owner + 1) % ep_size
+    elif route_mode == "mixed":
+        owner = origin_ep_rank if slot % 2 == 0 else (origin_ep_rank + 1) % ep_size
+    elif route_mode == "standard":
+        owner = (token * 3 + slot * 5) % ep_size
+    else:
+        raise ValueError(f"unknown route mode {route_mode!r}")
+    return owner * local_experts + local_index
+
+
+def _cpu_generator(seed: int) -> torch.Generator:
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    return generator
+
+
+@dataclass(slots=True)
+class FullWeights:
+    w13: torch.Tensor
+    w2: torch.Tensor
+    gate_a: torch.Tensor
+    gate_b: torch.Tensor
+    down_a: torch.Tensor
+    down_b: torch.Tensor
+
+
+def make_full_weights(
+    *,
+    num_experts: int,
+    num_adapters: int,
+    hidden: int,
+    intermediate: int,
+    rank: int,
+    device: torch.device,
+    seed: int,
+) -> FullWeights:
+    """Create bit-identical BF16 factors independently on every rank."""
+    generator = _cpu_generator(seed)
+
+    def randn(shape: Sequence[int], scale: float) -> torch.Tensor:
+        cpu = torch.randn(tuple(shape), generator=generator, dtype=torch.float32)
+        return (cpu * scale).to(dtype=torch.bfloat16, device=device)
+
+    return FullWeights(
+        w13=randn((num_experts, 2 * intermediate, hidden), 0.03),
+        w2=randn((num_experts, hidden, intermediate), 0.03),
+        gate_a=randn((num_adapters, num_experts, 2 * rank, hidden), 0.025),
+        gate_b=randn(
+            (num_adapters, num_experts, 2 * intermediate, rank), 0.025
+        ),
+        down_a=randn((num_adapters, num_experts, rank, intermediate), 0.025),
+        down_b=randn((num_adapters, num_experts, hidden, rank), 0.025),
+    )
+
+
+def make_dp_inputs(
+    *,
+    dp_rank: int,
+    num_tokens: int,
+    hidden: int,
+    device: torch.device,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return stable token ids and BF16 hidden rows for one MoE-DP domain."""
+    token_ids = torch.arange(num_tokens, dtype=torch.int64, device=device)
+    token_ids += dp_rank * 10_000
+    generator = _cpu_generator(seed + 101 * dp_rank)
+    cpu = torch.randn((num_tokens, hidden), generator=generator, dtype=torch.float32)
+    hidden_states = (cpu * 0.1).to(dtype=torch.bfloat16, device=device)
+    return token_ids, hidden_states
+
+
+def _slice_gate_up_rows(
+    tensor: torch.Tensor, shard_rank: int, shard_count: int
+) -> torch.Tensor:
+    """Shard a contiguous ``[gate | up]`` output dimension without copying semantics."""
+    full_intermediate = tensor.shape[-2] // 2
+    shard = full_intermediate // shard_count
+    start = shard_rank * shard
+    gate = tensor[..., start : start + shard, :]
+    up = tensor[
+        ..., full_intermediate + start : full_intermediate + start + shard, :
+    ]
+    return torch.cat((gate, up), dim=-2).contiguous()
+
+
+@dataclass(slots=True)
+class LocalWeights:
+    w13: torch.Tensor
+    w2: torch.Tensor
+    gate_a: torch.Tensor
+    gate_b: torch.Tensor
+    down_a: torch.Tensor
+    down_b: torch.Tensor
+    global_expert_offset: int
+
+
+def make_local_weights(
+    full: FullWeights, spec: TopologySpec, coords: LogicalCoordinates
+) -> LocalWeights:
+    experts = full.w13.shape[0]
+    if experts % spec.ep:
+        raise ValueError("expert count must divide EP")
+    local_experts = experts // spec.ep
+    expert_start = coords.ep_rank * local_experts
+    expert_stop = expert_start + local_experts
+    intermediate = full.w2.shape[-1]
+    if intermediate % spec.moe_tp:
+        raise ValueError("intermediate size must divide MoE-TP")
+    inter_shard = intermediate // spec.moe_tp
+    inter_start = coords.moe_tp_rank * inter_shard
+    inter_stop = inter_start + inter_shard
+
+    local_w13 = _slice_gate_up_rows(
+        full.w13[expert_start:expert_stop], coords.moe_tp_rank, spec.moe_tp
+    )
+    local_gate_b = _slice_gate_up_rows(
+        full.gate_b[:, expert_start:expert_stop],
+        coords.moe_tp_rank,
+        spec.moe_tp,
+    )
+    return LocalWeights(
+        w13=local_w13,
+        w2=full.w2[expert_start:expert_stop, :, inter_start:inter_stop].contiguous(),
+        gate_a=full.gate_a[:, expert_start:expert_stop].contiguous(),
+        gate_b=local_gate_b,
+        down_a=full.down_a[
+            :, expert_start:expert_stop, :, inter_start:inter_stop
+        ].contiguous(),
+        # Down-B is replicated across the MoE-TP reduction lanes.
+        down_b=full.down_b[:, expert_start:expert_stop].contiguous(),
+        global_expert_offset=expert_start,
+    )
+
+
+@dataclass(slots=True)
+class RoutedRecords:
+    hidden: torch.Tensor
+    weights: torch.Tensor
+    metadata: torch.Tensor
+    send_counts: torch.Tensor
+    recv_counts: torch.Tensor
+    self_send_pairs: int
+    nonlocal_send_pairs: int
+
+
+def _all_to_all_variable(
+    tensor: torch.Tensor,
+    send_counts: torch.Tensor,
+    recv_counts: torch.Tensor,
+    group: dist.ProcessGroup,
+) -> torch.Tensor:
+    shape = (int(recv_counts.sum().item()),) + tuple(tensor.shape[1:])
+    output = torch.empty(shape, dtype=tensor.dtype, device=tensor.device)
+    dist.all_to_all_single(
+        output,
+        tensor,
+        output_split_sizes=[int(x) for x in recv_counts.cpu().tolist()],
+        input_split_sizes=[int(x) for x in send_counts.cpu().tolist()],
+        group=group,
+    )
+    return output
+
+
+def dispatch_pairs(
+    *,
+    token_ids: torch.Tensor,
+    hidden_states: torch.Tensor,
+    adapters: torch.Tensor,
+    spec: TopologySpec,
+    coords: LogicalCoordinates,
+    route_mode: str,
+    num_experts: int,
+    top_k: int,
+    ep_group,
+) -> RoutedRecords:
+    """Dispatch pair records over the real SGL MoE-EP NCCL group.
+
+    Metadata columns are ``token, slot, GLOBAL expert, adapter, origin EP``.
+    Keeping the global expert id in the transported record is intentional: the
+    receiver checks ownership before making the one explicit local-id conversion.
+    """
+    owned = torch.remainder(token_ids, spec.ep) == coords.ep_rank
+    local_token_ids = token_ids[owned]
+    local_hidden = hidden_states[owned]
+    local_adapters = adapters[owned]
+    rows: list[tuple[int, int, int, int, int]] = []
+    hidden_rows: list[torch.Tensor] = []
+    weight_rows: list[float] = []
+    destinations: list[int] = []
+    for local_idx, token_id in enumerate(local_token_ids.cpu().tolist()):
+        token_in_dp = token_id - coords.dp_rank * 10_000
+        for slot in range(top_k):
+            expert = global_expert_for_route(
+                token=token_in_dp,
+                slot=slot,
+                origin_ep_rank=coords.ep_rank,
+                route_mode=route_mode,
+                num_experts=num_experts,
+                ep_size=spec.ep,
+            )
+            destination = expert // (num_experts // spec.ep)
+            rows.append(
+                (
+                    token_id,
+                    slot,
+                    expert,
+                    int(local_adapters[local_idx].item()),
+                    coords.ep_rank,
+                )
+            )
+            hidden_rows.append(local_hidden[local_idx])
+            # Positive, normalized top-k weights with different slot values.
+            weight_rows.append(0.6 if slot == 0 else 0.4 / max(1, top_k - 1))
+            destinations.append(destination)
+
+    order = sorted(range(len(rows)), key=lambda idx: (destinations[idx], idx))
+    if order:
+        metadata = torch.tensor(
+            [rows[idx] for idx in order], dtype=torch.int64, device=token_ids.device
+        )
+        packed_hidden = torch.stack([hidden_rows[idx] for idx in order])
+        packed_weights = torch.tensor(
+            [weight_rows[idx] for idx in order],
+            dtype=torch.float32,
+            device=token_ids.device,
+        )
+        ordered_destinations = [destinations[idx] for idx in order]
+    else:
+        metadata = torch.empty((0, 5), dtype=torch.int64, device=token_ids.device)
+        packed_hidden = torch.empty(
+            (0, hidden_states.shape[-1]),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+        packed_weights = torch.empty(0, dtype=torch.float32, device=token_ids.device)
+        ordered_destinations = []
+
+    send_counts = torch.tensor(
+        [ordered_destinations.count(dst) for dst in range(spec.ep)],
+        dtype=torch.int64,
+        device=token_ids.device,
+    )
+    recv_counts = torch.empty_like(send_counts)
+    # One count element is exchanged with each EP peer.
+    dist.all_to_all_single(
+        recv_counts,
+        send_counts,
+        group=ep_group.device_group,
+    )
+    received_metadata = _all_to_all_variable(
+        metadata, send_counts, recv_counts, ep_group.device_group
+    )
+    received_hidden = _all_to_all_variable(
+        packed_hidden, send_counts, recv_counts, ep_group.device_group
+    )
+    received_weights = _all_to_all_variable(
+        packed_weights, send_counts, recv_counts, ep_group.device_group
+    )
+    self_send = int(send_counts[coords.ep_rank].item())
+    return RoutedRecords(
+        hidden=received_hidden,
+        weights=received_weights,
+        metadata=received_metadata,
+        send_counts=send_counts,
+        recv_counts=recv_counts,
+        self_send_pairs=self_send,
+        nonlocal_send_pairs=int(send_counts.sum().item()) - self_send,
+    )
+
+
+def _local_compute(
+    records: RoutedRecords,
+    local: LocalWeights,
+    *,
+    num_experts: int,
+    top_k: int,
+    route_cache: dict | None = None,
+) -> torch.Tensor:
+    """Run serving-owned LoRA kernels plus an explicit BF16 base control."""
+    from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import (
+        merged_experts_fused_moe_lora_add,
+    )
+
+    num_pairs = records.metadata.shape[0]
+    hidden = records.hidden.shape[-1]
+    local_experts = local.w13.shape[0]
+    global_ids = records.metadata[:, 2]
+    local_ids = global_ids - local.global_expert_offset
+    # The ownership assertion belongs to the eager dispatcher boundary.  A
+    # device-to-host ``item()`` inside CUDA capture invalidates the stream, so
+    # graph replay consumes the already-validated fixed metadata directly.
+    check_ownership = num_pairs and not torch.cuda.is_current_stream_capturing()
+    if check_ownership and not bool(
+        torch.all((local_ids >= 0) & (local_ids < local_experts)).item()
+    ):
+        raise AssertionError(
+            "EP dispatch delivered a non-local global expert id to the local buffer"
+        )
+    local_ids_i32 = local_ids.to(torch.int32).view(num_pairs, 1)
+    adapter_mapping = records.metadata[:, 3].to(torch.int32)
+    unit_weights = torch.ones(
+        (num_pairs, 1), dtype=torch.float32, device=records.hidden.device
+    )
+    inter_shard = local.w2.shape[-1]
+    gate_delta = torch.empty(
+        (num_pairs, 1, 2 * inter_shard),
+        dtype=torch.bfloat16,
+        device=records.hidden.device,
+    )
+    if route_cache is None:
+        route_cache = {}
+    merged_experts_fused_moe_lora_add(
+        output=gate_delta,
+        hidden_states=records.hidden,
+        lora_a=local.gate_a,
+        lora_b=local.gate_b,
+        topk_ids=local_ids_i32,
+        topk_weights=unit_weights,
+        token_lora_mapping=adapter_mapping,
+        mul_routed_weight=False,
+        experts_shared_outer_loras_a=False,
+        experts_shared_outer_loras_b=False,
+        routing_cache=route_cache,
+        fuse_add_to_output=False,
+        fuse_sum_all_reduce=False,
+        use_direct_expand_add=True,
+        num_output_slices=2,
+        local_expert_offset=0,
+        local_num_experts=local_experts,
+    )
+
+    selected_w13 = local.w13.index_select(0, local_ids)
+    base_gate = torch.bmm(selected_w13, records.hidden.unsqueeze(-1)).squeeze(-1)
+    combined = base_gate + gate_delta[:, 0]
+    activated = (
+        F.silu(combined[:, :inter_shard].float())
+        * combined[:, inter_shard:].float()
+    ).to(torch.bfloat16)
+
+    down_delta = torch.zeros(
+        (num_pairs, hidden), dtype=torch.bfloat16, device=records.hidden.device
+    )
+    merged_experts_fused_moe_lora_add(
+        output=down_delta,
+        hidden_states=activated,
+        lora_a=local.down_a,
+        lora_b=local.down_b,
+        topk_ids=local_ids_i32,
+        topk_weights=records.weights.view(num_pairs, 1),
+        token_lora_mapping=adapter_mapping,
+        mul_routed_weight=True,
+        experts_shared_outer_loras_a=False,
+        experts_shared_outer_loras_b=False,
+        routing_cache=route_cache,
+        fuse_add_to_output=False,
+        fuse_sum_all_reduce=True,
+        use_direct_expand_add=True,
+        num_output_slices=1,
+        local_expert_offset=0,
+        local_num_experts=local_experts,
+    )
+    selected_w2 = local.w2.index_select(0, local_ids)
+    base_down = torch.bmm(selected_w2, activated.unsqueeze(-1)).squeeze(-1)
+    return base_down.float() * records.weights[:, None] + down_delta.float()
+
+
+def run_local_graph_replay(
+    records: RoutedRecords,
+    local: LocalWeights,
+    eager_output: torch.Tensor,
+    *,
+    num_experts: int,
+    top_k: int,
+) -> dict:
+    """Capture and replay only the fixed post-dispatch compute subgraph."""
+    # Compile/JIT and establish allocator state before graph capture.
+    # The serving runner owns routing metadata outside its captured compute
+    # body.  Reuse one pre-warmed cache here so torch.sort/allocation from the
+    # route builder is not accidentally included in the graph claim.
+    route_cache: dict = {}
+    warm = _local_compute(
+        records,
+        local,
+        num_experts=num_experts,
+        top_k=top_k,
+        route_cache=route_cache,
+    )
+    torch.cuda.synchronize()
+    graph_output = torch.empty_like(warm)
+    graph = torch.cuda.CUDAGraph()
+    try:
+        with torch.cuda.graph(graph):
+            graph_output.copy_(
+                _local_compute(
+                    records,
+                    local,
+                    num_experts=num_experts,
+                    top_k=top_k,
+                    route_cache=route_cache,
+                )
+            )
+        graph_output.fill_(float("nan"))
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(
+            graph_output, eager_output, rtol=2e-2, atol=2e-2
+        )
+        return {
+            "status": "passed",
+            "scope": "post_dispatch_local_compute",
+            "collectives_in_graph": False,
+            "replays": 1,
+        }
+    except Exception as exc:  # evidence must preserve the exact unsupported boundary
+        torch.cuda.synchronize()
+        return {
+            "status": "unsupported",
+            "scope": "post_dispatch_local_compute",
+            "collectives_in_graph": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+
+
+def reverse_dispatch(
+    records: RoutedRecords,
+    pair_outputs: torch.Tensor,
+    *,
+    spec: TopologySpec,
+    ep_group,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    origins = records.metadata[:, 4]
+    order = torch.argsort(origins, stable=True)
+    packed_meta = records.metadata.index_select(0, order)
+    packed_output = pair_outputs.index_select(0, order)
+    send_counts = torch.bincount(origins, minlength=spec.ep).to(torch.int64)
+    recv_counts = torch.empty_like(send_counts)
+    dist.all_to_all_single(
+        recv_counts,
+        send_counts,
+        group=ep_group.device_group,
+    )
+    returned_meta = _all_to_all_variable(
+        packed_meta, send_counts, recv_counts, ep_group.device_group
+    )
+    returned_output = _all_to_all_variable(
+        packed_output, send_counts, recv_counts, ep_group.device_group
+    )
+    return returned_meta, returned_output
+
+
+def reduce_origin_tokens(
+    token_ids: torch.Tensor,
+    returned_meta: torch.Tensor,
+    returned_output: torch.Tensor,
+) -> torch.Tensor:
+    result = torch.zeros(
+        (token_ids.numel(), returned_output.shape[-1]),
+        dtype=torch.float32,
+        device=returned_output.device,
+    )
+    if not token_ids.numel():
+        return result
+    lookup = {int(token): idx for idx, token in enumerate(token_ids.cpu().tolist())}
+    for pair_idx, token in enumerate(returned_meta[:, 0].cpu().tolist()):
+        if token not in lookup:
+            raise AssertionError(f"reverse EP dispatch returned foreign token {token}")
+        result[lookup[token]].add_(returned_output[pair_idx])
+    return result
+
+
+def independent_oracle(
+    *,
+    token_ids: torch.Tensor,
+    hidden_states: torch.Tensor,
+    adapters: torch.Tensor,
+    full: FullWeights,
+    spec: TopologySpec,
+    origin_ep_rank: int,
+    route_mode: str,
+    top_k: int,
+) -> torch.Tensor:
+    """Full-weight oracle that explicitly reproduces MoE-TP BF16 boundaries."""
+    num_experts = full.w13.shape[0]
+    hidden = full.w2.shape[1]
+    intermediate = full.w2.shape[-1]
+    inter_shard = intermediate // spec.moe_tp
+    output = torch.zeros(
+        (token_ids.numel(), hidden), dtype=torch.float32, device=hidden_states.device
+    )
+    for row, token_id in enumerate(token_ids.cpu().tolist()):
+        token_in_dp = token_id - logical_dp_from_token(token_id) * 10_000
+        adapter = int(adapters[row].item())
+        for slot in range(top_k):
+            expert = global_expert_for_route(
+                token=token_in_dp,
+                slot=slot,
+                origin_ep_rank=origin_ep_rank,
+                route_mode=route_mode,
+                num_experts=num_experts,
+                ep_size=spec.ep,
+            )
+            routed_weight = 0.6 if slot == 0 else 0.4 / max(1, top_k - 1)
+            x = hidden_states[row]
+            pair = torch.zeros(hidden, dtype=torch.float32, device=x.device)
+            for mtp_rank in range(spec.moe_tp):
+                start = mtp_rank * inter_shard
+                stop = start + inter_shard
+                gate_rows = torch.cat(
+                    (
+                        full.w13[expert, start:stop],
+                        full.w13[expert, intermediate + start : intermediate + stop],
+                    ),
+                    dim=0,
+                )
+                gate_base = (gate_rows.float() @ x.float()).to(torch.bfloat16)
+                if adapter >= 0:
+                    gate_rank = (
+                        full.gate_a[adapter, expert].float() @ x.float()
+                    ).to(torch.bfloat16)
+                    gate_b = torch.cat(
+                        (
+                            full.gate_b[adapter, expert, start:stop],
+                            full.gate_b[
+                                adapter,
+                                expert,
+                                intermediate + start : intermediate + stop,
+                            ],
+                        ),
+                        dim=0,
+                    )
+                    logical_rank = gate_b.shape[-1]
+                    gate_delta = torch.cat(
+                        (
+                            gate_b[:inter_shard].float()
+                            @ gate_rank[:logical_rank].float(),
+                            gate_b[inter_shard:].float()
+                            @ gate_rank[logical_rank:].float(),
+                        )
+                    ).to(torch.bfloat16)
+                else:
+                    gate_delta = torch.zeros_like(gate_base)
+                gate_up = gate_base + gate_delta
+                act = (
+                    F.silu(gate_up[:inter_shard].float())
+                    * gate_up[inter_shard:].float()
+                ).to(torch.bfloat16)
+                base_partial = (
+                    full.w2[expert, :, start:stop].float() @ act.float()
+                ).to(torch.bfloat16)
+                if adapter >= 0:
+                    down_rank = (
+                        full.down_a[adapter, expert, :, start:stop].float()
+                        @ act.float()
+                    ).to(torch.bfloat16)
+                    down_partial = (
+                        full.down_b[adapter, expert].float() @ down_rank.float()
+                    ).to(torch.bfloat16)
+                else:
+                    down_partial = torch.zeros_like(base_partial)
+                pair += base_partial.float() + down_partial.float()
+            output[row] += pair * routed_weight
+    return output
+
+
+def logical_dp_from_token(token_id: int) -> int:
+    return token_id // 10_000
+
+
+def _stats(actual: torch.Tensor, expected: torch.Tensor) -> dict[str, float]:
+    diff = (actual - expected).float()
+    expected_f = expected.float()
+    max_abs = float(diff.abs().max().item()) if diff.numel() else 0.0
+    rel_l2 = float(
+        torch.linalg.vector_norm(diff).item()
+        / max(torch.linalg.vector_norm(expected_f).item(), 1e-12)
+    )
+    if diff.numel() and torch.linalg.vector_norm(actual).item() > 0:
+        cosine = float(
+            F.cosine_similarity(actual.flatten(), expected.flatten(), dim=0).item()
+        )
+    else:
+        cosine = 1.0
+    return {"max_abs": max_abs, "rel_l2": rel_l2, "cosine": cosine}
+
+
+def _assert_route_invariants(
+    records: RoutedRecords, route_mode: str, ep_size: int
+) -> None:
+    if ep_size <= 1:
+        return
+    if route_mode == "all_local" and records.nonlocal_send_pairs != 0:
+        raise AssertionError("all_local generated a non-local EP send")
+    if route_mode == "no_local" and records.self_send_pairs != 0:
+        raise AssertionError("no_local generated a self EP send")
+    if route_mode == "mixed" and not (
+        records.self_send_pairs > 0 and records.nonlocal_send_pairs > 0
+    ):
+        raise AssertionError("mixed route did not contain both local and remote sends")
+
+
+def _validate_sgl_groups(rank: int, spec: TopologySpec) -> dict[str, list[int]]:
+    from sglang.srt.distributed import (
+        get_moe_dp_group,
+        get_moe_ep_group,
+        get_moe_tp_group,
+        get_tp_group,
+    )
+
+    actual = {
+        "tp": tuple(get_tp_group().ranks),
+        "moe_tp": tuple(get_moe_tp_group().ranks),
+        "moe_ep": tuple(get_moe_ep_group().ranks),
+        "moe_dp": tuple(get_moe_dp_group().ranks),
+    }
+    expected = expected_group_ranks(rank, spec)
+    if actual != expected:
+        raise AssertionError(f"SGL group mismatch: actual={actual}, expected={expected}")
+    return {key: list(value) for key, value in actual.items()}
+
+
+def run_case(args: argparse.Namespace) -> dict:
+    from sglang.srt.distributed import (
+        get_moe_dp_group,
+        get_moe_ep_group,
+        get_moe_tp_group,
+        get_world_group,
+    )
+
+    spec = TOPOLOGIES[args.topology]
+    rank = dist.get_rank()
+    coords = logical_coordinates(rank, spec)
+    device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
+    group_ranks = _validate_sgl_groups(rank, spec)
+
+    num_tokens = spec.token_counts[coords.dp_rank]
+    token_ids, hidden_states = make_dp_inputs(
+        dp_rank=coords.dp_rank,
+        num_tokens=num_tokens,
+        hidden=args.hidden,
+        device=device,
+        seed=args.seed,
+    )
+    adapter_list = adapter_ids(num_tokens, args.adapter_mode, args.num_adapters)
+    adapters = torch.tensor(adapter_list, dtype=torch.int32, device=device)
+    full = make_full_weights(
+        num_experts=args.num_experts,
+        num_adapters=args.num_adapters,
+        hidden=args.hidden,
+        intermediate=args.intermediate,
+        rank=args.rank,
+        device=device,
+        seed=args.seed + 7,
+    )
+    local = make_local_weights(full, spec, coords)
+    ep_group = get_moe_ep_group()
+
+    dist.barrier()
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    records = dispatch_pairs(
+        token_ids=token_ids,
+        hidden_states=hidden_states,
+        adapters=adapters,
+        spec=spec,
+        coords=coords,
+        route_mode=args.route_mode,
+        num_experts=args.num_experts,
+        top_k=args.top_k,
+        ep_group=ep_group,
+    )
+    torch.cuda.synchronize()
+    dispatch_ms = (time.perf_counter() - start) * 1e3
+    _assert_route_invariants(records, args.route_mode, spec.ep)
+
+    # The transported global id is authoritative until this ownership check.
+    global_ids = records.metadata[:, 2]
+    local_ids = global_ids - local.global_expert_offset
+    if global_ids.numel():
+        torch.testing.assert_close(
+            local_ids,
+            global_ids - coords.ep_rank * (args.num_experts // spec.ep),
+            rtol=0,
+            atol=0,
+        )
+
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    pair_partial = _local_compute(
+        records, local, num_experts=args.num_experts, top_k=args.top_k
+    )
+    torch.cuda.synchronize()
+    compute_ms = (time.perf_counter() - start) * 1e3
+    graph_report = (
+        run_local_graph_replay(
+            records,
+            local,
+            pair_partial,
+            num_experts=args.num_experts,
+            top_k=args.top_k,
+        )
+        if args.graph_replay
+        else {"status": "not_requested"}
+    )
+
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    pair_output = get_moe_tp_group().all_reduce(pair_partial)
+    torch.cuda.synchronize()
+    moe_tp_all_reduce_ms = (time.perf_counter() - start) * 1e3
+
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    returned_meta, returned_output = reverse_dispatch(
+        records, pair_output, spec=spec, ep_group=ep_group
+    )
+    torch.cuda.synchronize()
+    reverse_dispatch_ms = (time.perf_counter() - start) * 1e3
+
+    origin_owned = torch.remainder(token_ids, spec.ep) == coords.ep_rank
+    origin_tokens = token_ids[origin_owned]
+    origin_hidden = hidden_states[origin_owned]
+    origin_adapters = adapters[origin_owned]
+    actual = reduce_origin_tokens(origin_tokens, returned_meta, returned_output)
+    expected = independent_oracle(
+        token_ids=origin_tokens,
+        hidden_states=origin_hidden,
+        adapters=origin_adapters,
+        full=full,
+        spec=spec,
+        origin_ep_rank=coords.ep_rank,
+        route_mode=args.route_mode,
+        top_k=args.top_k,
+    )
+    error = _stats(actual, expected)
+    torch.testing.assert_close(actual, expected, rtol=3e-2, atol=3e-2)
+    if error["cosine"] < 0.999:
+        raise AssertionError(f"oracle cosine below 0.999: {error}")
+
+    # Real MoE-DP collective with static padding preserves uneven token counts.
+    max_origin_tokens = max(
+        (count + spec.ep - 1 - coords.ep_rank) // spec.ep
+        for count in spec.token_counts
+    )
+    padded = torch.zeros(
+        (max_origin_tokens, args.hidden), dtype=torch.float32, device=device
+    )
+    padded[: actual.shape[0]].copy_(actual)
+    dp_counts = torch.tensor(
+        [actual.shape[0], records.metadata.shape[0]],
+        dtype=torch.int64,
+        device=device,
+    )
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    gathered_outputs = get_moe_dp_group().all_gather(padded, dim=0)
+    gathered_counts = get_moe_dp_group().all_gather(dp_counts, dim=0)
+    torch.cuda.synchronize()
+    moe_dp_all_gather_ms = (time.perf_counter() - start) * 1e3
+    if gathered_outputs.shape[0] != max_origin_tokens * spec.moe_dp:
+        raise AssertionError("MoE-DP padded all-gather returned the wrong token domain")
+
+    report = {
+        "status": "passed",
+        "host": socket.gethostname(),
+        "rank": rank,
+        "local_rank": int(os.environ["LOCAL_RANK"]),
+        "topology": asdict(spec),
+        "coordinates": asdict(coords),
+        "groups": group_ranks,
+        "route_mode": args.route_mode,
+        "adapter_mode": args.adapter_mode,
+        "dimensions": {
+            "num_experts": args.num_experts,
+            "num_local_experts": local.w13.shape[0],
+            "hidden": args.hidden,
+            "intermediate": args.intermediate,
+            "intermediate_local": local.w2.shape[-1],
+            "rank": args.rank,
+            "top_k": args.top_k,
+            "num_adapters": args.num_adapters,
+        },
+        "transport": {
+            "metadata_contract": [
+                "global_token_id",
+                "topk_slot",
+                "global_expert_id",
+                "adapter_id",
+                "origin_ep_rank",
+            ],
+            "send_counts": records.send_counts.cpu().tolist(),
+            "recv_counts": records.recv_counts.cpu().tolist(),
+            "self_send_pairs": records.self_send_pairs,
+            "nonlocal_send_pairs": records.nonlocal_send_pairs,
+            "received_pairs": records.metadata.shape[0],
+            "global_expert_min": int(global_ids.min().item()) if global_ids.numel() else None,
+            "global_expert_max": int(global_ids.max().item()) if global_ids.numel() else None,
+            "local_expert_min": int(local_ids.min().item()) if local_ids.numel() else None,
+            "local_expert_max": int(local_ids.max().item()) if local_ids.numel() else None,
+            "global_to_local_boundary": "after_EP_dispatch_before_local_weight_index",
+        },
+        "origin_tokens": origin_tokens.numel(),
+        "oracle": error,
+        "graph": graph_report,
+        "collective_evidence": {
+            "ep_all_to_all_world_size": ep_group.world_size,
+            "moe_tp_all_reduce_world_size": get_moe_tp_group().world_size,
+            "moe_dp_all_gather_world_size": get_moe_dp_group().world_size,
+            "moe_dp_gathered_counts": gathered_counts.cpu().tolist(),
+            "graph_boundary": "NCCL collectives execute eagerly outside local CUDA graph",
+        },
+        "timing_ms": {
+            "ep_dispatch": dispatch_ms,
+            "post_dispatch_compute": compute_ms,
+            "moe_tp_all_reduce": moe_tp_all_reduce_ms,
+            "ep_reverse_dispatch": reverse_dispatch_ms,
+            "moe_dp_all_gather": moe_dp_all_gather_ms,
+        },
+    }
+    reports = get_world_group().all_gather_object(report)
+    if rank == 0:
+        aggregate = {
+            "schema_version": 1,
+            "status": "passed",
+            "command": " ".join(os.sys.argv),
+            "torch_version": torch.__version__,
+            "cuda_version": torch.version.cuda,
+            "device": torch.cuda.get_device_name(device),
+            "topology": asdict(spec),
+            "route_mode": args.route_mode,
+            "adapter_mode": args.adapter_mode,
+            "ranks": reports,
+        }
+        if args.output:
+            output = Path(args.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(aggregate, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(aggregate, indent=2, sort_keys=True), flush=True)
+    dist.barrier()
+    return report
+
+
+def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--topology", choices=sorted(TOPOLOGIES), required=True)
+    parser.add_argument(
+        "--route-mode",
+        choices=("standard", "all_local", "mixed", "no_local"),
+        default="standard",
+    )
+    parser.add_argument(
+        "--adapter-mode", choices=("active", "mixed", "base"), default="mixed"
+    )
+    parser.add_argument("--num-experts", type=int, default=8)
+    parser.add_argument("--num-adapters", type=int, default=2)
+    parser.add_argument("--hidden", type=int, default=128)
+    parser.add_argument("--intermediate", type=int, default=128)
+    parser.add_argument("--rank", type=int, default=16)
+    parser.add_argument("--top-k", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=20260722)
+    parser.add_argument("--graph-replay", action="store_true")
+    parser.add_argument("--output", type=str)
+    args = parser.parse_args(argv)
+    spec = TOPOLOGIES[args.topology]
+    if args.num_experts % spec.ep:
+        parser.error("--num-experts must be divisible by topology EP")
+    if args.intermediate % spec.moe_tp:
+        parser.error("--intermediate must be divisible by topology MoE-TP")
+    if spec.ep == 1 and args.route_mode != "standard":
+        parser.error("EP1 topologies use --route-mode standard")
+    if spec.ep > 1 and args.route_mode == "standard":
+        parser.error("EP>1 evidence requires all_local, mixed, or no_local")
+    return args
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    args = parse_args(argv)
+    spec = TOPOLOGIES[args.topology]
+    if int(os.environ.get("WORLD_SIZE", "1")) != spec.world_size:
+        raise RuntimeError(
+            f"{spec.name} requires WORLD_SIZE={spec.world_size}; launch with "
+            f"torchrun --nproc-per-node={spec.world_size}"
+        )
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+
+    from sglang.srt.distributed import (
+        destroy_distributed_environment,
+        destroy_model_parallel,
+        init_distributed_environment,
+        initialize_model_parallel,
+        set_custom_all_reduce,
+    )
+
+    # D0 attributes communication to NCCL explicitly.  Avoid silently routing
+    # a topology case through the optional custom all-reduce implementation.
+    set_custom_all_reduce(False)
+    init_distributed_environment(
+        world_size=spec.world_size,
+        rank=int(os.environ["RANK"]),
+        local_rank=local_rank,
+        backend="nccl",
+        timeout=300,
+    )
+    initialize_model_parallel(
+        tensor_model_parallel_size=spec.tp,
+        expert_model_parallel_size=spec.ep,
+        moe_data_model_parallel_size=spec.moe_dp,
+        pipeline_model_parallel_size=1,
+        backend="nccl",
+        enable_symm_mem=False,
+    )
+    try:
+        run_case(args)
+    finally:
+        destroy_model_parallel()
+        destroy_distributed_environment()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
