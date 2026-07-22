@@ -66,6 +66,8 @@ TARGETS = (
 )
 VARIANTS = ("production", "direct", "generic")
 B_CONFIG_SELECTORS = ("logical-t", "flat-tk", "explicit")
+B_INPUT_SOURCES = ("production-a", "synthetic")
+SYNTHETIC_B_INPUT_SEED = 20260722
 _MISSING_SERVER_ARGS_ERROR = "Global server args is not set yet!"
 
 
@@ -403,6 +405,12 @@ def _random_factor(
     return result
 
 
+def _fill_synthetic_b_intermediate(intermediate: torch.Tensor) -> None:
+    generator = torch.Generator(device=intermediate.device)
+    generator.manual_seed(SYNTHETIC_B_INPUT_SEED)
+    intermediate.uniform_(-0.1, 0.1, generator=generator)
+
+
 @dataclass(slots=True)
 class SiteFixture:
     case: MoeLoraBenchCase
@@ -478,7 +486,12 @@ class SiteFixture:
         )
 
 
-def _build_fixture(case: MoeLoraBenchCase, site: str) -> SiteFixture:
+def _build_fixture(
+    case: MoeLoraBenchCase,
+    site: str,
+    *,
+    b_input_source: str = "production-a",
+) -> SiteFixture:
     device = torch.device("cuda")
     generator = torch.Generator(device=device)
     generator.manual_seed(20260721)
@@ -531,7 +544,7 @@ def _build_fixture(case: MoeLoraBenchCase, site: str) -> SiteFixture:
         base_slot = case.adapters.l_active
         lora_a[base_slot].zero_()
         lora_b[base_slot].zero_()
-    return SiteFixture(
+    fixture = SiteFixture(
         case=case,
         site=site,
         hidden_states=hidden,
@@ -547,6 +560,11 @@ def _build_fixture(case: MoeLoraBenchCase, site: str) -> SiteFixture:
         ),
         routing_cache={},
     )
+    if b_input_source == "synthetic":
+        # Isolate B from unsupported or suboptimal production-A schedules while
+        # retaining the exact routed [token, top-k, rank] consumer layout.
+        _fill_synthetic_b_intermediate(fixture.intermediate)
+    return fixture
 
 
 def _resolve_direct(variant: str, rank: int) -> bool:
@@ -555,6 +573,34 @@ def _resolve_direct(variant: str, rank: int) -> bool:
     if variant == "generic":
         return False
     return rank <= 64
+
+
+def _fixture_b_rank(fixture: SiteFixture) -> int:
+    weight = getattr(fixture, "lora_b", None)
+    if weight is not None:
+        return weight.shape[-1]
+    adapters = fixture.case.adapters
+    return getattr(adapters, "physical_rank", adapters.rank)
+
+
+def _reference_direct(
+    fixture: SiteFixture,
+    *,
+    target: str,
+    variant: str,
+    b_input_source: str,
+) -> bool:
+    direct = _resolve_direct(variant, _fixture_b_rank(fixture))
+    if b_input_source == "synthetic" and target.endswith("_b"):
+        return not direct
+    if (
+        variant == "generic"
+        and target in ("gate_b", "gate_ab")
+        and fixture.num_slices > 1
+        and _fixture_b_rank(fixture) <= 64
+    ):
+        return True
+    return direct
 
 
 def _target_stage(target: str) -> str:
@@ -573,18 +619,24 @@ class PreparedOp:
     direct: bool
     launch: Callable[[], None]
     before_sample: Callable[[], None] | None
+    b_input_source: str = "production-a"
 
 
 def _build_op(
-    fixture: SiteFixture, *, target: str, variant: str, scope: str
+    fixture: SiteFixture,
+    *,
+    target: str,
+    variant: str,
+    scope: str,
+    b_input_source: str = "production-a",
 ) -> PreparedOp:
-    direct = _resolve_direct(variant, fixture.case.adapters.rank)
+    direct = _resolve_direct(variant, _fixture_b_rank(fixture))
     is_b = target.endswith("_b")
 
-    # Seed both A and B route plans, then compile the A producer needed by a
-    # B-only target. None of this is part of K0 timing.
+    # Seed both A and B route plans, then (for the production source) compile
+    # and run the A producer needed by a B-only target. This is outside K0.
     fixture.invoke("routing", direct=direct)
-    if is_b:
+    if is_b and b_input_source == "production-a":
         fixture.invoke("shrink", direct=direct)
     torch.cuda.synchronize()
 
@@ -616,6 +668,7 @@ def _build_op(
         direct=direct,
         launch=launch,
         before_sample=reset,
+        b_input_source=b_input_source,
     )
 
 
@@ -627,23 +680,25 @@ def _clone_operator_value(fixture: SiteFixture, target: str) -> torch.Tensor | N
 
 
 def _production_config_reference(
-    fixture: SiteFixture, *, target: str, variant: str
+    fixture: SiteFixture,
+    *,
+    target: str,
+    variant: str,
+    b_input_source: str = "production-a",
 ) -> torch.Tensor | None:
     """Compute a safe reference before installing an experimental B config."""
-    direct = _resolve_direct(variant, fixture.case.adapters.rank)
-    # A same-family generic reference used to reproduce the gate/up slice bug:
-    # both runs consumed A[:R] for both output halves.  Rank <= 64 has a safe,
-    # independent production direct path, so use it as the oracle here.
-    if (
-        variant == "generic"
-        and target in ("gate_b", "gate_ab")
-        and fixture.num_slices > 1
-        and fixture.case.adapters.rank <= 64
-    ):
-        direct = True
+    direct = _reference_direct(
+        fixture,
+        target=target,
+        variant=variant,
+        b_input_source=b_input_source,
+    )
+    # Synthetic B-only runs always use the opposite B family as their oracle.
+    # Production-A generic gate/up uses direct B when rank <= 64, where A can
+    # still produce the intermediate without the known rank-128 resource error.
     fixture.routing_cache.clear()
     fixture.invoke("routing", direct=direct)
-    if target.endswith("_b"):
+    if target.endswith("_b") and b_input_source == "production-a":
         fixture.invoke("shrink", direct=direct)
 
     if target != "routing":
@@ -673,7 +728,9 @@ def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
 
     first = run_once()
     second = run_once()
-    if not op.direct and op.target in ("gate_b", "gate_ab"):
+    if op.target in ("gate_b", "gate_ab") and (
+        not op.direct or op.b_input_source == "synthetic"
+    ):
         # Gate/up random factors produce small deltas.  A 6e-2 absolute bound
         # can accept an entirely wrong half, so keep a BF16-friendly relative
         # bound but make the absolute comparison discriminate the two slices.
@@ -720,6 +777,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", choices=TARGETS, default="gate_ab")
     parser.add_argument("--variant", choices=VARIANTS, default="production")
     parser.add_argument(
+        "--b-input-source",
+        choices=B_INPUT_SOURCES,
+        default="production-a",
+        help=(
+            "B-only input source: run the production A producer, or use a "
+            "deterministic precomputed synthetic intermediate"
+        ),
+    )
+    parser.add_argument(
         "--b-config-selector",
         choices=B_CONFIG_SELECTORS,
         default="logical-t",
@@ -755,6 +821,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _validate_b_input_source(target: str, source: str) -> None:
+    if source == "synthetic" and target not in ("gate_b", "down_b"):
+        raise ValueError("synthetic B input is only valid for gate_b or down_b")
+
+
 def _execute_benchmark(
     args: argparse.Namespace,
     case: MoeLoraBenchCase,
@@ -762,7 +833,13 @@ def _execute_benchmark(
     selection: BConfigSelection,
     reference: torch.Tensor | None,
 ) -> dict[str, object]:
-    op = _build_op(fixture, target=args.target, variant=args.variant, scope=args.scope)
+    op = _build_op(
+        fixture,
+        target=args.target,
+        variant=args.variant,
+        scope=args.scope,
+        b_input_source=args.b_input_source,
+    )
     if args.skip_check:
         op.launch()
     else:
@@ -782,6 +859,17 @@ def _execute_benchmark(
         execution=run_config.execution,
         inner_iterations=run_config.inner_iterations,
     )
+    is_b_only = args.target.endswith("_b")
+    oracle_expand = (
+        "direct"
+        if _reference_direct(
+            fixture,
+            target=args.target,
+            variant=args.variant,
+            b_input_source=args.b_input_source,
+        )
+        else "generic"
+    )
     result: dict[str, object] = {
         "environment": _environment(args),
         "case": _case_summary(case),
@@ -789,6 +877,23 @@ def _execute_benchmark(
         "scope": args.scope,
         "requested_variant": args.variant,
         "effective_expand": "direct" if op.direct else "generic",
+        "b_intermediate": {
+            "source": args.b_input_source if is_b_only else "not_applicable",
+            "seed": (
+                SYNTHETIC_B_INPUT_SEED
+                if is_b_only and args.b_input_source == "synthetic"
+                else None
+            ),
+            "shape": list(fixture.intermediate.shape) if is_b_only else None,
+            "a_producer_launched": (
+                args.b_input_source == "production-a" if is_b_only else None
+            ),
+        },
+        "correctness_oracle_expand": (
+            oracle_expand
+            if not args.skip_check and (is_b_only or args.target.endswith("_ab"))
+            else "not_applicable"
+        ),
         "b_config": {
             "requested_selector": selection.selector,
             "site": fixture.site,
@@ -805,7 +910,11 @@ def _execute_benchmark(
             "prebuilt"
             if args.scope == "K0"
             else (
-                "route_inclusive_b_with_precomputed_a"
+                (
+                    "route_inclusive_b_with_precomputed_a"
+                    if args.b_input_source == "production-a"
+                    else "route_inclusive_b_with_synthetic_intermediate"
+                )
                 if args.target.endswith("_b")
                 else "route_inclusive"
             )
@@ -831,6 +940,10 @@ def _execute_benchmark(
             "valid_pairs": fixture.topk_ids.numel(),
             "experts_hit": int(torch.unique(fixture.topk_ids).numel()),
             "virtual_expert_capacity": (case.e_local * case.adapters.l_capacity),
+            "prewarm": "a_and_b",
+            "a_execution": (
+                "skipped" if args.b_input_source == "synthetic" else "production"
+            ),
         },
     }
 
@@ -853,7 +966,8 @@ def _execute_benchmark(
         )
         print(
             f"{case.case_id} {args.scope}/{args.target} "
-            f"{result['effective_expand']} B={selection.selector} {args.execution}: "
+            f"{result['effective_expand']} B={selection.selector} "
+            f"BInput={args.b_input_source} {args.execution}: "
             f"p50={timing.p50_us:.3f} us "
             f"p20/p80={timing.p20_us:.3f}/{timing.p80_us:.3f} us"
         )
@@ -863,7 +977,7 @@ def _execute_benchmark(
         label = (
             f"sgl_lora_moe::{args.scope}::{args.target}::{case.case_id}::"
             f"{result['effective_expand']}::B={selection.selector}::"
-            f"{args.execution}::pdl=auto"
+            f"BInput={args.b_input_source}::{args.execution}::pdl=auto"
         )
         with cuda_profile_range(label):
             for _ in range(run_config.profile_iterations):
@@ -885,6 +999,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         device = args.device if args.device != "auto" else "h200"
         _list_cases(device)
         return 0
+    _validate_b_input_source(args.target, args.b_input_source)
     if not torch.cuda.is_available():
         raise RuntimeError("This benchmark requires CUDA")
     _ensure_benchmark_server_args()
@@ -898,7 +1013,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("route-inclusive O0 requires --inner-iterations 1")
 
     site = "down" if args.target.startswith("down") else "gate"
-    fixture = _build_fixture(case, site)
+    fixture = _build_fixture(case, site, b_input_source=args.b_input_source)
     explicit = ExplicitBConfig(
         block_m=args.b_block_m,
         block_n=args.b_block_n,
@@ -911,7 +1026,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         None
         if args.skip_check
         else _production_config_reference(
-            fixture, target=args.target, variant=args.variant
+            fixture,
+            target=args.target,
+            variant=args.variant,
+            b_input_source=args.b_input_source,
         )
     )
     selection = _select_b_config(fixture, args.b_config_selector, explicit)
