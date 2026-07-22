@@ -9,17 +9,31 @@ import pytest
 import benchmark.kernels.lora_moe.bench_indexed_shrink as indexed_shrink
 import benchmark.kernels.lora_moe.bench_moe_pipeline as moe_pipeline
 from benchmark.kernels.lora_moe.bench_moe_pipeline import (
+    _NEUTRAL_BASELINE_SPECS,
     BScheduleOverrides,
+    PipelineFixture,
     _b_schedule_override,
     _capture_production_c0_reference,
+    _check_provider_lora_delta,
     _exit_context_normally,
+    _experimental_trtllm_environment,
     _indexed_a_override,
+    _matched_latency_summary,
+    _make_routing,
     _parse_b_config,
     _pipeline_two_stream_metadata,
+    _resolve_baseline_pipelines,
     _resolve_c1_overlap,
     _resolve_indexed_a_configs,
+    _resolve_neutral_baselines,
+    _run_length_encode_token_mapping,
+    _smoke_case,
+    _strict_delta_atol,
+    _validate_neutral_case,
+    _validate_all_base_sentinel,
     parse_args,
 )
+from benchmark.kernels.lora_moe.matrix import p0_cases
 
 
 def _load_moe_runner_module():
@@ -44,9 +58,324 @@ def test_indexed_a_cli_defaults_to_production_and_auto_configs():
     assert args.down_b_variant == "production"
     assert args.gate_b_config is None
     assert args.down_b_config is None
+    assert args.neutral_baselines == "none"
+    assert args.route_pattern == "lattice_control"
+    assert args.route_seed == 0
+    assert args.all_base_sgl_c0_sentinel is False
 
     forced = parse_args(["--c1-overlap-policy", "force"])
     assert forced.c1_overlap_policy == "force"
+
+
+def test_neutral_baseline_cli_and_pipeline_resolution():
+    assert _resolve_neutral_baselines("none") == ()
+    assert _resolve_neutral_baselines("legacy_triton") == ("legacy_triton",)
+    assert _resolve_neutral_baselines("all") == (
+        "legacy_triton",
+        "experimental_trtllm",
+    )
+    with pytest.raises(ValueError, match="unknown neutral baseline"):
+        _resolve_neutral_baselines("missing")
+
+    case = p0_cases("h200")[2]
+    assert _resolve_baseline_pipelines("legacy_triton", "all", case) == (
+        "N0",
+        "C0",
+    )
+    assert _resolve_baseline_pipelines("experimental_trtllm", "all", case) == (
+        "N0",
+        "C0",
+        "C1",
+    )
+    assert _resolve_baseline_pipelines("legacy_triton", "C1", case) == ()
+
+    args = parse_args(["--neutral-baselines", "all"])
+    assert args.neutral_baselines == "all"
+
+
+def test_route_families_are_reproducible_unique_and_seed_isolated():
+    import torch
+
+    case = p0_cases("h200")[2]
+    device = torch.device("cpu")
+    lattice_a = _make_routing(
+        case, device, pattern="lattice_control", route_seed=1
+    )
+    lattice_b = _make_routing(
+        case, device, pattern="lattice_control", route_seed=999
+    )
+    assert lattice_a[3]["pattern"] == "lattice_control"
+    assert lattice_a[3]["seed_effective"] is False
+    assert lattice_a[3]["resolved_route_hash"] == lattice_b[3]["resolved_route_hash"]
+
+    uniform_a = _make_routing(
+        case,
+        device,
+        pattern="uniform_iid_without_replacement",
+        route_seed=7,
+    )
+    uniform_b = _make_routing(
+        case,
+        device,
+        pattern="uniform_iid_without_replacement",
+        route_seed=8,
+    )
+    assert uniform_a[3]["sampling"] == "uniform"
+    assert uniform_a[3]["resolved_route_hash"] != uniform_b[3]["resolved_route_hash"]
+    # Route seeds change only expert IDs: weights and adapter assignment remain exact.
+    assert torch.equal(uniform_a[1], uniform_b[1])
+    assert torch.equal(uniform_a[2], uniform_b[2])
+
+    skewed = _make_routing(
+        case,
+        device,
+        pattern="skewed_iid_without_replacement",
+        route_seed=7,
+    )
+    assert skewed[3]["sampling"] == "zipf_alpha_1.2"
+    for topk_ids, metadata in ((uniform_a[0], uniform_a[3]), (skewed[0], skewed[3])):
+        assert all(row.unique().numel() == case.model.top_k for row in topk_ids)
+        assert metadata["E_hit"] == topk_ids.unique().numel()
+
+
+def test_classic_adapter_segments_are_minimal_and_exact():
+    import torch
+
+    mapping = torch.tensor([2, 2, 2, -1, -1, 7, 2, 2], dtype=torch.int32)
+    indptr, identities = _run_length_encode_token_mapping(mapping)
+    assert indptr.tolist() == [0, 3, 5, 6, 8]
+    assert identities.tolist() == [2, -1, 7, 2]
+    reconstructed = torch.cat(
+        [
+            identities[i].expand(int(indptr[i + 1] - indptr[i]))
+            for i in range(identities.numel())
+        ]
+    )
+    assert torch.equal(reconstructed, mapping)
+
+    single = torch.zeros(32, dtype=torch.int32)
+    indptr, identities = _run_length_encode_token_mapping(single)
+    assert indptr.tolist() == [0, 32]
+    assert identities.tolist() == [0]
+
+
+def test_all_base_sgl_c0_sentinel_is_narrow_and_opt_in():
+    base = p0_cases("h200")[1]
+    active = p0_cases("h200")[2]
+    production = BScheduleOverrides()
+    _validate_all_base_sentinel(
+        base,
+        enabled=True,
+        execution="cuda_graph",
+        a_provider="production",
+        b_schedules=production,
+    )
+    with pytest.raises(ValueError, match="all-base P0 case"):
+        _validate_all_base_sentinel(
+            active,
+            enabled=True,
+            execution="cuda_graph",
+            a_provider="production",
+            b_schedules=production,
+        )
+    with pytest.raises(ValueError, match="requires --execution cuda_graph"):
+        _validate_all_base_sentinel(
+            base,
+            enabled=True,
+            execution="eager",
+            a_provider="production",
+            b_schedules=production,
+        )
+    assert parse_args(["--all-base-sgl-c0-sentinel"]).all_base_sgl_c0_sentinel
+
+
+def test_neutral_specs_make_conversion_accounting_explicit():
+    legacy = _NEUTRAL_BASELINE_SPECS["legacy_triton"]
+    trtllm = _NEUTRAL_BASELINE_SPECS["experimental_trtllm"]
+    assert legacy.base_provider == "stock_triton_bf16"
+    assert legacy.weight_layout == "canonical_standard_bf16"
+    assert "classic_lora_adapter_expert_alignment_for_active_pipeline" in (
+        legacy.per_forward_preparation
+    )
+    assert trtllm.weight_layout == "flashinfer_trtllm_block_major_k_bf16"
+    assert trtllm.supported_devices == ("gb300",)
+    assert "vendored_experimental_runner_must_match_flashinfer_header_abi" in (
+        trtllm.runtime_requirements
+    )
+    assert "standard_topk_to_trtllm_packed_topk" in (trtllm.per_forward_preparation)
+
+
+def test_trtllm_control_records_architecture_and_geometry_constraints():
+    smoke = _smoke_case("gb300")
+    with pytest.raises(ValueError, match="divisible by 128"):
+        _validate_neutral_case(smoke, ("experimental_trtllm",))
+    _validate_neutral_case(_smoke_case("h200"), ("legacy_triton",))
+    with pytest.raises(NotImplementedError, match="SM100"):
+        _validate_neutral_case(
+            p0_cases("h200")[2], ("experimental_trtllm",)
+        )
+    _validate_neutral_case(p0_cases("gb300")[2], ("experimental_trtllm",))
+
+
+def test_experimental_environment_is_scoped(monkeypatch):
+    name = "SGLANG_EXPERIMENTAL_LORA_OPTI"
+    monkeypatch.delenv(name, raising=False)
+    with _experimental_trtllm_environment(True):
+        assert moe_pipeline.os.environ[name] == "1"
+    assert name not in moe_pipeline.os.environ
+
+    monkeypatch.setenv(name, "custom")
+    with _experimental_trtllm_environment(True):
+        assert moe_pipeline.os.environ[name] == "1"
+    assert moe_pipeline.os.environ[name] == "custom"
+
+
+def test_matched_latency_summary_never_borrows_an_unmatched_n0():
+    missing = _matched_latency_summary({"C0": {"timing": {"p50_us": 120.0}}})
+    assert missing == {
+        "status": "unavailable_without_timed_provider_n0",
+        "provider_matched": True,
+    }
+
+    summary = _matched_latency_summary(
+        {
+            "N0": {"timing": {"p50_us": 100.0}},
+            "C0": {"timing": {"p50_us": 125.0}},
+            "C1": {"timing": {"p50_us": 110.0}},
+        }
+    )
+    assert summary["n0_p50_us"] == 100.0
+    assert summary["active"]["C0"] == {
+        "p50_us": 125.0,
+        "active_over_n0_p50_us": 25.0,
+        "n0_retention_percent": 80.0,
+    }
+    assert summary["active"]["C1"]["active_over_n0_p50_us"] == 10.0
+
+
+def test_n0_only_neutral_check_does_not_require_active_fixture(monkeypatch):
+    import torch
+
+    calls = []
+    fixture = SimpleNamespace(case=p0_cases("gb300")[2])
+    monkeypatch.setattr(
+        moe_pipeline,
+        "_run_checked",
+        lambda _fixture, pipeline: calls.append(("sgl", pipeline))
+        or torch.zeros(1),
+    )
+    monkeypatch.setattr(
+        moe_pipeline,
+        "_run_neutral_checked",
+        lambda _fixture, baseline, pipeline: calls.append((baseline, pipeline))
+        or torch.zeros(1),
+    )
+    monkeypatch.setattr(torch.testing, "assert_close", lambda *args, **kwargs: None)
+
+    moe_pipeline._check_neutral_baselines(
+        fixture, ("experimental_trtllm",), "N0"
+    )
+    assert calls == [("sgl", "N0"), ("experimental_trtllm", "N0")]
+
+
+def test_provider_delta_check_subtracts_each_providers_own_base(monkeypatch):
+    import torch
+
+    reference_base = torch.tensor([10.0, 20.0])
+    candidate_base = torch.tensor([11.0, 19.0])
+    delta = torch.tensor([0.25, -0.5])
+    checks = {}
+    compared = []
+    monkeypatch.setattr(
+        torch.testing,
+        "assert_close",
+        lambda lhs, rhs, **kwargs: compared.append(
+            (lhs.tolist(), rhs.tolist(), kwargs)
+        ),
+    )
+    _check_provider_lora_delta(
+        checks,
+        "matched",
+        reference_base + delta,
+        reference_base,
+        candidate_base + delta,
+        candidate_base,
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert checks["matched_delta_max_abs_error"] == 0.0
+    assert compared == [([0.25, -0.5], [0.25, -0.5], {"rtol": 0.0, "atol": 0.0})]
+
+
+def test_strict_delta_tolerance_cannot_hide_a_dropped_adapter(monkeypatch):
+    import torch
+
+    signal = 0.0035
+    assert _strict_delta_atol(signal) <= signal / 10
+
+    base = torch.full((4,), 100.0)
+    reference = base + torch.tensor([signal, 0.0, 0.0, 0.0])
+    def assert_close(lhs, rhs, *, rtol, atol):
+        tolerance = atol + rtol * rhs.abs()
+        if not bool(((lhs - rhs).abs() <= tolerance).all()):
+            raise AssertionError("not close")
+
+    monkeypatch.setattr(torch.testing, "assert_close", assert_close)
+    checks = {}
+    with pytest.raises(AssertionError):
+        moe_pipeline._check_lora_delta(
+            checks,
+            "dropped",
+            reference,
+            base,
+            base,
+        )
+
+
+def test_strict_delta_check_rejects_an_all_zero_reference_signal():
+    import torch
+
+    base = torch.ones(4)
+    with pytest.raises(AssertionError, match="all-zero delta"):
+        moe_pipeline._check_lora_delta({}, "zero", base, base, base)
+
+
+def test_legacy_control_dispatches_stock_n0_and_classic_lora_c0():
+    calls = []
+
+    class FakeRunner:
+        def __init__(self, output):
+            self.output = output
+
+        def run(self, *args, **kwargs):
+            calls.append((self.output, args, kwargs))
+            return SimpleNamespace(hidden_states=self.output)
+
+    fixture = SimpleNamespace(
+        _dispatch_output=lambda: "standard-dispatch",
+        legacy_quant_info="triton-quant",
+        legacy_base_runner=FakeRunner("base-output"),
+        legacy_lora_runner=FakeRunner("active-output"),
+        legacy_lora_info="classic-lora-info",
+        trtllm_quant_info=None,
+        last_output=None,
+    )
+    PipelineFixture.invoke_neutral(fixture, "legacy_triton", "N0")
+    assert fixture.last_output == "base-output"
+    PipelineFixture.invoke_neutral(fixture, "legacy_triton", "C0")
+    assert fixture.last_output == "active-output"
+    assert calls == [
+        (
+            "base-output",
+            ("standard-dispatch", "triton-quant"),
+            {},
+        ),
+        (
+            "active-output",
+            ("standard-dispatch", "triton-quant"),
+            {"lora_info": "classic-lora-info"},
+        ),
+    ]
 
 
 def test_b_schedule_cli_and_config_parser():

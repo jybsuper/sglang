@@ -14,6 +14,16 @@ another for correctness. ``N0`` is the matched base-only latency reference, not
 a numerical reference for an active-adapter result. The initial M0 checkpoint
 is intentionally limited to gated SwiGLU, BF16, and TP=EP=MoE-DP=1.
 
+The opt-in ``--neutral-baselines`` bracket adds whole-M0 controls without
+changing the existing SGL result schema:
+
+* ``legacy_triton``: stock Triton ``N0`` and the classic legacy-hook ``C0``;
+* ``experimental_trtllm``: provider-matched TRTLLM BF16 ``N0/C0/C1``.
+
+All providers start from the same canonical BF16 weights and standard top-k.
+Provider-private load-time weight conversion is excluded and reported; every
+per-forward route/alignment/top-k pack needed by a provider remains inside M0.
+
 Examples::
 
     python benchmark/kernels/lora_moe/bench_moe_pipeline.py --list-cases
@@ -26,6 +36,9 @@ Examples::
     python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
       --case-id p0-qwen3.5-35b-a3b-prefill-h200 --pipeline all \
       --c1-overlap-policy force --execution cuda_graph
+    python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
+      --case-id p0-qwen3.5-35b-a3b-cap1-h200 --pipeline all \
+      --neutral-baselines all --execution cuda_graph
 
 For a trace, choose exactly one pipeline and wrap this script with Nsight using
 the CUDA-profiler capture range, as in ``bench_local.py``.
@@ -34,14 +47,16 @@ the CUDA-profiler capture range, as in ``bench_local.py``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
 import socket
 import subprocess
 import sys
+import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Sequence
@@ -67,6 +82,13 @@ from benchmark.kernels.lora_moe.profiling import (
 
 PIPELINES = ("N0", "C0", "C1")
 C1_OVERLAP_POLICIES = ("production_auto", "force")
+NEUTRAL_BASELINES = ("legacy_triton", "experimental_trtllm")
+NEUTRAL_BASELINE_CHOICES = ("none", *NEUTRAL_BASELINES, "all")
+ROUTE_PATTERNS = (
+    "lattice_control",
+    "uniform_iid_without_replacement",
+    "skewed_iid_without_replacement",
+)
 B_VARIANTS = ("production", "direct", "generic")
 _B_CONFIG_FIELDS = (
     "BLOCK_SIZE_M",
@@ -164,6 +186,86 @@ class BScheduleOverrides:
             ),
             "production_policy_changed": False,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class NeutralBaselineSpec:
+    """One provider-matched whole-M0 control.
+
+    ``pipelines`` names only execution topology. The provider-private weight
+    representation and all per-forward conversions are described separately so
+    an ``N0`` number is never reused across providers.
+    """
+
+    key: str
+    base_provider: str
+    active_provider: str
+    pipelines: tuple[str, ...]
+    supported_devices: tuple[str, ...]
+    runtime_requirements: tuple[str, ...]
+    weight_layout: str
+    per_forward_preparation: tuple[str, ...]
+
+
+_NEUTRAL_BASELINE_SPECS = {
+    "legacy_triton": NeutralBaselineSpec(
+        key="legacy_triton",
+        base_provider="stock_triton_bf16",
+        active_provider="legacy_triton_classic_lora_hooks",
+        pipelines=("N0", "C0"),
+        supported_devices=("h200", "gb300"),
+        runtime_requirements=(
+            "triton_moe_available",
+            "exact_shape_tuned_configs_optional_but_required_for_peak_performance",
+        ),
+        weight_layout="canonical_standard_bf16",
+        per_forward_preparation=(
+            "stock_or_staged_triton_expert_alignment",
+            "classic_lora_adapter_expert_alignment_for_active_pipeline",
+        ),
+    ),
+    "experimental_trtllm": NeutralBaselineSpec(
+        key="experimental_trtllm",
+        base_provider="flashinfer_trtllm_bf16_routed",
+        active_provider="experimental_sgl_trtllm_bf16_lora",
+        pipelines=("N0", "C0", "C1"),
+        # The branch's FlashInfer BF16 routed entrypoint unconditionally loads
+        # its SM100 module.  The installed H200 toolchain therefore cannot emit
+        # a compatible kernel; do not turn that compile failure into a timing.
+        supported_devices=("gb300",),
+        runtime_requirements=(
+            "sm100_flashinfer_bf16_routed_moe",
+            "h_moe_and_intermediate_divisible_by_128",
+            "vendored_experimental_runner_must_match_flashinfer_header_abi",
+        ),
+        weight_layout="flashinfer_trtllm_block_major_k_bf16",
+        per_forward_preparation=(
+            "standard_topk_to_trtllm_packed_topk",
+            "virtual_expert_lora_route_plan_for_active_pipeline",
+        ),
+    ),
+}
+
+
+def _resolve_neutral_baselines(requested: str) -> tuple[str, ...]:
+    if requested == "none":
+        return ()
+    if requested == "all":
+        return NEUTRAL_BASELINES
+    if requested in _NEUTRAL_BASELINE_SPECS:
+        return (requested,)
+    raise ValueError(f"unknown neutral baseline {requested!r}")
+
+
+def _resolve_baseline_pipelines(
+    baseline: str,
+    requested_pipeline: str,
+    case: MoeLoraBenchCase,
+) -> tuple[str, ...]:
+    """Intersect requested topologies with what one neutral provider supports."""
+    spec = _NEUTRAL_BASELINE_SPECS[baseline]
+    requested = _resolve_pipelines(requested_pipeline, case)
+    return tuple(pipeline for pipeline in requested if pipeline in spec.pipelines)
 
 
 def _parse_b_config(value: str | None) -> dict[str, int] | None:
@@ -275,6 +377,9 @@ def _environment(args: argparse.Namespace) -> dict[str, object]:
         "git_revision": revision,
         "git_dirty": dirty,
         "pdl_policy": "architecture_auto",
+        "experimental_lora_master_effective": os.getenv(
+            "SGLANG_EXPERIMENTAL_LORA_OPTI", "0"
+        ),
         "cli": vars(args),
     }
 
@@ -358,20 +463,86 @@ def _resolve_c1_overlap(policy: str, num_tokens: int) -> bool:
     raise ValueError(f"unknown C1 overlap policy {policy!r}")
 
 
+@contextmanager
+def _experimental_trtllm_environment(enabled: bool) -> Iterator[None]:
+    """Enable the existing experimental defaults for an isolated benchmark run.
+
+    The direct benchmark dispatch does not alter production selectors or install
+    the package-wide monkey patches. It does need the same master gate that makes
+    the experimental backend's default routing/packing optimizations visible.
+    """
+    if not enabled:
+        yield
+        return
+    name = "SGLANG_EXPERIMENTAL_LORA_OPTI"
+    previous = os.environ.get(name)
+    os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
+
+
 def _make_routing(
-    case: MoeLoraBenchCase, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    case: MoeLoraBenchCase,
+    device: torch.device,
+    *,
+    pattern: str = "lattice_control",
+    route_seed: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, object]]:
+    """Resolve one fixed top-k route independently of all other fixture data.
+
+    ``lattice_control`` retains the original deterministic arithmetic lattice;
+    it is a structured control, not IID. ``uniform_iid_without_replacement``
+    draws every token's K distinct experts with equal probability.
+    ``skewed_iid_without_replacement`` uses ``torch.multinomial`` with Zipf-1.2
+    expert weights, which is a sequential weighted-without-replacement draw.
+    Hidden states, top-k weights, adapter mapping, base weights, and LoRA factors
+    use separate fixed seeds, so changing only ``route_seed`` changes only IDs.
+    """
     tokens = torch.arange(case.t_local, dtype=torch.int32, device=device)
     slots = torch.arange(case.model.top_k, dtype=torch.int32, device=device)
-    topk_ids = (tokens[:, None] * 13 + slots[None, :] * 7) % case.e_local
+    distribution = "deterministic_arithmetic_lattice"
+    seed_effective = False
+    if pattern == "lattice_control":
+        topk_ids = (tokens[:, None] * 13 + slots[None, :] * 7) % case.e_local
+    elif pattern in (
+        "uniform_iid_without_replacement",
+        "skewed_iid_without_replacement",
+    ):
+        route_generator = torch.Generator(device=device)
+        route_generator.manual_seed(route_seed)
+        if pattern == "uniform_iid_without_replacement":
+            expert_weights = torch.ones(
+                case.e_local, dtype=torch.float32, device=device
+            )
+            distribution = "uniform"
+        else:
+            expert_rank = torch.arange(
+                1, case.e_local + 1, dtype=torch.float32, device=device
+            )
+            expert_weights = expert_rank.pow(-1.2)
+            distribution = "zipf_alpha_1.2"
+        topk_ids = torch.multinomial(
+            expert_weights.expand(case.t_local, -1),
+            num_samples=case.model.top_k,
+            replacement=False,
+            generator=route_generator,
+        ).to(torch.int32)
+        seed_effective = True
+    else:
+        raise ValueError(f"unknown route pattern {pattern!r}")
 
-    generator = torch.Generator(device=device)
-    generator.manual_seed(17)
+    topk_weight_generator = torch.Generator(device=device)
+    topk_weight_generator.manual_seed(17)
     topk_weights = torch.rand(
         (case.t_local, case.model.top_k),
         dtype=torch.float32,
         device=device,
-        generator=generator,
+        generator=topk_weight_generator,
     )
     topk_weights /= topk_weights.sum(dim=1, keepdim=True)
 
@@ -382,7 +553,51 @@ def _make_routing(
         identities.append(-1)
     identity_tensor = torch.tensor(identities, dtype=torch.int32, device=device)
     token_lora_mapping = identity_tensor[tokens.long() % len(identities)]
-    return topk_ids.contiguous(), topk_weights, token_lora_mapping
+    topk_ids = topk_ids.contiguous()
+    route_bytes = topk_ids.detach().cpu().numpy().tobytes()
+    metadata: dict[str, object] = {
+        "pattern": pattern,
+        "route_seed": route_seed,
+        "seed_effective": seed_effective,
+        "sampling": distribution,
+        "without_replacement_within_token": True,
+        "E_hit": int(torch.unique(topk_ids).numel()),
+        "resolved_route_hash": hashlib.sha256(route_bytes).hexdigest(),
+        "route_hash_algorithm": "sha256_int32_row_major",
+        "topk_weight_seed": 17,
+        "fixture_tensor_seed": 20260721,
+        "non_route_inputs_fixed_across_route_seeds": True,
+    }
+    return topk_ids, topk_weights, token_lora_mapping, metadata
+
+
+def _run_length_encode_token_mapping(
+    token_lora_mapping: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert a token-domain adapter map to minimal contiguous segments."""
+    num_tokens = token_lora_mapping.shape[0]
+    if num_tokens == 0:
+        return (
+            torch.zeros(1, dtype=torch.int32, device=token_lora_mapping.device),
+            token_lora_mapping.clone(),
+        )
+    changes = torch.nonzero(
+        token_lora_mapping[1:] != token_lora_mapping[:-1], as_tuple=False
+    ).flatten()
+    segment_indptr = torch.cat(
+        (
+            torch.zeros(1, dtype=torch.int32, device=token_lora_mapping.device),
+            (changes + 1).to(torch.int32),
+            torch.full(
+                (1,),
+                num_tokens,
+                dtype=torch.int32,
+                device=token_lora_mapping.device,
+            ),
+        )
+    )
+    segment_to_lora = token_lora_mapping[segment_indptr[:-1].long()].clone()
+    return segment_indptr, segment_to_lora
 
 
 def _random_bf16(
@@ -397,9 +612,78 @@ def _random_bf16(
     return tensor
 
 
+def _tensor_bytes(tensor: torch.Tensor) -> int:
+    return tensor.numel() * tensor.element_size()
+
+
+def _prepare_trtllm_bf16_weights(
+    w13: torch.Tensor,
+    w2: torch.Tensor,
+    *,
+    is_gated: bool,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+    """Create TRTLLM's load-time BF16 BlockMajorK representation.
+
+    This mirrors unquantized MoE post-load processing. The conversion is a
+    provider-residency cost, not a forward operation; its elapsed setup time and
+    bytes are reported so it cannot be mistaken for free per-forward work.
+    """
+    from flashinfer.fused_moe.core import (
+        _maybe_get_cached_w3_w1_permute_indices,
+        convert_to_block_layout,
+        get_w2_permute_indices_with_cache,
+    )
+
+    torch.cuda.synchronize()
+    started = time.perf_counter()
+    index_cache: dict = {}
+
+    def convert(weight: torch.Tensor, *, gate_up: bool) -> torch.Tensor:
+        converted = []
+        for expert_weight in weight:
+            bytes_view = expert_weight.view(torch.uint8)
+            if gate_up:
+                indices = _maybe_get_cached_w3_w1_permute_indices(
+                    index_cache,
+                    bytes_view,
+                    128,
+                    is_gated_act_gemm=is_gated,
+                )
+            else:
+                indices = get_w2_permute_indices_with_cache(
+                    index_cache,
+                    bytes_view,
+                    128,
+                )
+            permuted = bytes_view[indices.to(weight.device)].contiguous()
+            blocked = convert_to_block_layout(permuted, 128)
+            converted.append(blocked.view(torch.bfloat16))
+        return torch.stack(converted).contiguous()
+
+    trtllm_w13 = convert(w13, gate_up=True)
+    trtllm_w2 = convert(w2, gate_up=False)
+    torch.cuda.synchronize()
+    elapsed_ms = (time.perf_counter() - started) * 1e3
+    canonical_bytes = _tensor_bytes(w13) + _tensor_bytes(w2)
+    resident_bytes = _tensor_bytes(trtllm_w13) + _tensor_bytes(trtllm_w2)
+    metadata: dict[str, object] = {
+        "source_layout": "canonical_standard_bf16",
+        "resident_layout": "flashinfer_trtllm_block_major_k_bf16",
+        "lifetime": "load_time_provider_residency",
+        "included_in_m0_timing": False,
+        "conversion": "row_permute_then_block_major_k_128",
+        "canonical_source_bytes": canonical_bytes,
+        "provider_resident_bytes": resident_bytes,
+        "elapsed_setup_ms": elapsed_ms,
+        "per_forward_weight_conversion": False,
+    }
+    return trtllm_w13, trtllm_w2, metadata
+
+
 @dataclass(slots=True)
 class PipelineFixture:
     case: MoeLoraBenchCase
+    route_metadata: dict[str, object]
     c1_overlap_policy: str
     c1_two_stream_enabled: bool
     hidden_seed: torch.Tensor
@@ -408,6 +692,12 @@ class PipelineFixture:
     runner_config: object
     base_quant_info: object
     base_runner: object
+    legacy_base_runner: object | None
+    legacy_lora_runner: object | None
+    legacy_quant_info: object | None
+    legacy_lora_info: object | None
+    trtllm_quant_info: object | None
+    provider_representations: dict[str, dict[str, object]]
     sgl_quant_info: object | None
     sgl_base: object | None
     lora_info: object | None
@@ -427,16 +717,19 @@ class PipelineFixture:
         else:
             self.hidden_work.copy_(self.hidden_seed)
 
-    def invoke(self, pipeline: str) -> None:
+    def _dispatch_output(self):
         from sglang.srt.layers.moe.token_dispatcher.standard import (
             StandardDispatchOutput,
         )
 
-        dispatch_output = StandardDispatchOutput(
+        return StandardDispatchOutput(
             hidden_states=self.hidden_work,
             hidden_states_scale=None,
             topk_output=self.topk_output,
         )
+
+    def invoke(self, pipeline: str) -> None:
+        dispatch_output = self._dispatch_output()
         if pipeline == "N0":
             result = self.base_runner.run(dispatch_output, self.base_quant_info)
         else:
@@ -452,6 +745,94 @@ class PipelineFixture:
                 self.sgl_base,
                 two_stream_enabled=(pipeline == "C1" and self.c1_two_stream_enabled),
             )
+        self.last_output = result.hidden_states
+
+    def invoke_neutral(self, baseline: str, pipeline: str) -> None:
+        """Run one provider-matched neutral control at the M0 boundary."""
+        dispatch_output = self._dispatch_output()
+        if baseline == "legacy_triton":
+            if self.legacy_quant_info is None or self.legacy_base_runner is None:
+                raise RuntimeError("legacy Triton baseline was not constructed")
+            if pipeline == "N0":
+                result = self.legacy_base_runner.run(
+                    dispatch_output, self.legacy_quant_info
+                )
+            elif pipeline == "C0":
+                if self.legacy_lora_runner is None or self.legacy_lora_info is None:
+                    raise RuntimeError(
+                        "legacy Triton LoRA baseline was not constructed"
+                    )
+                result = self.legacy_lora_runner.run(
+                    dispatch_output,
+                    self.legacy_quant_info,
+                    lora_info=self.legacy_lora_info,
+                )
+            else:
+                raise ValueError("legacy Triton has no C1 two-stream topology")
+        elif baseline == "experimental_trtllm":
+            if self.trtllm_quant_info is None:
+                raise RuntimeError("experimental TRTLLM baseline was not constructed")
+            if pipeline == "N0":
+                from sglang.srt.layers.moe.moe_runner.flashinfer_trtllm import (
+                    fused_experts_none_to_flashinfer_trtllm_bf16,
+                )
+
+                result = fused_experts_none_to_flashinfer_trtllm_bf16(
+                    dispatch_output,
+                    self.trtllm_quant_info,
+                    self.runner_config,
+                    use_routed_topk=True,
+                )
+            elif pipeline in ("C0", "C1"):
+                if self.lora_info is None:
+                    raise RuntimeError(
+                        "experimental TRTLLM LoRA baseline was not constructed"
+                    )
+                import sglang.srt.lora.trtllm_lora_temp.lora_dispatch as trt_dispatch
+                from sglang.srt.lora.trtllm_lora_temp import (
+                    get_original_bf16_moe_lora_func,
+                )
+
+                serial_dispatch = get_original_bf16_moe_lora_func()
+                if serial_dispatch is None:
+                    serial_dispatch = (
+                        trt_dispatch.fused_experts_none_to_experimental_sgl_trtllm_bf16_lora
+                    )
+
+                if pipeline == "C1" and self.c1_two_stream_enabled:
+                    import sglang.srt.lora.trtllm_lora_temp.moe_overlap as overlap
+
+                    # C1 is an explicitly resolved fixed-shape topology in this
+                    # benchmark. Bypass the legacy module's internal scalar gate
+                    # so ``force`` and production-auto mean the same thing for all
+                    # providers; restore immediately after the call.
+                    original_gate = overlap.is_two_stream_active
+                    overlap.is_two_stream_active = lambda _hidden: True
+                    try:
+                        two_stream_dispatch = getattr(
+                            overlap,
+                            "fused_experts_none_to_experimental_sgl_"
+                            "trtllm_bf16_lora_two_stream",
+                        )
+                        result = two_stream_dispatch(
+                            dispatch_output,
+                            self.trtllm_quant_info,
+                            self.runner_config,
+                            self.lora_info,
+                        )
+                    finally:
+                        overlap.is_two_stream_active = original_gate
+                else:
+                    result = serial_dispatch(
+                        dispatch_output,
+                        self.trtllm_quant_info,
+                        self.runner_config,
+                        self.lora_info,
+                    )
+            else:
+                raise ValueError(f"unknown TRTLLM pipeline {pipeline!r}")
+        else:
+            raise ValueError(f"unknown neutral baseline {baseline!r}")
         self.last_output = result.hidden_states
 
 
@@ -498,6 +879,10 @@ def _build_fixture(
     need_lora: bool,
     need_indexed_a: bool = False,
     c1_overlap_policy: str = "production_auto",
+    neutral_baselines: tuple[str, ...] = (),
+    route_pattern: str = "lattice_control",
+    route_seed: int = 0,
+    zero_lora_factors: bool = False,
 ) -> PipelineFixture:
     from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
     from sglang.srt.layers.moe.moe_runner.deep_gemm import DeepGemmMoeQuantInfo
@@ -515,7 +900,12 @@ def _build_fixture(
         device=device,
         scale=1.0,
     )
-    topk_ids, topk_weights, token_lora_mapping = _make_routing(case, device)
+    topk_ids, topk_weights, token_lora_mapping, route_metadata = _make_routing(
+        case,
+        device,
+        pattern=route_pattern,
+        route_seed=route_seed,
+    )
     topk_output = StandardTopKOutput(
         topk_weights=topk_weights,
         topk_ids=topk_ids,
@@ -545,6 +935,11 @@ def _build_fixture(
         inplace=False,
         no_combine=False,
         routed_scaling_factor=1.0,
+        # FlashInfer's BF16 TRTLLM entrypoint requires an explicit zero rather
+        # than the MoeRunnerConfig default (None).  M0 intentionally excludes
+        # model-level fused shared experts, so make the common fixture contract
+        # unambiguous for every provider.
+        num_fused_shared_experts=0,
         gate_up_interleaved=False,
     )
     base_quant_info = DeepGemmMoeQuantInfo(
@@ -555,6 +950,99 @@ def _build_fixture(
     # Force the non-fused DeepGEMM core even if a fused registration is added
     # later; N0 is specifically the matched staged-provider reference.
     base_runner = MoeRunner(MoeRunnerBackend.DEEP_GEMM, config, lora_enabled=True)
+
+    canonical_base_bytes = _tensor_bytes(w13) + _tensor_bytes(w2)
+    provider_representations: dict[str, dict[str, object]] = {
+        "sgl": {
+            "base_provider": "deepgemm_bf16_staged",
+            "active_provider": "sgl_lora_deepgemm_bf16",
+            "source_layout": "canonical_standard_bf16",
+            "resident_layout": "canonical_standard_bf16",
+            "canonical_source_bytes": canonical_base_bytes,
+            "provider_resident_bytes": canonical_base_bytes,
+            "load_time_conversion": "none",
+            "load_time_conversion_included_in_m0": False,
+            "per_forward_preparation_included_in_m0": [
+                "deepgemm_prepare_and_finalize",
+                "virtual_expert_lora_route_plan_for_active_pipeline",
+            ],
+            "output_contract": "bf16_token_domain_T_by_H",
+            "output_conversion": "none",
+        }
+    }
+
+    legacy_base_runner = None
+    legacy_lora_runner = None
+    legacy_quant_info = None
+    legacy_lora_info = None
+    if "legacy_triton" in neutral_baselines:
+        from sglang.srt.layers.moe.moe_runner.triton import TritonMoeQuantInfo
+
+        legacy_quant_info = TritonMoeQuantInfo(w13_weight=w13, w2_weight=w2)
+        legacy_base_runner = MoeRunner(
+            MoeRunnerBackend.TRITON, config, lora_enabled=False
+        )
+        if need_lora:
+            legacy_lora_runner = MoeRunner(
+                MoeRunnerBackend.TRITON, config, lora_enabled=True
+            )
+        spec = _NEUTRAL_BASELINE_SPECS["legacy_triton"]
+        provider_representations["legacy_triton"] = {
+            "base_provider": spec.base_provider,
+            "active_provider": spec.active_provider,
+            "source_layout": "canonical_standard_bf16",
+            "resident_layout": spec.weight_layout,
+            "canonical_source_bytes": canonical_base_bytes,
+            "provider_resident_bytes": canonical_base_bytes,
+            "load_time_conversion": "none",
+            "load_time_conversion_included_in_m0": False,
+            "per_forward_preparation_included_in_m0": list(
+                spec.per_forward_preparation
+            ),
+            "output_contract": "bf16_token_domain_T_by_H",
+            "output_conversion": "none",
+            "lora_route_representation": "classic_segment_to_adapter_expert_alignment",
+        }
+
+    trtllm_quant_info = None
+    if "experimental_trtllm" in neutral_baselines:
+        from sglang.srt.layers.moe.moe_runner.flashinfer_trtllm import (
+            FlashInferTrtllmBf16MoeQuantInfo,
+        )
+        from sglang.srt.lora.trtllm_lora_temp.environ import lora_envs
+
+        trtllm_w13, trtllm_w2, conversion = _prepare_trtllm_bf16_weights(
+            w13, w2, is_gated=config.is_gated
+        )
+        trtllm_quant_info = FlashInferTrtllmBf16MoeQuantInfo(
+            gemm1_weights=trtllm_w13,
+            gemm2_weights=trtllm_w2,
+            global_num_experts=case.model.num_experts,
+            local_expert_offset=case.global_expert_offset,
+        )
+        spec = _NEUTRAL_BASELINE_SPECS["experimental_trtllm"]
+        provider_representations["experimental_trtllm"] = {
+            "base_provider": spec.base_provider,
+            "active_provider": spec.active_provider,
+            **conversion,
+            "load_time_conversion": conversion["conversion"],
+            "load_time_conversion_included_in_m0": False,
+            "per_forward_preparation_included_in_m0": list(
+                spec.per_forward_preparation
+            ),
+            "output_contract": "bf16_token_domain_T_by_H",
+            "output_conversion": "none",
+            "lora_route_representation": "virtual_expert_aligned_plan",
+            "experimental_policy": {
+                "shrink_split_k": lora_envs.SGLANG_ENABLE_LORA_SHRINK_SPLIT_K.get(),
+                "fused_merged_align": lora_envs.SGLANG_OPT_LORA_FUSED_MERGED_ALIGN.get(),
+                "fused_topk_pack": lora_envs.SGLANG_OPT_LORA_FUSED_TOPK_PACK.get(),
+                "prefill_routing_reuse": lora_envs.SGLANG_OPT_LORA_PREFILL_ROUTING_REUSE.get(),
+                "gated_split_fix": lora_envs.SGLANG_ENABLE_LORA_MOE_GATEUP_GATED_SPLIT.get(),
+                "legacy_two_stream_max_tokens": lora_envs.SGLANG_TWO_STREAM_MAX_TOKENS.get(),
+                "benchmark_c1_policy": c1_overlap_policy,
+            },
+        }
 
     sgl_quant_info = None
     sgl_base = None
@@ -567,18 +1055,17 @@ def _build_fixture(
         from sglang.srt.lora.sgl_lora.quant_info import SglLoraBf16QuantInfo
 
         shapes = case.factor_shapes
-        gate_a = _random_bf16(
-            shapes.gate_up_a, generator=generator, device=device, scale=0.02
-        )
-        gate_b = _random_bf16(
-            shapes.gate_up_b, generator=generator, device=device, scale=0.02
-        )
-        down_a = _random_bf16(
-            shapes.down_a, generator=generator, device=device, scale=0.02
-        )
-        down_b = _random_bf16(
-            shapes.down_b, generator=generator, device=device, scale=0.02
-        )
+        def make_factor(shape: tuple[int, ...]) -> torch.Tensor:
+            if zero_lora_factors:
+                return torch.zeros(shape, dtype=torch.bfloat16, device=device)
+            return _random_bf16(
+                shape, generator=generator, device=device, scale=0.02
+            )
+
+        gate_a = make_factor(shapes.gate_up_a)
+        gate_b = make_factor(shapes.gate_up_b)
+        down_a = make_factor(shapes.down_a)
+        down_b = make_factor(shapes.down_b)
         lora_weights = (gate_a, gate_b, down_a, down_b)
 
         lora_ranks = torch.zeros(
@@ -588,27 +1075,45 @@ def _build_fixture(
         if case.adapters.l_active:
             lora_ranks[: case.adapters.l_active] = case.adapters.rank
             adapter_enabled[: case.adapters.l_active] = 1
+        # The classic runner consumes request segments.  Build the minimal
+        # run-length encoding of the canonical token mapping: one-token
+        # segments are semantically valid but can dramatically overstate the
+        # legacy orchestration cost for a single-adapter batch.
+        segment_indptr, segment_to_lora = _run_length_encode_token_mapping(
+            token_lora_mapping
+        )
         lora_info = LoRAInfo(
             gate_up_lora_a_weights=gate_a,
             gate_up_lora_b_weights=gate_b,
             down_lora_a_weights=down_a,
             down_lora_b_weights=down_b,
-            seg_indptr=torch.tensor(
-                [0, case.t_local], dtype=torch.int32, device=device
-            ),
-            req_to_lora=torch.tensor([0], dtype=torch.int32, device=device),
+            seg_indptr=segment_indptr,
+            req_to_lora=segment_to_lora,
             lora_ranks=lora_ranks,
             adapter_enabled=adapter_enabled,
             token_lora_mapping=token_lora_mapping,
             max_lora_rank=case.adapters.max_rank,
             num_experts=case.e_local,
-            has_active_lora=True,
+            has_active_lora=not zero_lora_factors,
             experts_shared_outer_loras=case.adapters.shared_outer,
             tp_size=1,
             tp_rank=0,
             hidden_size=case.model.h_moe,
             lora_use_virtual_experts=True,
         )
+        if "legacy_triton" in neutral_baselines:
+            legacy_lora_info = replace(
+                lora_info,
+                lora_use_virtual_experts=False,
+                cg_buffers=None,
+            )
+            provider_representations["legacy_triton"].update(
+                {
+                    "adapter_segment_encoding": "minimal_contiguous_run_length",
+                    "adapter_segment_count": int(segment_to_lora.numel()),
+                    "token_count": case.t_local,
+                }
+            )
         sgl_quant_info = SglLoraBf16QuantInfo(
             w13_weight=w13,
             w2_weight=w2,
@@ -630,6 +1135,7 @@ def _build_fixture(
 
     return PipelineFixture(
         case=case,
+        route_metadata=route_metadata,
         c1_overlap_policy=c1_overlap_policy,
         c1_two_stream_enabled=_resolve_c1_overlap(c1_overlap_policy, case.t_local),
         hidden_seed=hidden_seed,
@@ -638,6 +1144,12 @@ def _build_fixture(
         runner_config=config,
         base_quant_info=base_quant_info,
         base_runner=base_runner,
+        legacy_base_runner=legacy_base_runner,
+        legacy_lora_runner=legacy_lora_runner,
+        legacy_quant_info=legacy_quant_info,
+        legacy_lora_info=legacy_lora_info,
+        trtllm_quant_info=trtllm_quant_info,
+        provider_representations=provider_representations,
         sgl_quant_info=sgl_quant_info,
         sgl_base=sgl_base,
         lora_info=lora_info,
@@ -780,6 +1292,18 @@ def _run_checked(fixture: PipelineFixture, pipeline: str) -> torch.Tensor:
     return fixture.last_output.clone()
 
 
+def _run_neutral_checked(
+    fixture: PipelineFixture, baseline: str, pipeline: str
+) -> torch.Tensor:
+    fixture.reset_hidden()
+    fixture.invoke_neutral(baseline, pipeline)
+    torch.cuda.synchronize()
+    assert fixture.last_output is not None
+    if not bool(torch.isfinite(fixture.last_output).all()):
+        raise AssertionError(f"{baseline}/{pipeline} produced a non-finite output")
+    return fixture.last_output.clone()
+
+
 def _capture_production_c0_reference(
     fixture: PipelineFixture,
 ) -> tuple[torch.Tensor | None, dict[str, object]]:
@@ -801,6 +1325,23 @@ def _max_abs_diff(lhs: torch.Tensor, rhs: torch.Tensor) -> float:
     return float((lhs.float() - rhs.float()).abs().max().item())
 
 
+_BF16_DELTA_ABS_FLOOR = 2.0**-11
+_STRICT_DELTA_RTOL = 2e-2
+
+
+def _strict_delta_atol(signal: float) -> float:
+    """Return an absolute tolerance that cannot hide a dropped LoRA delta.
+
+    ``2**-11`` covers two BF16 rounding steps around the fixture's typical
+    output scale: provider deltas subtract two independently rounded outputs.
+    The signal/10 cap still guarantees an all-zero candidate fails.  A 1%
+    signal component keeps the rule scale-aware above that quantization floor.
+    """
+    if not signal > 0.0:
+        raise AssertionError("active LoRA reference produced an all-zero delta")
+    return min(signal / 10.0, max(signal / 100.0, _BF16_DELTA_ABS_FLOOR))
+
+
 def _check_lora_delta(
     checks: dict[str, object],
     prefix: str,
@@ -808,13 +1349,16 @@ def _check_lora_delta(
     candidate: torch.Tensor,
     base_only: torch.Tensor,
     *,
-    rtol: float,
-    atol: float,
+    rtol: float = _STRICT_DELTA_RTOL,
+    atol: float | None = None,
 ) -> None:
     """Compare active LoRA deltas so the much larger base cannot mask errors."""
     reference_delta = reference.float() - base_only.float()
     candidate_delta = candidate.float() - base_only.float()
     signal = float(reference_delta.abs().max().item())
+    strict_atol = _strict_delta_atol(signal)
+    effective_rtol = min(rtol, _STRICT_DELTA_RTOL)
+    effective_atol = strict_atol if atol is None else min(atol, strict_atol)
     error = _max_abs_diff(reference_delta, candidate_delta)
     checks[f"{prefix}_reference_delta_max_abs"] = signal
     checks[f"{prefix}_candidate_delta_max_abs"] = float(
@@ -822,13 +1366,52 @@ def _check_lora_delta(
     )
     checks[f"{prefix}_delta_max_abs_error"] = error
     checks[f"{prefix}_delta_error_over_signal"] = error / signal if signal else None
-    checks[f"{prefix}_delta_rtol"] = rtol
-    checks[f"{prefix}_delta_atol"] = atol
+    checks[f"{prefix}_delta_rtol"] = effective_rtol
+    checks[f"{prefix}_delta_atol"] = effective_atol
+    checks[f"{prefix}_delta_atol_signal_cap"] = signal / 10.0
+    checks[f"{prefix}_bf16_abs_floor"] = _BF16_DELTA_ABS_FLOOR
     torch.testing.assert_close(
         reference_delta,
         candidate_delta,
-        rtol=rtol,
-        atol=atol,
+        rtol=effective_rtol,
+        atol=effective_atol,
+    )
+
+
+def _check_provider_lora_delta(
+    checks: dict[str, object],
+    prefix: str,
+    reference_active: torch.Tensor,
+    reference_base: torch.Tensor,
+    candidate_active: torch.Tensor,
+    candidate_base: torch.Tensor,
+    *,
+    rtol: float = _STRICT_DELTA_RTOL,
+    atol: float | None = None,
+) -> None:
+    """Compare LoRA contributions after subtracting each provider's own N0."""
+    reference_delta = reference_active.float() - reference_base.float()
+    candidate_delta = candidate_active.float() - candidate_base.float()
+    signal = float(reference_delta.abs().max().item())
+    strict_atol = _strict_delta_atol(signal)
+    effective_rtol = min(rtol, _STRICT_DELTA_RTOL)
+    effective_atol = strict_atol if atol is None else min(atol, strict_atol)
+    error = _max_abs_diff(reference_delta, candidate_delta)
+    checks[f"{prefix}_reference_delta_max_abs"] = signal
+    checks[f"{prefix}_candidate_delta_max_abs"] = float(
+        candidate_delta.abs().max().item()
+    )
+    checks[f"{prefix}_delta_max_abs_error"] = error
+    checks[f"{prefix}_delta_error_over_signal"] = error / signal if signal else None
+    checks[f"{prefix}_delta_rtol"] = effective_rtol
+    checks[f"{prefix}_delta_atol"] = effective_atol
+    checks[f"{prefix}_delta_atol_signal_cap"] = signal / 10.0
+    checks[f"{prefix}_bf16_abs_floor"] = _BF16_DELTA_ABS_FLOOR
+    torch.testing.assert_close(
+        reference_delta,
+        candidate_delta,
+        rtol=effective_rtol,
+        atol=effective_atol,
     )
 
 
@@ -867,6 +1450,16 @@ def _check_pipelines(
         torch.testing.assert_close(base_reference, sgl_base_only, rtol=6e-2, atol=6e-2)
 
         serial = _run_checked(fixture, "C0")
+        # Full-output tolerances can conceal a missing LoRA contribution behind
+        # the much larger base result.  Record and require a non-zero C0 delta
+        # before comparing any candidate execution plan.
+        _check_lora_delta(
+            checks,
+            "c0_active",
+            serial,
+            serial,
+            sgl_base_only,
+        )
         if production_c0_reference is not None:
             checks["production_c0_candidate_c0_max_abs"] = _max_abs_diff(
                 production_c0_reference, serial
@@ -875,6 +1468,13 @@ def _check_pipelines(
             checks["production_c0_candidate_c0_atol"] = 6e-2
             torch.testing.assert_close(
                 production_c0_reference, serial, rtol=6e-2, atol=6e-2
+            )
+            _check_lora_delta(
+                checks,
+                "production_c0_candidate_c0",
+                production_c0_reference,
+                serial,
+                sgl_base_only,
             )
         if pre_b_override_reference is not None:
             checks["pre_b_override_candidate_c0_max_abs"] = _max_abs_diff(
@@ -886,15 +1486,120 @@ def _check_pipelines(
                 pre_b_override_reference,
                 serial,
                 sgl_base_only,
-                rtol=6e-2,
-                atol=1.5e-3,
             )
         overlap = _run_checked(fixture, "C1")
         checks["c0_c1_max_abs"] = _max_abs_diff(serial, overlap)
         checks["c0_c1_rtol"] = 6e-2
         checks["c0_c1_atol"] = 6e-2
         torch.testing.assert_close(serial, overlap, rtol=6e-2, atol=6e-2)
+        _check_lora_delta(
+            checks,
+            "c0_c1",
+            serial,
+            overlap,
+            sgl_base_only,
+        )
     return checks
+
+
+def _check_neutral_baselines(
+    fixture: PipelineFixture,
+    neutral_baselines: tuple[str, ...],
+    requested_pipeline: str,
+) -> dict[str, object]:
+    """Check every provider at the common final-BF16 M0 boundary.
+
+    Full base outputs are compared directly. Active LoRA is checked both as a
+    full output and as ``C0(provider)-N0(provider)`` so a base-provider rounding
+    difference cannot hide or manufacture LoRA parity.
+    """
+    if not neutral_baselines:
+        return {}
+    reference_n0 = _run_checked(fixture, "N0")
+    need_active_reference = any(
+        any(
+            pipeline != "N0"
+            for pipeline in _resolve_baseline_pipelines(
+                baseline, requested_pipeline, fixture.case
+            )
+        )
+        for baseline in neutral_baselines
+    )
+    reference_c0 = (
+        _run_checked(fixture, "C0") if need_active_reference else None
+    )
+    results: dict[str, object] = {}
+    for baseline in neutral_baselines:
+        pipelines = _resolve_baseline_pipelines(
+            baseline, requested_pipeline, fixture.case
+        )
+        checks: dict[str, object] = {
+            "common_input_contract": "bf16_hidden_plus_standard_topk",
+            "common_output_contract": "bf16_token_domain_T_by_H",
+            "provider_matched_n0": True,
+            "pipelines_checked": list(pipelines),
+        }
+        provider_n0 = _run_neutral_checked(fixture, baseline, "N0")
+        checks["sgl_n0_provider_n0_max_abs"] = _max_abs_diff(reference_n0, provider_n0)
+        checks["base_rtol"] = 8e-2
+        checks["base_atol"] = 8e-2
+        torch.testing.assert_close(reference_n0, provider_n0, rtol=8e-2, atol=8e-2)
+
+        if "C0" in pipelines or "C1" in pipelines:
+            assert reference_c0 is not None
+            provider_c0 = _run_neutral_checked(fixture, baseline, "C0")
+            checks["sgl_c0_provider_c0_max_abs"] = _max_abs_diff(
+                reference_c0, provider_c0
+            )
+            checks["active_rtol"] = 8e-2
+            checks["active_atol"] = 8e-2
+            torch.testing.assert_close(reference_c0, provider_c0, rtol=8e-2, atol=8e-2)
+            _check_provider_lora_delta(
+                checks,
+                "sgl_c0_provider_c0",
+                reference_c0,
+                reference_n0,
+                provider_c0,
+                provider_n0,
+            )
+            if "C1" in pipelines:
+                provider_c1 = _run_neutral_checked(fixture, baseline, "C1")
+                checks["provider_c0_c1_max_abs"] = _max_abs_diff(
+                    provider_c0, provider_c1
+                )
+                torch.testing.assert_close(
+                    provider_c0, provider_c1, rtol=8e-2, atol=8e-2
+                )
+        results[baseline] = checks
+    return results
+
+
+def _check_all_base_sgl_c0_sentinel(
+    fixture: PipelineFixture,
+) -> dict[str, object]:
+    """Verify the opt-in captured SGL path for an all-base adapter batch."""
+    if fixture.lora_info is None or not fixture.lora_weights:
+        raise RuntimeError("all-base SGL C0 sentinel requires a LoRA fixture")
+    if not bool((fixture.lora_info.token_lora_mapping == -1).all()):
+        raise AssertionError("all-base sentinel requires token_lora_mapping=-1")
+    if any(bool(torch.count_nonzero(weight)) for weight in fixture.lora_weights):
+        raise AssertionError("all-base sentinel requires zero LoRA factors")
+
+    n0 = _run_checked(fixture, "N0")
+    c0 = _run_checked(fixture, "C0")
+    max_abs = _max_abs_diff(n0, c0)
+    rtol = 2e-2
+    atol = 3e-3
+    torch.testing.assert_close(n0, c0, rtol=rtol, atol=atol)
+    return {
+        "status": "available",
+        "n0_c0_max_abs": max_abs,
+        "rtol": rtol,
+        "atol": atol,
+        "token_lora_mapping": "all_-1",
+        "lora_factors": "all_zero",
+        "semantic_role": "captured_all_base_graph_tax_sentinel",
+    }
 
 
 @contextmanager
@@ -961,12 +1666,89 @@ def _validate_case(case: MoeLoraBenchCase) -> None:
         raise NotImplementedError("initial M0 supports the BF16 provider only")
 
 
+def _validate_neutral_case(
+    case: MoeLoraBenchCase, neutral_baselines: tuple[str, ...]
+) -> None:
+    if "experimental_trtllm" not in neutral_baselines:
+        return
+    spec = _NEUTRAL_BASELINE_SPECS["experimental_trtllm"]
+    if case.device not in spec.supported_devices:
+        raise NotImplementedError(
+            "experimental TRTLLM BF16 on this branch loads FlashInfer's SM100 "
+            f"module and cannot run on {case.device}; supported benchmark devices: "
+            f"{', '.join(spec.supported_devices)}"
+        )
+    if case.model.h_moe % 128 or case.i_physical % 128:
+        raise ValueError(
+            "experimental TRTLLM BF16 needs H_moe and I_physical divisible by 128; "
+            f"case {case.case_id!r} resolves to H={case.model.h_moe}, "
+            f"I={case.i_physical}. Select a model-scale P0 case instead of the "
+            "synthetic smoke case."
+        )
+
+
+def _validate_all_base_sentinel(
+    case: MoeLoraBenchCase,
+    *,
+    enabled: bool,
+    execution: str,
+    a_provider: str,
+    b_schedules: BScheduleOverrides,
+) -> None:
+    if not enabled:
+        return
+    if case.adapters.l_active != 0 or case.adapters.b_base != 1:
+        raise ValueError(
+            "--all-base-sgl-c0-sentinel requires an all-base P0 case "
+            "(L_active=0, B_base=1)"
+        )
+    if execution != "cuda_graph":
+        raise ValueError("--all-base-sgl-c0-sentinel requires --execution cuda_graph")
+    if a_provider != "production" or b_schedules.applied:
+        raise ValueError(
+            "--all-base-sgl-c0-sentinel requires unchanged production SGL A/B"
+        )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list-cases", action="store_true")
     parser.add_argument("--device", choices=("auto", "h200", "gb300"), default="auto")
     parser.add_argument("--case-id")
     parser.add_argument("--pipeline", choices=(*PIPELINES, "all"), default="all")
+    parser.add_argument(
+        "--neutral-baselines",
+        choices=NEUTRAL_BASELINE_CHOICES,
+        default="none",
+        help=(
+            "opt-in provider-matched whole-M0 bracket; load-time provider weight "
+            "conversion is reported and per-forward preparation stays timed"
+        ),
+    )
+    parser.add_argument(
+        "--route-pattern",
+        choices=ROUTE_PATTERNS,
+        default="lattice_control",
+        help=(
+            "fixed route family: the historical lattice control, true uniform "
+            "IID top-k without replacement, or Zipf-1.2 weighted IID top-k "
+            "without replacement"
+        ),
+    )
+    parser.add_argument(
+        "--route-seed",
+        type=int,
+        default=0,
+        help="seed for IID expert-ID draws; recorded but ignored by lattice_control",
+    )
+    parser.add_argument(
+        "--all-base-sgl-c0-sentinel",
+        action="store_true",
+        help=(
+            "opt in only on an all-base case: build zero LoRA factors with every "
+            "token mapped to -1, capture SGL C0, and report its tax over matched N0"
+        ),
+    )
     parser.add_argument(
         "--c1-overlap-policy",
         choices=C1_OVERLAP_POLICIES,
@@ -1035,16 +1817,41 @@ def _benchmark_pipeline(
     check: bool,
     a_provider: str = "production",
     b_schedules: BScheduleOverrides = BScheduleOverrides(),
+    neutral_baseline: str | None = None,
+    expect_active_lora: bool = True,
 ) -> dict[str, object]:
     from sglang.srt.model_executor.runner_utils.capture_mode import model_capture_mode
 
-    effective_a_provider = "not_applicable" if pipeline == "N0" else a_provider
+    provider_key = neutral_baseline or "sgl"
+    is_sgl = neutral_baseline is None
+    effective_a_provider = (
+        "not_applicable" if pipeline == "N0" or not is_sgl else a_provider
+    )
     two_stream = _pipeline_two_stream_metadata(fixture, pipeline)
     two_stream_effective = bool(two_stream["effective"])
 
+    def invoke() -> None:
+        if neutral_baseline is None:
+            fixture.invoke(pipeline)
+        else:
+            fixture.invoke_neutral(neutral_baseline, pipeline)
+
+    def invoke_base() -> None:
+        if neutral_baseline is None:
+            fixture.invoke("N0")
+        else:
+            fixture.invoke_neutral(neutral_baseline, "N0")
+
     # Compile/JIT and initialize all lazy resources before timing or capture.
+    eager_base_reference = None
+    if check and pipeline != "N0":
+        fixture.reset_hidden()
+        invoke_base()
+        torch.cuda.synchronize()
+        assert fixture.last_output is not None
+        eager_base_reference = fixture.last_output.clone()
     fixture.reset_hidden()
-    fixture.invoke(pipeline)
+    invoke()
     torch.cuda.synchronize()
     assert fixture.last_output is not None
     eager_reference = fixture.last_output.clone() if check else None
@@ -1053,28 +1860,60 @@ def _benchmark_pipeline(
     if run_config.execution == "cuda_graph":
         with model_capture_mode():
             batch = make_batch(
-                lambda: fixture.invoke(pipeline),
+                invoke,
                 execution="cuda_graph",
                 inner_iterations=1,
             )
     else:
         batch = make_batch(
-            lambda: fixture.invoke(pipeline),
+            invoke,
             execution="eager",
             inner_iterations=1,
         )
 
+    if neutral_baseline is None:
+        description = (
+            "sgl_c0_all_base_zero_factor_graph_sentinel"
+            if pipeline == "C0" and not expect_active_lora
+            else {
+                "N0": "matched_base_only_deepgemm",
+                "C0": f"sgl_lora_serial_{a_provider}_a",
+                "C1": (
+                    f"sgl_lora_c1_{fixture.c1_overlap_policy}_"
+                    f"{'two_stream' if two_stream_effective else 'serial'}_"
+                    f"{a_provider}_a"
+                ),
+            }[pipeline]
+        )
+    else:
+        spec = _NEUTRAL_BASELINE_SPECS[neutral_baseline]
+        provider = spec.base_provider if pipeline == "N0" else spec.active_provider
+        topology = (
+            "two_stream" if pipeline == "C1" and two_stream_effective else "serial"
+        )
+        description = f"{provider}_{pipeline.lower()}_{topology}"
+
+    if not two_stream_effective:
+        route_prewarm = (
+            "not_run_resolved_serial_production_auto_threshold"
+            if pipeline == "C1"
+            else None
+        )
+    elif is_sgl and a_provider == "indexed":
+        route_prewarm = (
+            "production_a_and_b_routes_including_conservative_unused_a_overhead"
+        )
+    elif is_sgl:
+        route_prewarm = "production"
+    else:
+        route_prewarm = "provider_native"
+
     result: dict[str, object] = {
         "pipeline": pipeline,
-        "description": {
-            "N0": "matched_base_only_deepgemm",
-            "C0": f"sgl_lora_serial_{a_provider}_a",
-            "C1": (
-                f"sgl_lora_c1_{fixture.c1_overlap_policy}_"
-                f"{'two_stream' if two_stream_effective else 'serial'}_"
-                f"{a_provider}_a"
-            ),
-        }[pipeline],
+        "provider_key": provider_key,
+        "description": description,
+        "semantic_boundary": "bf16_hidden_plus_standard_topk_to_bf16_T_by_H",
+        "provider_representation": fixture.provider_representations[provider_key],
         "a_provider": effective_a_provider,
         "b_schedule": (
             b_schedules.metadata(
@@ -1083,38 +1922,34 @@ def _benchmark_pipeline(
                 ),
                 shared_outer_b=case.adapters.shared_outer,
             )
-            if pipeline != "N0"
+            if pipeline != "N0" and is_sgl
             else "not_applicable"
         ),
         "retained_components": (
             None
             if pipeline == "N0"
-            else [
-                (
-                    "production_lora_b"
-                    if not b_schedules.applied
-                    else "production_lora_b_with_benchmark_schedule_override"
-                ),
-                "production_swiglu_activation",
-                "production_deepgemm_base",
-            ]
+            else (
+                [
+                    (
+                        "production_lora_b"
+                        if not b_schedules.applied
+                        else "production_lora_b_with_benchmark_schedule_override"
+                    ),
+                    "production_swiglu_activation",
+                    "production_deepgemm_base",
+                ]
+                if is_sgl
+                else [
+                    _NEUTRAL_BASELINE_SPECS[neutral_baseline].active_provider,
+                    _NEUTRAL_BASELINE_SPECS[neutral_baseline].base_provider,
+                    "provider_native_swiglu",
+                ]
+            )
         ),
         "two_stream_requested": two_stream["requested"],
         "two_stream_overlap_effective": two_stream_effective,
         "two_stream_policy": two_stream,
-        "c1_route_prewarm": (
-            "production_a_and_b_routes_including_conservative_unused_a_overhead"
-            if two_stream_effective and a_provider == "indexed"
-            else (
-                "production"
-                if two_stream_effective
-                else (
-                    "not_run_resolved_serial_production_auto_threshold"
-                    if pipeline == "C1"
-                    else None
-                )
-            )
-        ),
+        "c1_route_prewarm": route_prewarm,
         "logical_invocations_per_batch": 1,
     }
 
@@ -1124,14 +1959,26 @@ def _benchmark_pipeline(
         torch.cuda.synchronize()
         assert fixture.last_output is not None and eager_reference is not None
         graph_diff = _max_abs_diff(eager_reference, fixture.last_output)
+        graph_atol = 3e-3
         result["graph_correctness"] = {
             "eager_graph_max_abs": graph_diff,
             "rtol": 0.0,
-            "atol": 3e-3,
+            "atol": graph_atol,
         }
         torch.testing.assert_close(
-            eager_reference, fixture.last_output, rtol=0.0, atol=3e-3
+            eager_reference, fixture.last_output, rtol=0.0, atol=graph_atol
         )
+        if pipeline != "N0" and expect_active_lora:
+            assert eager_base_reference is not None
+            active_delta_checks: dict[str, object] = {}
+            _check_lora_delta(
+                active_delta_checks,
+                "eager_graph_active",
+                eager_reference,
+                fixture.last_output,
+                eager_base_reference,
+            )
+            result["graph_correctness"]["active_delta"] = active_delta_checks
 
     if run_config.mode == "time":
         timing = time_cuda_events(
@@ -1143,15 +1990,18 @@ def _benchmark_pipeline(
         )
         result["timing"] = asdict(timing)
         print(
-            f"{case.case_id} M0/{pipeline} {run_config.execution}: "
+            f"{case.case_id} M0/{provider_key}/{pipeline} {run_config.execution}: "
             f"p50={timing.p50_us:.3f} us "
             f"p20/p80={timing.p20_us:.3f}/{timing.p80_us:.3f} us"
         )
     else:
         fixture.reset_hidden()
+        gate_b_label = b_schedules.gate_variant if is_sgl else "provider_native"
+        down_b_label = b_schedules.down_variant if is_sgl else "provider_native"
         label = (
-            f"sgl_lora_moe::M0::{pipeline}::{case.case_id}::A={effective_a_provider}::"
-            f"GateB={b_schedules.gate_variant}::DownB={b_schedules.down_variant}::"
+            f"sgl_lora_moe::M0::{provider_key}::{pipeline}::{case.case_id}::"
+            f"A={effective_a_provider}::"
+            f"GateB={gate_b_label}::DownB={down_b_label}::"
             f"C1_POLICY={two_stream['policy']}::overlap={two_stream_effective}::"
             f"{run_config.execution}::pdl=auto"
         )
@@ -1167,6 +2017,40 @@ def _benchmark_pipeline(
     return result
 
 
+def _matched_latency_summary(
+    pipeline_results: dict[str, object],
+) -> dict[str, object]:
+    """Derive provider-local LoRA tax without ever borrowing another N0."""
+    n0 = pipeline_results.get("N0")
+    if not isinstance(n0, dict) or not isinstance(n0.get("timing"), dict):
+        return {
+            "status": "unavailable_without_timed_provider_n0",
+            "provider_matched": True,
+        }
+    n0_p50 = float(n0["timing"]["p50_us"])
+    summary: dict[str, object] = {
+        "status": "available",
+        "provider_matched": True,
+        "n0_p50_us": n0_p50,
+        "active": {},
+    }
+    active = summary["active"]
+    assert isinstance(active, dict)
+    for pipeline in ("C0", "C1"):
+        candidate = pipeline_results.get(pipeline)
+        if not isinstance(candidate, dict) or not isinstance(
+            candidate.get("timing"), dict
+        ):
+            continue
+        p50 = float(candidate["timing"]["p50_us"])
+        active[pipeline] = {
+            "p50_us": p50,
+            "active_over_n0_p50_us": p50 - n0_p50,
+            "n0_retention_percent": 100.0 * n0_p50 / p50,
+        }
+    return summary
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.list_cases:
@@ -1179,6 +2063,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     device = _detect_device(args.device)
     case = _select_case(device, args.case_id)
     _validate_case(case)
+    neutral_baselines = _resolve_neutral_baselines(args.neutral_baselines)
+    _validate_neutral_case(case, neutral_baselines)
     indexed_configs = None
     if args.a_provider == "indexed":
         if case.adapters.shared_outer:
@@ -1196,6 +2082,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         down_config=_parse_b_config(args.down_b_config),
     )
     pipelines = _resolve_pipelines(args.pipeline, case)
+    _validate_all_base_sentinel(
+        case,
+        enabled=args.all_base_sgl_c0_sentinel,
+        execution=args.execution,
+        a_provider=args.a_provider,
+        b_schedules=b_schedules,
+    )
+    if neutral_baselines and (args.a_provider != "production" or b_schedules.applied):
+        raise ValueError(
+            "neutral baselines require the unchanged production SGL A/B path; "
+            "run benchmark-only A/B substitutions in a separate bracket"
+        )
     if b_schedules.applied and not any(pipeline != "N0" for pipeline in pipelines):
         raise ValueError("B schedule overrides require a benchmarked LoRA pipeline")
     if args.mode != "time" and len(pipelines) != 1:
@@ -1220,14 +2118,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     with ExitStack() as stack:
+        stack.enter_context(
+            _experimental_trtllm_environment("experimental_trtllm" in neutral_baselines)
+        )
         stack.enter_context(_single_rank_runtime())
-        need_lora = any(pipeline != "N0" for pipeline in pipelines)
+        need_lora = any(pipeline != "N0" for pipeline in pipelines) or (
+            args.all_base_sgl_c0_sentinel
+        )
         indexed_applied = args.a_provider == "indexed" and need_lora
         fixture = _build_fixture(
             case,
             need_lora=need_lora,
             need_indexed_a=indexed_applied,
             c1_overlap_policy=args.c1_overlap_policy,
+            neutral_baselines=neutral_baselines,
+            route_pattern=args.route_pattern,
+            route_seed=args.route_seed,
+            zero_lora_factors=args.all_base_sgl_c0_sentinel,
         )
         c1_two_stream = _pipeline_two_stream_metadata(fixture, "C1")
         effective_indexed_c1 = (
@@ -1294,6 +2201,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             correctness["production_c0_reference"] = production_c0_reference_status
         if b_schedules.applied:
             correctness["pre_b_override_reference"] = pre_b_override_reference_status
+        neutral_correctness = (
+            {"skipped": True}
+            if args.skip_check and neutral_baselines
+            else _check_neutral_baselines(
+                fixture,
+                neutral_baselines,
+                args.pipeline,
+            )
+        )
+        all_base_sentinel_correctness = (
+            _check_all_base_sgl_c0_sentinel(fixture)
+            if args.all_base_sgl_c0_sentinel and not args.skip_check
+            else (
+                {"skipped": True}
+                if args.all_base_sgl_c0_sentinel
+                else {"status": "not_requested"}
+            )
+        )
         torch.cuda.synchronize()
 
         substitutions = []
@@ -1313,6 +2238,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         result: dict[str, object] = {
             "environment": _environment(args),
             "case": _case_summary(case),
+            "routing": fixture.route_metadata,
+            "all_base_sgl_c0_sentinel": {
+                "requested": args.all_base_sgl_c0_sentinel,
+                "normal_pipeline_resolution_unchanged": True,
+                "correctness": all_base_sentinel_correctness,
+                "pipeline": None,
+                "matched_latency": None,
+            },
             "scope": "M0",
             "comparison": (
                 "matched DeepGEMM N0 versus SGL LoRA C0/C1"
@@ -1385,6 +2318,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             ),
             "correctness": correctness,
+            "neutral_baselines": {
+                "requested": list(neutral_baselines),
+                "common_input_contract": "bf16_hidden_plus_standard_topk",
+                "common_output_contract": "bf16_token_domain_T_by_H",
+                "canonical_weight_identity": (
+                    "all providers derive from the same seeded canonical BF16 w13/w2"
+                ),
+                "accounting_rule": (
+                    "load-time provider weight conversion is reported but excluded; "
+                    "all per-forward route/alignment/topk packing remains inside M0"
+                ),
+                "correctness": neutral_correctness,
+                "providers": {},
+            },
             "base_weight_bytes": sum(
                 tensor.numel() * tensor.element_size()
                 for tensor in fixture.base_weights
@@ -1409,6 +2356,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "tp1_ep1_moe_dp1_only",
                 "non_gated_models_pending",
                 "fp8_nvfp4_w4a16_pending",
+                *(
+                    ["opt_in_all_base_sgl_c0_graph_sentinel"]
+                    if args.all_base_sgl_c0_sentinel
+                    else []
+                ),
                 *(["benchmark_b_schedule_override"] if b_schedules.applied else []),
                 *(
                     [
@@ -1434,6 +2386,55 @@ def main(argv: Sequence[str] | None = None) -> int:
                 a_provider=args.a_provider,
                 b_schedules=b_schedules,
             )
+        result["matched_latency"] = _matched_latency_summary(pipeline_results)
+
+        if args.all_base_sgl_c0_sentinel:
+            sentinel_pipeline = _benchmark_pipeline(
+                fixture,
+                "C0",
+                run_config,
+                case,
+                check=not args.skip_check,
+                expect_active_lora=False,
+            )
+            sentinel_section = result["all_base_sgl_c0_sentinel"]
+            assert isinstance(sentinel_section, dict)
+            sentinel_section["pipeline"] = sentinel_pipeline
+            sentinel_section["matched_latency"] = _matched_latency_summary(
+                {"N0": pipeline_results["N0"], "C0": sentinel_pipeline}
+            )
+
+        neutral_section = result["neutral_baselines"]
+        assert isinstance(neutral_section, dict)
+        provider_results = neutral_section["providers"]
+        assert isinstance(provider_results, dict)
+        for baseline in neutral_baselines:
+            baseline_pipelines = _resolve_baseline_pipelines(
+                baseline, args.pipeline, case
+            )
+            timed: dict[str, object] = {}
+            for pipeline in baseline_pipelines:
+                timed[pipeline] = _benchmark_pipeline(
+                    fixture,
+                    pipeline,
+                    run_config,
+                    case,
+                    check=not args.skip_check,
+                    neutral_baseline=baseline,
+                )
+            requested_for_case = _resolve_pipelines(args.pipeline, case)
+            unsupported = [
+                pipeline
+                for pipeline in requested_for_case
+                if pipeline not in _NEUTRAL_BASELINE_SPECS[baseline].pipelines
+            ]
+            provider_results[baseline] = {
+                "spec": asdict(_NEUTRAL_BASELINE_SPECS[baseline]),
+                "representation": fixture.provider_representations[baseline],
+                "unsupported_requested_pipelines": unsupported,
+                "pipelines": timed,
+                "matched_latency": _matched_latency_summary(timed),
+            }
 
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
