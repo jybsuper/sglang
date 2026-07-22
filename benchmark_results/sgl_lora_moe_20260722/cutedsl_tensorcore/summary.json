@@ -1,0 +1,64 @@
+{
+  "decision": "do_not_integrate_production",
+  "reason": "The only speedup uses route-dependent static grouped descriptors that are incorrect when expert or adapter assignments change across CUDA graph replays.",
+  "device": "NVIDIA GB300",
+  "software": {
+    "compute_capability": "10.3",
+    "cuda_runtime": "13.0",
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "cutlass_python": "4.6.0",
+    "grouped_kernel_source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f"
+  },
+  "coverage": {
+    "core_runs": 384,
+    "core_errors": 0,
+    "tactic_runs": 136,
+    "tactic_errors": 0,
+    "sites": ["gate_a", "down_a", "gate_B_activation_down_A", "down_B_finalize"],
+    "ranks": [16, 32, 64, 128],
+    "token_counts": [1, 32, 256, 2048],
+    "executions": ["eager", "cuda_graph"],
+    "activations": ["swiglu", "relu2"],
+    "triton_families": ["indexed", "segmented", "aligned"],
+    "cutedsl_scopes": ["compute_only", "gather_compute_consumer_boundary"]
+  },
+  "exact_k0_shortlist": {
+    "case": "T2048_R128_H2048_I512_E32_K8_L4_multi_IID_gate_A",
+    "cutedsl_tactic": "mma_m128_mma_n128_cluster1x1_smem_tensormap",
+    "triton_tactic": "aligned_BN128_BK64_4warps",
+    "graph_hot_p50_us": {"cutedsl": 73.152, "triton": 87.520},
+    "graph_hot_cutedsl_latency_reduction_percent": 16.42,
+    "graph_cold_p50_us_median_across_orders": {"cutedsl": 73.968, "triton": 89.224},
+    "eager_cold_p50_us_median_across_orders": {"cutedsl": 76.992, "triton": 91.296},
+    "dispatch_eligible": false
+  },
+  "m0_static_route_upper_bound": {
+    "case": "Qwen3.5_35B_T2048_R128_H2048_I512_E256_K8_L4_multi_uniform_IID_C0",
+    "substitution": "gate_A_only; production gate_B, activation, base MoE, and down LoRA retained",
+    "route_build_included": false,
+    "graph_p50_us_median_across_two_processes": {"cutedsl": 996.032, "production": 1059.312},
+    "graph_cutedsl_latency_reduction_percent": 5.97,
+    "eager_p50_us_median_across_two_processes": {"cutedsl": 1071.816, "production": 1105.600},
+    "eager_cutedsl_latency_reduction_percent": 3.06,
+    "full_output_max_abs_error_vs_production": 0.000244140625,
+    "dispatch_eligible": false
+  },
+  "route_mutation": {
+    "same_tensor_addresses": true,
+    "expert_and_adapter_ids_changed": true,
+    "replay_output_max_abs_change": 0.0,
+    "correct_mutated_reference_max_abs_change": 0.32861328125,
+    "mutated_replay_max_abs_error": 0.32861328125,
+    "supports_dynamic_route_graph_replay": false
+  },
+  "negative_controls": {
+    "kimi_k2_5_C2_graph_us": {"cutedsl_boundary": 189.904, "best_triton_boundary": 42.416},
+    "odd_relu2_I1877_p1920_C2_graph_us": {"cutedsl_boundary": 36.288, "best_triton_boundary": 14.688},
+    "fused_boundaries": "CuTe lost broadly; no fused C2 or down-finalize candidate advanced."
+  },
+  "h200": {
+    "status": "not_run",
+    "reason": "No Python CuTe DSL compiler in the H200 image and no SM90 implementation in this candidate."
+  }
+}

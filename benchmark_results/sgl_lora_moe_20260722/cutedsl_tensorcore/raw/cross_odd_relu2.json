@@ -1,0 +1,2628 @@
+{
+  "arguments": {
+    "block_n": "64",
+    "executions": "eager,cuda_graph",
+    "json_output": "/tmp/cutedsl_moe/cross_odd_relu2.json",
+    "models": "odd-provider-padding",
+    "ranks": "16,32,64,128",
+    "samples": 20,
+    "schedules": "pair,aligned",
+    "scopes": "compute,boundary",
+    "skip_check": false,
+    "tactics": "m64n64",
+    "tokens": "1,32,256",
+    "warmup": 5
+  },
+  "capability": {
+    "available": true,
+    "cutlass_version": "4.6.0",
+    "device_capability": "10.3",
+    "kernel_class": "GroupedGemmKernel",
+    "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+    "source_path": "/usr/local/lib/python3.12/dist-packages/flashinfer/data/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
+    "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f"
+  },
+  "contract": {
+    "activations": [
+      "swiglu",
+      "relu2"
+    ],
+    "base_only_rows": true,
+    "boundary_scope_dispatch_eligible": true,
+    "compute_scope_dispatch_eligible": false,
+    "global_to_local_expert_offset": true,
+    "invalid_expert_rows": true,
+    "logical_physical_intermediate_widths": true,
+    "provider_destinations": true
+  },
+  "environment": {
+    "compute_capability": "10.3",
+    "cuda_runtime": "13.0",
+    "cuda_visible_devices": "0",
+    "device": "NVIDIA GB300",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "timestamp_utc": "2026-07-22T14:34:36.548770+00:00",
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0"
+  },
+  "errors": [],
+  "runs": [
+    {
+      "block_n": 64,
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_error_over_signal": 0.0,
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 0.0101318359375,
+        "base_only_tokens": 7,
+        "down_rank_error_over_signal": 0.009009009009009009,
+        "down_rank_max_abs_error": 3.0517578125e-05,
+        "down_rank_signal_max_abs": 0.003387451171875,
+        "invalid_pairs": 5,
+        "routed_scaling": {
+          "applied_stage": "down_b_finalize_not_fused_consumer",
+          "destination_dtype": "torch.float32",
+          "factor": 1.75,
+          "max_abs_error": 0.0
+        },
+        "sampled_pair_indices": [
+          0,
+          4,
+          5,
+          80,
+          144,
+          154,
+          159
+        ]
+      },
+      "execution": "eager",
+      "graph_status": null,
+      "provider": "triton_pair",
+      "scope": "boundary",
+      "status": "ok",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 105.50399869680405,
+        "min_us": 69.5360004901886,
+        "num_samples": 20,
+        "p20_us": 72.0127984881401,
+        "p50_us": 74.12799820303917,
+        "p80_us": 81.08800053596497
+      }
+    },
+    {
+      "block_n": 64,
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_error_over_signal": 0.0,
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 0.0101318359375,
+        "base_only_tokens": 7,
+        "down_rank_error_over_signal": 0.009009009009009009,
+        "down_rank_max_abs_error": 3.0517578125e-05,
+        "down_rank_signal_max_abs": 0.003387451171875,
+        "invalid_pairs": 5,
+        "routed_scaling": {
+          "applied_stage": "down_b_finalize_not_fused_consumer",
+          "destination_dtype": "torch.float32",
+          "factor": 1.75,
+          "max_abs_error": 0.0
+        },
+        "sampled_pair_indices": [
+          0,
+          4,
+          5,
+          80,
+          144,
+          154,
+          159
+        ]
+      },
+      "execution": "cuda_graph",
+      "graph_status": {
+        "replay_completed": 1.0
+      },
+      "provider": "triton_pair",
+      "scope": "boundary",
+      "status": "ok",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 40.511999279260635,
+        "min_us": 34.20799970626831,
+        "num_samples": 20,
+        "p20_us": 34.23359990119934,
+        "p50_us": 36.01599857211113,
+        "p80_us": 36.294400691986084
+      }
+    },
+    {
+      "block_n": 64,
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_error_over_signal": 0.0,
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 0.0101318359375,
+        "base_only_tokens": 7,
+        "down_rank_error_over_signal": 0.009009009009009009,
+        "down_rank_max_abs_error": 3.0517578125e-05,
+        "down_rank_signal_max_abs": 0.003387451171875,
+        "invalid_pairs": 5,
+        "routed_scaling": {
+          "applied_stage": "down_b_finalize_not_fused_consumer",
+          "destination_dtype": "torch.float32",
+          "factor": 1.75,
+          "max_abs_error": 0.0
+        },
+        "sampled_pair_indices": [
+          0,
+          4,
+          5,
+          80,
+          144,
+          154,
+          159
+        ]
+      },
+      "execution": "eager",
+      "graph_status": null,
+      "provider": "triton_aligned",
+      "scope": "boundary",
+      "status": "ok",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 128.80000472068787,
+        "min_us": 96.51199728250504,
+        "num_samples": 20,
+        "p20_us": 97.40159809589386,
+        "p50_us": 104.0479987859726,
+        "p80_us": 107.75679796934128
+      }
+    },
+    {
+      "block_n": 64,
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_error_over_signal": 0.0,
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 0.0101318359375,
+        "base_only_tokens": 7,
+        "down_rank_error_over_signal": 0.009009009009009009,
+        "down_rank_max_abs_error": 3.0517578125e-05,
+        "down_rank_signal_max_abs": 0.003387451171875,
+        "invalid_pairs": 5,
+        "routed_scaling": {
+          "applied_stage": "down_b_finalize_not_fused_consumer",
+          "destination_dtype": "torch.float32",
+          "factor": 1.75,
+          "max_abs_error": 0.0
+        },
+        "sampled_pair_indices": [
+          0,
+          4,
+          5,
+          80,
+          144,
+          154,
+          159
+        ]
+      },
+      "execution": "cuda_graph",
+      "graph_status": {
+        "replay_completed": 1.0
+      },
+      "provider": "triton_aligned",
+      "scope": "boundary",
+      "status": "ok",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 16.96000061929226,
+        "min_us": 13.69599997997284,
+        "num_samples": 20,
+        "p20_us": 13.791999779641628,
+        "p50_us": 14.688000082969666,
+        "p80_us": 15.750400722026825
+      }
+    },
+    {
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "execution": "eager",
+      "graph_replay_correctness": null,
+      "graph_status": null,
+      "implementation": {
+        "activation": "relu2",
+        "boundary": "gather__grouped_gate_B__activation__grouped_down_A__base_fill_scatter_unpack",
+        "down_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": true,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 0.28643300174735487,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 34
+        },
+        "gate_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": false,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 1974.400462990161,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 1020
+        },
+        "logical_i": 1877,
+        "physical_i": 1920,
+        "rank": 32,
+        "route": {
+          "active_groups": 34,
+          "group_counts": [
+            4,
+            3,
+            3,
+            5,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            5,
+            4,
+            2,
+            5,
+            3,
+            2,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4
+          ],
+          "group_offsets": [
+            0,
+            4,
+            7,
+            10,
+            15,
+            18,
+            21,
+            25,
+            29,
+            32,
+            36,
+            40,
+            43,
+            46,
+            51,
+            55,
+            57,
+            62,
+            65,
+            67,
+            71,
+            75,
+            78,
+            82,
+            86,
+            89,
+            92,
+            96,
+            100,
+            103,
+            106,
+            110,
+            114,
+            117,
+            121
+          ],
+          "local_expert_offset": 11,
+          "num_adapters": 2,
+          "num_experts": 17,
+          "num_pairs": 160,
+          "route_build_ms": 97.53042898955755,
+          "valid_pairs": 121
+        },
+        "slices": 1
+      },
+      "provider": "cutedsl_grouped_tensorcore",
+      "scope": "compute",
+      "status": "ok",
+      "tactic_name": "m64n64",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 76.92799717187881,
+        "min_us": 57.40800127387047,
+        "num_samples": 20,
+        "p20_us": 59.33439880609512,
+        "p50_us": 60.67200005054474,
+        "p80_us": 61.772799491882324
+      }
+    },
+    {
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "execution": "cuda_graph",
+      "graph_replay_correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "graph_status": {
+        "replay_completed": 1.0
+      },
+      "implementation": {
+        "activation": "relu2",
+        "boundary": "gather__grouped_gate_B__activation__grouped_down_A__base_fill_scatter_unpack",
+        "down_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": true,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 0.28643300174735487,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 34
+        },
+        "gate_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": false,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 1974.400462990161,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 1020
+        },
+        "logical_i": 1877,
+        "physical_i": 1920,
+        "rank": 32,
+        "route": {
+          "active_groups": 34,
+          "group_counts": [
+            4,
+            3,
+            3,
+            5,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            5,
+            4,
+            2,
+            5,
+            3,
+            2,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4
+          ],
+          "group_offsets": [
+            0,
+            4,
+            7,
+            10,
+            15,
+            18,
+            21,
+            25,
+            29,
+            32,
+            36,
+            40,
+            43,
+            46,
+            51,
+            55,
+            57,
+            62,
+            65,
+            67,
+            71,
+            75,
+            78,
+            82,
+            86,
+            89,
+            92,
+            96,
+            100,
+            103,
+            106,
+            110,
+            114,
+            117,
+            121
+          ],
+          "local_expert_offset": 11,
+          "num_adapters": 2,
+          "num_experts": 17,
+          "num_pairs": 160,
+          "route_build_ms": 97.53042898955755,
+          "valid_pairs": 121
+        },
+        "slices": 1
+      },
+      "provider": "cutedsl_grouped_tensorcore",
+      "scope": "compute",
+      "status": "ok",
+      "tactic_name": "m64n64",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 32.896000891923904,
+        "min_us": 28.063999488949776,
+        "num_samples": 20,
+        "p20_us": 28.18560041487217,
+        "p50_us": 30.063999816775322,
+        "p80_us": 30.14400042593479
+      }
+    },
+    {
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "execution": "eager",
+      "graph_replay_correctness": null,
+      "graph_status": null,
+      "implementation": {
+        "activation": "relu2",
+        "boundary": "gather__grouped_gate_B__activation__grouped_down_A__base_fill_scatter_unpack",
+        "down_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": true,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 0.28643300174735487,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 34
+        },
+        "gate_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": false,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 1974.400462990161,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 1020
+        },
+        "logical_i": 1877,
+        "physical_i": 1920,
+        "rank": 32,
+        "route": {
+          "active_groups": 34,
+          "group_counts": [
+            4,
+            3,
+            3,
+            5,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            5,
+            4,
+            2,
+            5,
+            3,
+            2,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4
+          ],
+          "group_offsets": [
+            0,
+            4,
+            7,
+            10,
+            15,
+            18,
+            21,
+            25,
+            29,
+            32,
+            36,
+            40,
+            43,
+            46,
+            51,
+            55,
+            57,
+            62,
+            65,
+            67,
+            71,
+            75,
+            78,
+            82,
+            86,
+            89,
+            92,
+            96,
+            100,
+            103,
+            106,
+            110,
+            114,
+            117,
+            121
+          ],
+          "local_expert_offset": 11,
+          "num_adapters": 2,
+          "num_experts": 17,
+          "num_pairs": 160,
+          "route_build_ms": 97.53042898955755,
+          "valid_pairs": 121
+        },
+        "slices": 1
+      },
+      "provider": "cutedsl_grouped_tensorcore",
+      "scope": "boundary",
+      "status": "ok",
+      "tactic_name": "m64n64",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 188.80000710487366,
+        "min_us": 159.10400450229645,
+        "num_samples": 20,
+        "p20_us": 162.93760240077972,
+        "p50_us": 166.1599949002266,
+        "p80_us": 170.53439915180206
+      }
+    },
+    {
+      "case": {
+        "activation": "relu2",
+        "experts": 17,
+        "logical_i": 1877,
+        "model": "odd-provider-padding",
+        "physical_i": 1920,
+        "rank": 32,
+        "tokens": 32,
+        "top_k": 5
+      },
+      "correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "execution": "cuda_graph",
+      "graph_replay_correctness": {
+        "activation_max_abs_error": 0.0,
+        "activation_signal_max_abs": 123.0,
+        "down_rank_max_abs_error": 1.52587890625e-05,
+        "down_rank_signal_max_abs": 0.00567626953125,
+        "oracle_down_rounding": "one_full_logical_I_grouped_output",
+        "physical_padding_zero": true
+      },
+      "graph_status": {
+        "replay_completed": 1.0
+      },
+      "implementation": {
+        "activation": "relu2",
+        "boundary": "gather__grouped_gate_B__activation__grouped_down_A__base_fill_scatter_unpack",
+        "down_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": true,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 0.28643300174735487,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              5,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              2,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ],
+            [
+              3,
+              32,
+              1920,
+              1
+            ],
+            [
+              4,
+              32,
+              1920,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 34
+        },
+        "gate_grouped_gemm": {
+          "automatic_stages": {
+            "num_ab_stage": 13,
+            "num_acc_stage": 2,
+            "num_epi_stage": 2
+          },
+          "compile_cache_hit": false,
+          "compile_ms": 1795.3929840005003,
+          "groups": 34,
+          "max_active_clusters": 152,
+          "mechanism": "persistent_tcgen05_tma_tmem_warp_specialized",
+          "plan_build_ms": 1974.400462990161,
+          "problem_shapes_mnkl": [
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              5,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              2,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ],
+            [
+              3,
+              1920,
+              32,
+              1
+            ],
+            [
+              4,
+              1920,
+              32,
+              1
+            ]
+          ],
+          "source_sha256": "05b74a05682c024557d83284e32f973ed5be4f0d1a1a12c72fe7824c29f7e94f",
+          "tactic": {
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "host_problem_shapes": false,
+            "mma_m": 64,
+            "mma_n": 64,
+            "tensormap_update": "SMEM",
+            "use_2cta": false
+          },
+          "total_clusters": 1020
+        },
+        "logical_i": 1877,
+        "physical_i": 1920,
+        "rank": 32,
+        "route": {
+          "active_groups": 34,
+          "group_counts": [
+            4,
+            3,
+            3,
+            5,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            5,
+            4,
+            2,
+            5,
+            3,
+            2,
+            4,
+            4,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            3,
+            4,
+            4,
+            3,
+            4
+          ],
+          "group_offsets": [
+            0,
+            4,
+            7,
+            10,
+            15,
+            18,
+            21,
+            25,
+            29,
+            32,
+            36,
+            40,
+            43,
+            46,
+            51,
+            55,
+            57,
+            62,
+            65,
+            67,
+            71,
+            75,
+            78,
+            82,
+            86,
+            89,
+            92,
+            96,
+            100,
+            103,
+            106,
+            110,
+            114,
+            117,
+            121
+          ],
+          "local_expert_offset": 11,
+          "num_adapters": 2,
+          "num_experts": 17,
+          "num_pairs": 160,
+          "route_build_ms": 97.53042898955755,
+          "valid_pairs": 121
+        },
+        "slices": 1
+      },
+      "provider": "cutedsl_grouped_tensorcore",
+      "scope": "boundary",
+      "status": "ok",
+      "tactic_name": "m64n64",
+      "timing": {
+        "launches_per_batch": 1,
+        "max_us": 39.96799886226654,
+        "min_us": 35.64799949526787,
+        "num_samples": 20,
+        "p20_us": 36.24960035085678,
+        "p50_us": 36.288000643253326,
+        "p80_us": 36.54399886727333
+      }
+    }
+  ],
+  "schema_version": 1,
+  "scope": "optimized_cutedsl_cross_model_C2_contract"
+}

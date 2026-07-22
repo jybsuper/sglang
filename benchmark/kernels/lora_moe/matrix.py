@@ -91,6 +91,10 @@ P0_CELLS: tuple[tuple[str, int, int, int, int, int, str, str], ...] = (
     ("prefill-threshold", 256, 3, 0, 8, 64, "prefill", "cold"),
     ("prefill-threshold-plus", 257, 3, 0, 8, 64, "prefill", "cold"),
     ("prefill", 2048, 3, 0, 8, 64, "prefill", "cold"),
+    # Exact CuTe/Triton gate-A shortlist anchor.  The route family remains a
+    # driver argument because the same allocation shape is useful as a lattice
+    # control; the CuTe audit invokes this cell with uniform IID routing.
+    ("prefill-r128", 2048, 4, 0, 4, 128, "prefill", "cold"),
     ("routing-hot", 256, 8, 0, 8, 128, "decode", "hot"),
 )
 

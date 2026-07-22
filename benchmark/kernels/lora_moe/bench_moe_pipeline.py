@@ -1315,6 +1315,151 @@ def _indexed_a_override(
         virtual_experts.merged_experts_fused_moe_lora_add = delegated_ab
 
 
+class _CuTeStaticGateAOverride:
+    """Benchmark-only grouped Tensor Core gate-A upper-bound bracket.
+
+    The installed Blackwell grouped GEMM consumes one static compact route.
+    That is sufficient to answer whether its gather/GEMM/unpack boundary can
+    survive the complete M0 pipeline, but it is *not* a serving-compatible
+    provider: a CUDA-graph replay with different expert IDs or adapter mapping
+    would need a new route and new runtime problem descriptors.  The result is
+    therefore recorded as an upper bound and can never directly select a
+    production dispatch policy.
+
+    Only gate/up A is replaced.  Gate/up B, activation, both down LoRA stages,
+    and the base MoE path remain production code.  A retained output allocation
+    gives the CuTe plan graph-stable pointers; the production call's transient
+    gate-A intermediate is intentionally unused.
+    """
+
+    def __init__(self, fixture: PipelineFixture) -> None:
+        from benchmark.kernels.lora_moe.cutedsl_grouped_tensorcore import (
+            GroupedTactic,
+        )
+        from benchmark.kernels.lora_moe.cutedsl_moe_boundary import (
+            build_compact_grouped_route,
+        )
+
+        if fixture.lora_info is None or not fixture.lora_weights:
+            raise RuntimeError("CuTe gate-A override requires active LoRA factors")
+        case = fixture.case
+        gate_a = fixture.lora_weights[0]
+        self.fixture = fixture
+        self.route = build_compact_grouped_route(
+            fixture.topk_output.topk_ids,
+            fixture.lora_info.token_lora_mapping,
+            num_experts=case.e_local,
+            num_adapters=case.adapters.l_capacity,
+            local_expert_offset=case.global_expert_offset,
+        )
+        self.weight = gate_a.reshape(
+            case.adapters.l_capacity * case.e_local,
+            gate_a.shape[-2],
+            gate_a.shape[-1],
+        )
+        self.tactic = GroupedTactic(mma_m=128, mma_n=128)
+        self.output = torch.empty(
+            (case.t_local, case.model.top_k, gate_a.shape[-2]),
+            dtype=gate_a.dtype,
+            device=gate_a.device,
+        )
+        self.boundary = None
+        self._input_ptr: int | None = None
+        self._passthrough_depth = 0
+        self._delegated = None
+
+    def _ensure_boundary(self, hidden_states: torch.Tensor) -> None:
+        from benchmark.kernels.lora_moe.cutedsl_moe_boundary import (
+            GroupedGemmBoundary,
+        )
+
+        pointer = hidden_states.data_ptr()
+        if self.boundary is not None and pointer == self._input_ptr:
+            return
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(
+                "CuTe gate-A input address changed during CUDA graph capture"
+            )
+        self.boundary = GroupedGemmBoundary(
+            hidden_states,
+            self.weight,
+            self.output.view(-1, self.output.shape[-1]),
+            self.route,
+            input_pair_major=False,
+            top_k=self.fixture.case.model.top_k,
+            tactic=self.tactic,
+        )
+        self._input_ptr = pointer
+
+    @contextmanager
+    def production_passthrough(self) -> Iterator[None]:
+        """Temporarily restore production for the mutable all-base oracle."""
+
+        self._passthrough_depth += 1
+        try:
+            yield
+        finally:
+            self._passthrough_depth -= 1
+
+    def __enter__(self) -> "_CuTeStaticGateAOverride":
+        from sglang.srt.lora.sgl_lora.triton_ops import virtual_experts
+
+        self._delegated = virtual_experts.merged_experts_fused_moe_lora_add
+
+        def cutedsl_gate_a_delegated_b(*args, **kwargs):
+            if args:
+                raise TypeError("CuTe gate-A benchmark wrapper requires keywords")
+            assert self._delegated is not None
+            if self._passthrough_depth:
+                return self._delegated(**kwargs)
+            stage = kwargs.get("stage", "all")
+            if stage == "routing":
+                # C1 retains production prewarm.  This lane benchmarks serial C0;
+                # keeping it here makes accidental C1 use conservative, not faster.
+                return self._delegated(**kwargs)
+            if kwargs["num_output_slices"] != 2:
+                return self._delegated(**kwargs)
+            if stage != "all":
+                raise ValueError(
+                    "static CuTe gate-A supports serial stage='all' only, got "
+                    f"{stage!r}"
+                )
+            if kwargs["experts_shared_outer_loras_a"]:
+                raise NotImplementedError(
+                    "static CuTe gate-A supports per-expert factors only"
+                )
+            self._ensure_boundary(kwargs["hidden_states"])
+            assert self.boundary is not None
+            self.boundary.invoke_boundary()
+            expand_kwargs = dict(kwargs)
+            expand_kwargs["stage"] = "expand"
+            expand_kwargs["intermediate_buffer"] = self.output
+            return self._delegated(**expand_kwargs)
+
+        virtual_experts.merged_experts_fused_moe_lora_add = cutedsl_gate_a_delegated_b
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        from sglang.srt.lora.sgl_lora.triton_ops import virtual_experts
+
+        assert self._delegated is not None
+        virtual_experts.merged_experts_fused_moe_lora_add = self._delegated
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "selection": "fixed_qwen_prefill_r128_k0_winner",
+            "provider": "blackwell_cutedsl_grouped_tensorcore",
+            "scope": "gate_up_lora_a_only",
+            "route_contract": "static_compact_route_built_outside_m0",
+            "dispatch_eligible": False,
+            "reason_not_dispatch_eligible": (
+                "runtime expert IDs and adapter mapping can change between graph replays"
+            ),
+            "tactic": asdict(self.tactic),
+            "boundary": self.boundary.metadata() if self.boundary is not None else None,
+        }
+
+
 def _run_checked(fixture: PipelineFixture, pipeline: str) -> torch.Tensor:
     fixture.reset_hidden()
     fixture.invoke(pipeline)
@@ -1454,6 +1599,7 @@ def _check_pipelines(
     *,
     production_c0_reference: torch.Tensor | None = None,
     pre_b_override_reference: torch.Tensor | None = None,
+    static_a_override: _CuTeStaticGateAOverride | None = None,
 ) -> dict[str, object]:
     checks: dict[str, object] = {
         "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
@@ -1474,7 +1620,13 @@ def _check_pipelines(
         base_reference = _run_checked(fixture, "N0")
         try:
             fixture.lora_info.token_lora_mapping.fill_(-1)
-            sgl_base_only = _run_checked(fixture, "C0")
+            if static_a_override is None:
+                sgl_base_only = _run_checked(fixture, "C0")
+            else:
+                # The CuTe upper-bound route is intentionally immutable.  The
+                # base-only oracle still validates the retained production path.
+                with static_a_override.production_passthrough():
+                    sgl_base_only = _run_checked(fixture, "C0")
         finally:
             fixture.lora_info.token_lora_mapping.copy_(active_mapping)
         checks["n0_c0_zero_lora_max_abs"] = _max_abs_diff(base_reference, sgl_base_only)
@@ -1791,7 +1943,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--a-provider",
-        choices=("production", "indexed"),
+        choices=("production", "indexed", "cutedsl_static_gate"),
         default="production",
         help="LoRA-A implementation; production remains the default",
     )
@@ -2172,6 +2324,10 @@ def _main(args: argparse.Namespace) -> int:
             "neutral baselines require the unchanged production SGL A/B path; "
             "run benchmark-only A/B substitutions in a separate bracket"
         )
+    if args.a_provider == "cutedsl_static_gate" and b_schedules.applied:
+        raise ValueError(
+            "the CuTe static-route M0 upper bound must retain production B schedules"
+        )
     if b_schedules.applied and not any(pipeline != "N0" for pipeline in pipelines):
         raise ValueError("B schedule overrides require a benchmarked LoRA pipeline")
     if args.mode != "time" and len(pipelines) != 1:
@@ -2210,6 +2366,8 @@ def _main(args: argparse.Namespace) -> int:
             args.all_base_sgl_c0_sentinel
         )
         indexed_applied = args.a_provider == "indexed" and need_lora
+        cutedsl_applied = args.a_provider == "cutedsl_static_gate" and need_lora
+        a_substitution_applied = indexed_applied or cutedsl_applied
         fixture = _build_fixture(
             case,
             need_lora=need_lora,
@@ -2230,12 +2388,12 @@ def _main(args: argparse.Namespace) -> int:
         # addition to the existing base-only and C0/C1 checks.
         production_c0_reference = None
         production_c0_reference_status: dict[str, object] = {"status": "not_applicable"}
-        if indexed_applied and not args.skip_check:
+        if a_substitution_applied and not args.skip_check:
             (
                 production_c0_reference,
                 production_c0_reference_status,
             ) = _capture_production_c0_reference(fixture)
-        elif indexed_applied:
+        elif a_substitution_applied:
             production_c0_reference_status = {"status": "skipped"}
 
         # Capture the same A provider with production B before installing the
@@ -2267,6 +2425,9 @@ def _main(args: argparse.Namespace) -> int:
         # wrapper and delegates only routing/B work into the held B config.
         if b_schedules.applied:
             stack.enter_context(_b_schedule_override(b_schedules))
+        cutedsl_override = None
+        if cutedsl_applied:
+            cutedsl_override = stack.enter_context(_CuTeStaticGateAOverride(fixture))
         if indexed_applied:
             assert indexed_configs is not None
             stack.enter_context(_indexed_a_override(fixture, indexed_configs))
@@ -2279,9 +2440,10 @@ def _main(args: argparse.Namespace) -> int:
                 pipelines,
                 production_c0_reference=production_c0_reference,
                 pre_b_override_reference=pre_b_override_reference,
+                static_a_override=cutedsl_override,
             )
         )
-        if indexed_applied:
+        if a_substitution_applied:
             correctness["production_c0_reference"] = production_c0_reference_status
         if b_schedules.applied:
             correctness["pre_b_override_reference"] = pre_b_override_reference_status
@@ -2308,6 +2470,8 @@ def _main(args: argparse.Namespace) -> int:
         substitutions = []
         if indexed_applied:
             substitutions.append("indexed A")
+        if cutedsl_applied:
+            substitutions.append("static-route CuTe gate A")
         if b_schedules.applied:
             substitutions.append("benchmark-selected B schedules")
         substitution_text = (
@@ -2359,12 +2523,22 @@ def _main(args: argparse.Namespace) -> int:
             ),
             "a_provider": {
                 "name": args.a_provider,
-                "applied": indexed_applied,
+                "applied": a_substitution_applied,
                 "configs": (
-                    indexed_configs.metadata() if indexed_configs is not None else None
+                    indexed_configs.metadata()
+                    if indexed_configs is not None
+                    else (
+                        cutedsl_override.metadata()
+                        if cutedsl_override is not None
+                        else None
+                    )
                 ),
                 "substitution_scope": (
-                    "gate_and_down_lora_a_only" if indexed_applied else "none"
+                    "gate_and_down_lora_a_only"
+                    if indexed_applied
+                    else "gate_up_lora_a_only_static_route_upper_bound"
+                    if cutedsl_applied
+                    else "none"
                 ),
                 "retained_components": (
                     [
@@ -2401,16 +2575,21 @@ def _main(args: argparse.Namespace) -> int:
                 shared_outer_b=case.adapters.shared_outer,
             ),
             "route_inclusion": (
-                f"raw_route_indexed_a_plus_{b_routing}; effective C1 "
-                "retains conservative unused production A route prewarm"
-                if effective_indexed_c1
+                "static_compact_route_built_outside_m0_upper_bound_plus_"
+                "production_b_route_planning"
+                if cutedsl_applied
                 else (
-                    f"raw_route_indexed_a_plus_{b_routing}"
-                    if indexed_applied
+                    f"raw_route_indexed_a_plus_{b_routing}; effective C1 "
+                    "retains conservative unused production A route prewarm"
+                    if effective_indexed_c1
                     else (
-                        "full_pipeline_including_benchmark_selected_b_route_planning"
-                        if b_schedules.routing_config_overridden
-                        else "full_pipeline_including_lora_route_planning"
+                        f"raw_route_indexed_a_plus_{b_routing}"
+                        if indexed_applied
+                        else (
+                            "full_pipeline_including_benchmark_selected_b_route_planning"
+                            if b_schedules.routing_config_overridden
+                            else "full_pipeline_including_lora_route_planning"
+                        )
                     )
                 )
             ),
@@ -2459,6 +2638,15 @@ def _main(args: argparse.Namespace) -> int:
                     else []
                 ),
                 *(["benchmark_b_schedule_override"] if b_schedules.applied else []),
+                *(
+                    [
+                        "cutedsl_gate_a_static_route_upper_bound_only",
+                        "cutedsl_route_not_dynamic_across_graph_replays",
+                        "cutedsl_blackwell_only",
+                    ]
+                    if cutedsl_applied
+                    else []
+                ),
                 *(
                     [
                         "indexed_a_per_expert_only",
