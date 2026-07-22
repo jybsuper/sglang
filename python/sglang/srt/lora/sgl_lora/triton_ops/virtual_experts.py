@@ -76,11 +76,17 @@ def _fused_virtual_topk_ids_kernel(
         )
         base = tl.where(owned, base, -1)
     # Preserve negative sentinel topk_ids (e.g. -1 for non-local experts after
-    # EP dispatch). Without this, `-1 + safe_lora * num_experts` would land on
-    # a real virtual-expert slot belonging to another adapter and trigger OOB
-    # loads in downstream LoRA kernels.
+    # EP dispatch), and reject nonnegative IDs outside this factor buffer's
+    # routed-expert domain.  Fused shared-expert routing appends IDs beginning
+    # at ``num_experts_for_weight`` even though routed LoRA factors stop just
+    # before that boundary.  Shifting such an ID would alias the next adapter's
+    # expert zero (or read past the final adapter).
     shifted = base + safe_lora * num_experts_for_weight
-    result = tl.where(base < 0, base, shifted)
+    result = tl.where(
+        base < 0,
+        base,
+        tl.where(base < num_experts_for_weight, shifted, -1),
+    )
     result = tl.where(mask_val, result, -1)
     tl.store(virtual_topk_ids_ptr + offs, result, mask=valid)
 

@@ -50,12 +50,16 @@ def _fused_virtual_topk_ids_kernel(
     safe_lora = tl.maximum(lora_id, 0)
 
     base = tl.load(topk_ids_ptr + offs, mask=valid, other=0)
-    # Preserve negative sentinel topk_ids (e.g. -1 for non-local experts after
-    # EP dispatch). Without this, `-1 + safe_lora * num_experts` would land on
-    # a real virtual-expert slot belonging to another adapter and trigger OOB
-    # loads in downstream LoRA kernels.
+    # Preserve negative sentinel topk_ids and reject nonnegative IDs outside
+    # the routed-factor domain. Fused shared-expert IDs start at
+    # ``num_experts_for_weight`` but have no corresponding routed LoRA factor;
+    # shifting one would alias the next adapter or read out of bounds.
     shifted = base + safe_lora * num_experts_for_weight
-    result = tl.where(base < 0, base, shifted)
+    result = tl.where(
+        base < 0,
+        base,
+        tl.where(base < num_experts_for_weight, shifted, -1),
+    )
     tl.store(virtual_topk_ids_ptr + offs, result, mask=valid)
 
     # Write mask once per row (at first k position)
