@@ -55,6 +55,26 @@ def test_large_align_rocm_selects_explicit_torch_fallback(monkeypatch):
     )
 
 
+def test_pdl_policy_has_explicit_off_seam_and_restores_auto(monkeypatch):
+    monkeypatch.setattr(virtual_experts, "is_arch_support_pdl", lambda: True)
+
+    assert virtual_experts._get_pdl_launch_metadata() == (
+        True,
+        {"launch_pdl": True},
+    )
+    with virtual_experts.lora_pdl_policy(False):
+        assert virtual_experts._get_pdl_launch_metadata() == (False, {})
+    assert virtual_experts._get_pdl_launch_metadata()[0]
+
+
+def test_pdl_policy_rejects_forced_on_when_unsupported(monkeypatch):
+    monkeypatch.setattr(virtual_experts, "is_arch_support_pdl", lambda: False)
+
+    with virtual_experts.lora_pdl_policy(True):
+        with pytest.raises(RuntimeError, match="unsupported CUDA architecture"):
+            virtual_experts._get_pdl_launch_metadata()
+
+
 @pytest.mark.parametrize("rank", [8, 16, 64, 128, 192, 256])
 def test_gate_up_a_rank_tiling_matches_reference(rank: int):
     """The production shrink schedule is compile-legal across rank tiles."""

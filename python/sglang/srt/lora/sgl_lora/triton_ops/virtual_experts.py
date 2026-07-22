@@ -6,6 +6,9 @@ temporary-package kernels are deliberately not imported here.
 """
 
 import functools
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import torch
@@ -16,9 +19,30 @@ from sglang.jit_kernel.moe_align import moe_align_block_size as jit_moe_align_bl
 from sglang.jit_kernel.utils import is_arch_support_pdl
 from sglang.srt.utils import is_hip
 
+_PDL_POLICY: ContextVar[bool | None] = ContextVar("sgl_lora_pdl_policy", default=None)
+
+
+@contextmanager
+def lora_pdl_policy(enabled: bool | None) -> Iterator[None]:
+    """Temporarily select auto/forced-on/forced-off PDL launch behavior.
+
+    Production uses ``None`` (architecture auto).  The explicit seam exists so
+    benchmarks can compare the same kernel chain with PDL disabled without an
+    environment variable or a benchmark-side monkeypatch.
+    """
+    token = _PDL_POLICY.set(enabled)
+    try:
+        yield
+    finally:
+        _PDL_POLICY.reset(token)
+
 
 def _get_pdl_launch_metadata() -> tuple[bool, dict]:
-    enable_pdl = is_arch_support_pdl()
+    supported = is_arch_support_pdl()
+    requested = _PDL_POLICY.get()
+    if requested and not supported:
+        raise RuntimeError("PDL was forced on for an unsupported CUDA architecture")
+    enable_pdl = supported if requested is None else requested
     return enable_pdl, ({"launch_pdl": True} if enable_pdl else {})
 
 
