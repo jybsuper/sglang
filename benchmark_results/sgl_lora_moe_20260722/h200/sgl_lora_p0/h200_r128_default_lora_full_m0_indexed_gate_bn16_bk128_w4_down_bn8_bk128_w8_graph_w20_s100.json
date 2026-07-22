@@ -1,0 +1,222 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T00:36:51.123155+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "17ccc1b0a2ba7385c7e28a51479f094efcf51a4e",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-h200",
+      "pipeline": "all",
+      "a_provider": "indexed",
+      "indexed_gate_config": "bn16-bk128-w4",
+      "indexed_down_config": "bn8-bk128-w8",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 100,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_r128_default_lora_full_m0_indexed_gate_bn16_bk128_w4_down_bn8_bk128_w8_graph_w20_s100.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-h200",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A",
+  "a_provider": {
+    "name": "indexed",
+    "applied": true,
+    "configs": {
+      "gate": {
+        "selection": "explicit",
+        "key": "bn16-bk128-w4",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "down": {
+        "selection": "explicit",
+        "key": "bn8-bk128-w8",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      }
+    },
+    "substitution_scope": "gate_and_down_lora_a_only",
+    "retained_components": [
+      "production_lora_b",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "conservative unused production A route prewarm retained"
+  },
+  "route_inclusion": "raw_route_indexed_a_plus_production_b_routing; effective C1 retains conservative unused production A route prewarm",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "c0_c1_max_abs": 0.000244140625,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06,
+    "production_c0_reference": {
+      "status": "unsupported",
+      "error_type": "OutOfResources",
+      "error": "out of resource: shared memory, Required: 278528, Hardware limit: 232448. Reducing block sizes or `num_stages` may help."
+    }
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 4026531840,
+  "factor_shapes": {
+    "gate_up_a": [
+      8,
+      256,
+      256,
+      2048
+    ],
+    "gate_up_b": [
+      8,
+      256,
+      1024,
+      128
+    ],
+    "down_a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "down_b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending",
+    "indexed_a_per_expert_only",
+    "indexed_effective_c1_retains_unused_production_a_route_prewarm"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 400.12800693511963,
+        "p50_us": 401.3599902391434,
+        "p80_us": 403.0208110809326,
+        "min_us": 396.7680037021637,
+        "max_us": 405.8240056037903,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 532.4479937553406,
+        "p50_us": 533.871978521347,
+        "p80_us": 535.206401348114,
+        "min_us": 530.3999781608582,
+        "max_us": 541.1199927330017,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_two_stream_requested_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": true,
+      "c1_route_prewarm": "production_a_and_b_routes_including_conservative_unused_a_overhead",
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 518.336009979248,
+        "p50_us": 519.4080173969269,
+        "p80_us": 520.7807898521423,
+        "min_us": 516.2240266799927,
+        "max_us": 527.2960066795349,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,1336 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T23:55:55.808818+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "c08d0db80ed5bdc17c9f2784fcc3f35b4750bdc9",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": true,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+      "site": "down",
+      "config": "bn16-bk64-w4",
+      "scope": "O0",
+      "mode": "time",
+      "execution": "eager",
+      "cache_state": "cold",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_qwen_sparse_down_indexed_o0_cold.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "site": "down",
+  "scope": "O0",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "route_inclusion": "raw_route_addressing_inline_no_separate_plan",
+  "route_storage": "none_inline_raw",
+  "scope_note": "K0 and O0 launch the same candidate kernel because adapter/expert address resolution is inline and no route plan exists",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 125829120,
+    "detected_l2_bytes": 62914560,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "baseline_driver": "benchmark/kernels/lora_moe/bench_shrink_schedules.py",
+  "results": [
+    {
+      "config": {
+        "key": "bn8-bk32-w2",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 37.6886,
+        "p50_us": 38.5345,
+        "p80_us": 39.395,
+        "min_us": 36.719,
+        "max_us": 44.165,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk32-w4",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 36.4938,
+        "p50_us": 36.8665,
+        "p80_us": 37.6536,
+        "min_us": 35.443,
+        "max_us": 45.445,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk32-w8",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 39.5782,
+        "p50_us": 40.1145,
+        "p80_us": 40.9428,
+        "min_us": 38.794,
+        "max_us": 109.283,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w2",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 36.145399999999995,
+        "p50_us": 36.611999999999995,
+        "p80_us": 37.1542,
+        "min_us": 35.245,
+        "max_us": 44.617,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w4",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.546140993013978e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.7868,
+        "p50_us": 35.1525,
+        "p80_us": 35.7706,
+        "min_us": 33.809,
+        "max_us": 37.157,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w8",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 3.814697265625e-06,
+        "mean_abs_error": 2.3283064365386963e-10,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.478199999999994,
+        "p50_us": 35.93,
+        "p80_us": 36.6946,
+        "min_us": 34.674,
+        "max_us": 65.363,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w2",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.9346,
+        "p50_us": 35.41,
+        "p80_us": 36.1216,
+        "min_us": 34.162,
+        "max_us": 37.926,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w4",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.2196,
+        "p50_us": 35.691,
+        "p80_us": 36.227999999999994,
+        "min_us": 34.499,
+        "max_us": 39.722,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w8",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.52587890625e-05,
+        "mean_abs_error": 9.458744898438454e-10,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.502,
+        "p50_us": 34.903,
+        "p80_us": 35.5588,
+        "min_us": 33.836,
+        "max_us": 38.574,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w2",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 41.184799999999996,
+        "p50_us": 41.748000000000005,
+        "p80_us": 42.5356,
+        "min_us": 40.125,
+        "max_us": 47.576,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w4",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 37.0306,
+        "p50_us": 37.5845,
+        "p80_us": 38.2352,
+        "min_us": 36.28,
+        "max_us": 41.061,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w8",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 36.172200000000004,
+        "p50_us": 36.696,
+        "p80_us": 37.3648,
+        "min_us": 35.642,
+        "max_us": 60.818,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w2",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 36.9734,
+        "p50_us": 37.4105,
+        "p80_us": 38.067800000000005,
+        "min_us": 36.271,
+        "max_us": 43.053,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w4",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.3342,
+        "p50_us": 35.835,
+        "p80_us": 36.3786,
+        "min_us": 34.791,
+        "max_us": 39.318,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w8",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.546140993013978e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.144800000000004,
+        "p50_us": 35.680499999999995,
+        "p80_us": 36.1136,
+        "min_us": 34.248,
+        "max_us": 42.067,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w2",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.7578,
+        "p50_us": 35.308,
+        "p80_us": 35.9122,
+        "min_us": 34.001,
+        "max_us": 39.936,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w4",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.422399999999996,
+        "p50_us": 34.992000000000004,
+        "p80_us": 35.856,
+        "min_us": 33.8,
+        "max_us": 38.595,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w8",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 4,
+        "programs": 1024
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.227,
+        "p50_us": 34.707,
+        "p80_us": 35.4092,
+        "min_us": 33.512,
+        "max_us": 38.55,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w2",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 49.0898,
+        "p50_us": 49.6745,
+        "p80_us": 50.4596,
+        "min_us": 47.831,
+        "max_us": 52.215,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w4",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 41.3666,
+        "p50_us": 41.9965,
+        "p80_us": 42.7492,
+        "min_us": 40.472,
+        "max_us": 58.107,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w8",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 37.1592,
+        "p50_us": 37.7625,
+        "p80_us": 38.4292,
+        "min_us": 36.654,
+        "max_us": 39.714,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w2",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 36.800200000000004,
+        "p50_us": 37.1695,
+        "p80_us": 37.7946,
+        "min_us": 36.193,
+        "max_us": 39.356,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w4",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 40.3716,
+        "p50_us": 40.941,
+        "p80_us": 41.9482,
+        "min_us": 39.7,
+        "max_us": 57.722,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w8",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 2.384185791015625e-07,
+        "mean_abs_error": 1.4551915228366852e-11,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.69,
+        "p50_us": 36.116,
+        "p80_us": 36.782399999999996,
+        "min_us": 34.9,
+        "max_us": 40.443,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w2",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.2346,
+        "p50_us": 35.801,
+        "p80_us": 36.641799999999996,
+        "min_us": 34.654,
+        "max_us": 41.491,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w4",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 34.739000000000004,
+        "p50_us": 35.245000000000005,
+        "p80_us": 36.2622,
+        "min_us": 34.193,
+        "max_us": 38.062,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w8",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 64,
+        "H": 512
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 2,
+        "programs": 512
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 9.094947017729282e-13,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 35.1114,
+        "p50_us": 35.713499999999996,
+        "p80_us": 36.5088,
+        "min_us": 34.295,
+        "max_us": 49.129,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    }
+  ]
+}

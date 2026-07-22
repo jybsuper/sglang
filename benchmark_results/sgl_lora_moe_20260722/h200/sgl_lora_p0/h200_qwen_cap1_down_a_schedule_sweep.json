@@ -1,0 +1,644 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T23:04:42.752549+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "f05d0d7fa973fe5625802dbbabc0ed17cf6363e1",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": true,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+      "site": "down",
+      "config": "production",
+      "block_m": null,
+      "block_n": null,
+      "block_k": null,
+      "split_k": null,
+      "num_warps": null,
+      "num_stages": null,
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 10,
+      "samples": 30,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_qwen_cap1_down_a_schedule_sweep.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "site": "down",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "pdl_policy": "architecture_auto",
+  "results": [
+    {
+      "config": {
+        "key": "production",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "resolved production launcher"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 6.8063996732234955,
+        "p50_us": 6.819199770689011,
+        "p80_us": 6.828799843788147,
+        "min_us": 6.777600198984146,
+        "max_us": 7.171200215816498,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn16-sk1",
+        "block_m": 16,
+        "block_n": 16,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "narrow N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 4,
+        "split_k": 1,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 9.283839911222458,
+        "p50_us": 9.336000308394432,
+        "p80_us": 9.358079731464386,
+        "min_us": 9.171199798583984,
+        "max_us": 9.63200032711029,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn32-sk1",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two/four N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 2,
+        "split_k": 1,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 6.326399743556976,
+        "p50_us": 6.332799792289734,
+        "p80_us": 6.3391998410224915,
+        "min_us": 6.310400366783142,
+        "max_us": 6.659200042486191,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn64-sk1",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two N tiles at gate rank 64"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 6.905599683523178,
+        "p50_us": 6.9151997566223145,
+        "p80_us": 6.924799829721451,
+        "min_us": 6.889600306749344,
+        "max_us": 7.238399982452393,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn128-sk1",
+        "block_m": 16,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "current gate rank-64 tile"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 14.292479455471039,
+        "p50_us": 14.315199851989746,
+        "p80_us": 14.33728039264679,
+        "min_us": 14.265599846839905,
+        "max_us": 14.630399644374847,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn32-sk2",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 2,
+        "split_k": 2,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.981313653232064e-05
+      },
+      "timing": {
+        "p20_us": 10.396160185337067,
+        "p50_us": 10.411200299859047,
+        "p80_us": 10.42879968881607,
+        "min_us": 10.380800068378448,
+        "max_us": 10.726399719715118,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn64-sk2",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.981313653232064e-05
+      },
+      "timing": {
+        "p20_us": 11.078400164842606,
+        "p50_us": 11.088000237941742,
+        "p80_us": 11.0944002866745,
+        "min_us": 11.043199896812439,
+        "max_us": 11.369600147008896,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.981313653232064e-05
+      },
+      "timing": {
+        "p20_us": 18.809600174427032,
+        "p50_us": 18.81600022315979,
+        "p80_us": 18.831999599933624,
+        "min_us": 18.79040002822876,
+        "max_us": 19.15840059518814,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 2048
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.981313653232064e-05
+      },
+      "timing": {
+        "p20_us": 30.99519908428192,
+        "p50_us": 31.007999181747437,
+        "p80_us": 31.018241047859192,
+        "min_us": 30.97279965877533,
+        "max_us": 31.299200654029846,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bk128-bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 128,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 3.037867099919822e-05
+      },
+      "timing": {
+        "p20_us": 9.320960193872452,
+        "p50_us": 9.337600320577621,
+        "p80_us": 9.372799843549728,
+        "min_us": 9.305600076913834,
+        "max_us": 9.756799787282944,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bk64-bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 64,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 2048
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.0612969314679503e-05
+      },
+      "timing": {
+        "p20_us": 8.150400221347809,
+        "p50_us": 8.168000355362892,
+        "p80_us": 8.179199695587158,
+        "min_us": 8.128000050783157,
+        "max_us": 8.508799970149994,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bm32-bn64-sk2",
+        "block_m": 32,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 32,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 8192,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 6752
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.981313653232064e-05
+      },
+      "timing": {
+        "p20_us": 12.428800016641617,
+        "p50_us": 12.440000101923943,
+        "p80_us": 12.451200187206268,
+        "min_us": 12.42239996790886,
+        "max_us": 12.81919926404953,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    },
+    {
+      "config": {
+        "key": "bm32-bn128-sk1-w2",
+        "block_m": 32,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 2,
+        "num_stages": 2,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 32,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 8192,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 6752
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 16.473600268363953,
+        "p50_us": 16.494400054216385,
+        "p80_us": 16.525440514087677,
+        "min_us": 16.419200599193573,
+        "max_us": 16.816000640392303,
+        "num_samples": 30,
+        "launches_per_batch": 10
+      }
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T23:57:19.549898+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "c08d0db80ed5bdc17c9f2784fcc3f35b4750bdc9",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+      "site": "gate",
+      "config": "bn16-bk128-w2",
+      "scope": "O0",
+      "mode": "time",
+      "execution": "eager",
+      "cache_state": "cold",
+      "warmup": 20,
+      "samples": 200,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_qwen_sparse_gate_indexed_bn16_bk128_w2_o0_cold_confirm.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "site": "gate",
+  "scope": "O0",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "route_inclusion": "raw_route_addressing_inline_no_separate_plan",
+  "route_storage": "none_inline_raw",
+  "scope_note": "K0 and O0 launch the same candidate kernel because adapter/expert address resolution is inline and no route plan exists",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 125829120,
+    "detected_l2_bytes": 62914560,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "baseline_driver": "benchmark/kernels/lora_moe/bench_shrink_schedules.py",
+  "results": [
+    {
+      "config": {
+        "key": "bn16-bk128-w2",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 32,
+        "top_k": 8,
+        "route_pairs": 256,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 256,
+        "n_tiles_per_pair": 8,
+        "programs": 2048
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 6.103515625e-05,
+        "mean_abs_error": 1.8630998965818435e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 62.8434,
+        "p50_us": 63.644999999999996,
+        "p80_us": 64.79220000000001,
+        "min_us": 61.912,
+        "max_us": 76.145,
+        "num_samples": 200,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    }
+  ]
+}

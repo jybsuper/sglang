@@ -1,0 +1,222 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T01:04:25.063973+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "17ccc1b0a2ba7385c7e28a51479f094efcf51a4e",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-prefill-h200",
+      "pipeline": "all",
+      "a_provider": "indexed",
+      "indexed_gate_config": "bn8-bk128-w2",
+      "indexed_down_config": "bn32-bk64-w2",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 10,
+      "samples": 30,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_prefill_t2048_r64_m0_indexed_gate_bn8_bk128_w2_down_bn32_bk64_w2_graph_w10_s30.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-prefill-h200",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "prefill",
+    "T": 2048,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 3,
+    "B_base": 0,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A",
+  "a_provider": {
+    "name": "indexed",
+    "applied": true,
+    "configs": {
+      "gate": {
+        "selection": "explicit",
+        "key": "bn8-bk128-w2",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "down": {
+        "selection": "explicit",
+        "key": "bn32-bk64-w2",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      }
+    },
+    "substitution_scope": "gate_and_down_lora_a_only",
+    "retained_components": [
+      "production_lora_b",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "not_run_two_stream_threshold_fallback"
+  },
+  "route_inclusion": "raw_route_indexed_a_plus_production_b_routing",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "production_c0_indexed_c0_max_abs": 0.000244140625,
+    "production_c0_indexed_c0_rtol": 0.06,
+    "production_c0_indexed_c0_atol": 0.06,
+    "c0_c1_max_abs": 0.000244140625,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06,
+    "production_c0_reference": {
+      "status": "available"
+    }
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 2013265920,
+  "factor_shapes": {
+    "gate_up_a": [
+      8,
+      256,
+      128,
+      2048
+    ],
+    "gate_up_b": [
+      8,
+      256,
+      1024,
+      64
+    ],
+    "down_a": [
+      8,
+      256,
+      64,
+      512
+    ],
+    "down_b": [
+      8,
+      256,
+      2048,
+      64
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending",
+    "indexed_a_per_expert_only"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 520.4160213470459,
+        "p50_us": 521.5680003166199,
+        "p80_us": 524.019193649292,
+        "min_us": 517.1520113945007,
+        "max_us": 525.9199738502502,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 1845.7728147506714,
+        "p50_us": 1853.775978088379,
+        "p80_us": 1858.4192276000977,
+        "min_us": 1840.60800075531,
+        "max_us": 1865.7599687576294,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_two_stream_requested_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": "not_run_two_stream_threshold_fallback",
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 1849.4976043701172,
+        "p50_us": 1852.9439568519592,
+        "p80_us": 1863.904047012329,
+        "min_us": 1845.8240032196045,
+        "max_us": 1870.2080249786377,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}

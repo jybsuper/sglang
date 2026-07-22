@@ -1,0 +1,42 @@
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  28%|██▊       | 4535/16384 [00:00<00:00, 45338.69it/s]DeepGEMM warmup:  55%|█████▌    | 9069/16384 [00:00<00:00, 43498.25it/s]DeepGEMM warmup:  82%|████████▏ | 13424/16384 [00:00<00:00, 42951.23it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 43091.39it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  32%|███▏      | 5233/16384 [00:00<00:00, 52317.33it/s]DeepGEMM warmup:  64%|██████▍   | 10465/16384 [00:00<00:00, 45862.73it/s]DeepGEMM warmup:  92%|█████████▏| 15103/16384 [00:00<00:00, 44231.61it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 44986.85it/s]
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /sgl-workspace/sglang/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=256,N=64,device_name=NVIDIA_H200.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /sgl-workspace/sglang/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=256,N=512,device_name=NVIDIA_H200.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /sgl-workspace/sglang/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=256,N=512,device_name=NVIDIA_H200_down.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/sgl-workspace/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 2101, in <module>
+[rank0]:     raise SystemExit(main())
+[rank0]:                      ^^^^^^
+[rank0]:   File "/sgl-workspace/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1898, in main
+[rank0]:     else _check_neutral_baselines(
+[rank0]:          ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/sgl-workspace/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1354, in _check_neutral_baselines
+[rank0]:     provider_n0 = _run_neutral_checked(fixture, baseline, "N0")
+[rank0]:                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/sgl-workspace/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1169, in _run_neutral_checked
+[rank0]:     fixture.invoke_neutral(baseline, pipeline)
+[rank0]:   File "/sgl-workspace/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 670, in invoke_neutral
+[rank0]:     result = fused_experts_none_to_flashinfer_trtllm_bf16(
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/sgl-workspace/sglang/python/sglang/srt/layers/moe/moe_runner/flashinfer_trtllm.py", line 1207, in fused_experts_none_to_flashinfer_trtllm_bf16
+[rank0]:     final_hidden_states = trtllm_bf16_routed_moe(
+[rank0]:                           ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/usr/local/lib/python3.12/dist-packages/flashinfer/api_logging.py", line 2333, in _auto_dump_wrapper
+[rank0]:     return _inner(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/usr/local/lib/python3.12/dist-packages/flashinfer/fused_moe/core.py", line 2721, in trtllm_bf16_routed_moe
+[rank0]:     result = get_trtllm_moe_sm100_module().trtllm_bf16_moe(
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/usr/local/lib/python3.12/dist-packages/flashinfer/fused_moe/core.py", line 1062, in get_trtllm_moe_sm100_module
+[rank0]:     module = gen_trtllm_gen_fused_moe_sm100_module()
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/usr/local/lib/python3.12/dist-packages/flashinfer/jit/fused_moe.py", line 283, in gen_trtllm_gen_fused_moe_sm100_module
+[rank0]:     nvcc_flags = current_compilation_context.get_nvcc_flags_list(
+[rank0]:                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/usr/local/lib/python3.12/dist-packages/flashinfer/compilation_context.py", line 95, in get_nvcc_flags_list
+[rank0]:     raise RuntimeError(
+[rank0]: RuntimeError: No supported CUDA architectures found for major versions [10, 12].

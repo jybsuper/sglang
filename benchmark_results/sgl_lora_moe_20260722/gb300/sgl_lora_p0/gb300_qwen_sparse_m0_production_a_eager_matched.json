@@ -1,0 +1,183 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T00:06:29.297827+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "3435e909b965e8f6472d6fd09e8fee5a73045888",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-sparse-gb300",
+      "pipeline": "all",
+      "a_provider": "production",
+      "indexed_gate_config": "auto",
+      "indexed_down_config": "auto",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 10,
+      "samples": 30,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/gb300_qwen_sparse_m0_production_a_eager_matched.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-sparse-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1",
+  "a_provider": {
+    "name": "production",
+    "applied": false,
+    "configs": null,
+    "substitution_scope": "none",
+    "retained_components": [
+      "production_lora_b",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "production"
+  },
+  "route_inclusion": "full_pipeline_including_lora_route_planning",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "c0_c1_max_abs": 0.000244140625,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 2013265920,
+  "factor_shapes": {
+    "gate_up_a": [
+      8,
+      256,
+      128,
+      2048
+    ],
+    "gate_up_b": [
+      8,
+      256,
+      1024,
+      64
+    ],
+    "down_a": [
+      8,
+      256,
+      64,
+      512
+    ],
+    "down_b": [
+      8,
+      256,
+      2048,
+      64
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "timing": {
+        "p20_us": 388.61438632011414,
+        "p50_us": 400.89599788188934,
+        "p80_us": 416.4095997810364,
+        "min_us": 375.10401010513306,
+        "max_us": 448.3200013637543,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_production_a",
+      "a_provider": "production",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "timing": {
+        "p20_us": 741.4463996887207,
+        "p50_us": 757.1040093898773,
+        "p80_us": 790.0864005088806,
+        "min_us": 721.6640114784241,
+        "max_us": 852.1919846534729,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_two_stream_requested_production_a",
+      "a_provider": "production",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": true,
+      "c1_route_prewarm": "production",
+      "logical_invocations_per_batch": 1,
+      "timing": {
+        "p20_us": 802.2144079208374,
+        "p50_us": 820.1279938220978,
+        "p80_us": 828.5696029663086,
+        "min_us": 786.1120104789734,
+        "max_us": 841.3439989089966,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}

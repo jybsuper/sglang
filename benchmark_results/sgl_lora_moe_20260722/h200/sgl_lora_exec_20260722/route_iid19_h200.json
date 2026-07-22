@@ -1,0 +1,158 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T08:20:49.038485+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+      "target": "gate_ab",
+      "variant": "production",
+      "b_input_source": "production-a",
+      "b_config_selector": "logical-t",
+      "b_block_m": 64,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 4,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 2,
+      "samples": 3,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "routing_pattern": "iid",
+      "routing_seed": 19,
+      "json_output": "/workspace/artifacts/sgl_lora_exec_20260722/route_iid19_h200.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "target": "gate_ab",
+  "scope": "K0",
+  "requested_variant": "production",
+  "effective_expand": "direct",
+  "b_intermediate": {
+    "source": "not_applicable",
+    "seed": null,
+    "shape": null,
+    "a_producer_launched": null
+  },
+  "correctness_oracle_expand": "direct",
+  "correctness": {
+    "reference": "base_subtracted_lora_delta",
+    "reference_delta_max_abs": 0.01361083984375,
+    "candidate_delta_max_abs": 0.01361083984375,
+    "candidate_delta_max_abs_error": 0.0,
+    "repeat_delta_max_abs_error": 0.0,
+    "full_output_max_abs_error": 0.0,
+    "rtol": 0.03,
+    "atol": 0.0002
+  },
+  "b_config": {
+    "requested_selector": "logical-t",
+    "site": "gate",
+    "lookup_m": 32,
+    "resolution_status": "production_resolver",
+    "resolution_error": null,
+    "held_override": false,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "aligned_flat",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 64,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      1,
+      256,
+      128,
+      2048
+    ],
+    "b": [
+      1,
+      256,
+      1024,
+      64
+    ]
+  },
+  "factor_bytes_allocated": 167772160,
+  "routing": {
+    "pattern": "iid",
+    "seed": 19,
+    "topk_weights_seed": 1701,
+    "topk_ids_sha256": "d6d8f46c2912afc5060fda0c363579f3874c0aa9ad6cefefd3b1180f0d6df822",
+    "valid_pairs": 256,
+    "experts_hit": 162,
+    "virtual_expert_capacity": 256,
+    "prewarm": "a_and_b",
+    "a_execution": "production",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "actual_pair_slots": 2592,
+        "post_padding_pair_slots": 2592,
+        "padding_pair_slots": 2336
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 106.87999874353409,
+    "p50_us": 107.45599865913391,
+    "p80_us": 120.83839774131775,
+    "min_us": 106.49599879980087,
+    "max_us": 129.7599971294403,
+    "num_samples": 3,
+    "launches_per_batch": 1
+  },
+  "timing_domain": "cuda_event_device"
+}

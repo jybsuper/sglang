@@ -1,0 +1,160 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:11:08.477616+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-default-mixed-full-gb300",
+      "target": "gate_a",
+      "variant": "production",
+      "b_input_source": "production-a",
+      "b_config_selector": "logical-t",
+      "b_block_m": 64,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 4,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 200,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "routing_pattern": "lattice",
+      "routing_seed": 17,
+      "json_output": "/mirror/artifacts/sgl_lora_p1/rank128_production_a/gb300/stages2_bm8_gate_a.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-default-mixed-full-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 128,
+    "L_active": 7,
+    "B_base": 1,
+    "L_capacity": 8
+  },
+  "target": "gate_a",
+  "scope": "K0",
+  "requested_variant": "production",
+  "effective_expand": "generic",
+  "b_intermediate": {
+    "source": "not_applicable",
+    "seed": null,
+    "shape": null,
+    "a_producer_launched": null
+  },
+  "correctness_oracle_expand": "not_applicable",
+  "correctness": {
+    "reference": "operator_value",
+    "reference_max_abs": 0.12890625,
+    "candidate_max_abs_error": 0.0,
+    "repeat_max_abs_error": 0.0,
+    "rtol": 0.03,
+    "atol": 0.03
+  },
+  "b_config": {
+    "requested_selector": "logical-t",
+    "site": "gate",
+    "lookup_m": 32,
+    "resolution_status": "production_resolver",
+    "resolution_error": null,
+    "held_override": false,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1
+    },
+    "effective_config": {
+      "kernel_family": "generic_fused_moe",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 3
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      8,
+      256,
+      256,
+      2048
+    ],
+    "b": [
+      8,
+      256,
+      1024,
+      128
+    ]
+  },
+  "factor_bytes_allocated": 2684354560,
+  "routing": {
+    "pattern": "lattice",
+    "seed": 17,
+    "topk_weights_seed": 1701,
+    "topk_ids_sha256": "ec0469d30ff144a03acdc66cf059423557eb638510452e357d3d419ccbed553f",
+    "valid_pairs": 256,
+    "experts_hit": 211,
+    "virtual_expert_capacity": 2048,
+    "prewarm": "a_and_b",
+    "a_execution": "production",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 8,
+        "allocated_pair_slots": 2048,
+        "allocated_expert_blocks": 256,
+        "actual_pair_slots": 2048,
+        "post_padding_pair_slots": 2048,
+        "padding_pair_slots": 1792
+      },
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "actual_pair_slots": 4096,
+        "post_padding_pair_slots": 4096,
+        "padding_pair_slots": 3840
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 63.37535858154297,
+    "p50_us": 63.6896014213562,
+    "p80_us": 64.09599781036377,
+    "min_us": 62.249600887298584,
+    "max_us": 65.28319716453552,
+    "num_samples": 200,
+    "launches_per_batch": 10
+  },
+  "timing_domain": "cuda_event_device"
+}

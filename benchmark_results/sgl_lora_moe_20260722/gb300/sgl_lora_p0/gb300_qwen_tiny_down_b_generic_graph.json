@@ -1,0 +1,95 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T22:27:01.489732+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "2023fe1b52f923c101a7501ca959b8a7d57f94ae",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "auto",
+      "case_id": "p0-qwen3.5-35b-a3b-tiny-gb300",
+      "target": "down_b",
+      "variant": "generic",
+      "scope": "K0",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 10,
+      "samples": 30,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/gb300_qwen_tiny_down_b_generic_graph.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-tiny-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 1,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 8,
+    "R": 32,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "target": "down_b",
+  "scope": "K0",
+  "requested_variant": "generic",
+  "effective_expand": "generic",
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      1,
+      256,
+      32,
+      512
+    ],
+    "b": [
+      1,
+      256,
+      2048,
+      32
+    ]
+  },
+  "factor_bytes_allocated": 41943040,
+  "routing": {
+    "valid_pairs": 8,
+    "experts_hit": 8,
+    "virtual_expert_capacity": 256,
+    "plans": [
+      {
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "actual_pair_slots": 128
+      },
+      {
+        "allocated_pair_slots": 512,
+        "allocated_expert_blocks": 8,
+        "actual_pair_slots": 512
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 4.578559845685959,
+    "p50_us": 4.579199850559235,
+    "p80_us": 4.649600014090538,
+    "min_us": 4.550400003790855,
+    "max_us": 4.992000013589859,
+    "num_samples": 30,
+    "launches_per_batch": 10
+  }
+}

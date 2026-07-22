@@ -1,0 +1,708 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T00:46:52.650037+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "17ccc1b0a2ba7385c7e28a51479f094efcf51a4e",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": true,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-tiny-h200",
+      "site": "gate",
+      "config": "production",
+      "block_m": null,
+      "block_n": null,
+      "block_k": null,
+      "split_k": null,
+      "num_warps": null,
+      "num_stages": null,
+      "mode": "time",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_tiny_t1_r32_gate_grouped_all_cold_k0_graph_w20_s100.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-tiny-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 1,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 8,
+    "R": 32,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "site": "gate",
+  "scope": "K0",
+  "route_storage": "prebuilt",
+  "scope_note": "A routing is prebuilt outside the measured shrink",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 125829120,
+    "detected_l2_bytes": 62914560,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "results": [
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "production",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "resolved production launcher"
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 64
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 8.490262553095818e-05
+      },
+      "timing": {
+        "p20_us": 9.375999681651592,
+        "p50_us": 9.535999968647957,
+        "p80_us": 9.824000298976898,
+        "min_us": 9.216000325977802,
+        "max_us": 11.42400037497282,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn16-sk1",
+        "block_m": 16,
+        "block_n": 16,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "narrow N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 4,
+        "split_k": 1,
+        "programs": 32
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0
+      },
+      "timing": {
+        "p20_us": 10.56000031530857,
+        "p50_us": 10.751999914646149,
+        "p80_us": 10.950400307774544,
+        "min_us": 10.400000028312206,
+        "max_us": 12.35199999064207,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn32-sk1",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two/four N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 2,
+        "split_k": 1,
+        "programs": 16
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0
+      },
+      "timing": {
+        "p20_us": 10.400000028312206,
+        "p50_us": 10.56000031530857,
+        "p80_us": 10.828800313174725,
+        "min_us": 10.239999741315842,
+        "max_us": 12.575999833643436,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn64-sk1",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two N tiles at gate rank 64"
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 8
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0
+      },
+      "timing": {
+        "p20_us": 12.31359988451004,
+        "p50_us": 12.463999912142754,
+        "p80_us": 12.703999876976013,
+        "min_us": 12.032000347971916,
+        "max_us": 14.368000440299511,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn128-sk1",
+        "block_m": 16,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "current gate rank-64 tile"
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 8
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0
+      },
+      "timing": {
+        "p20_us": 15.87199978530407,
+        "p50_us": 16.00000075995922,
+        "p80_us": 16.35199971497059,
+        "min_us": 15.680000185966492,
+        "max_us": 17.59999990463257,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn32-sk2",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 2,
+        "split_k": 2,
+        "programs": 32
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.093116149306297e-05
+      },
+      "timing": {
+        "p20_us": 10.111999697983265,
+        "p50_us": 10.319999884814024,
+        "p80_us": 10.56000031530857,
+        "min_us": 9.952000342309475,
+        "max_us": 12.223999947309494,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn64-sk2",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 16
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.093116149306297e-05
+      },
+      "timing": {
+        "p20_us": 11.455999687314034,
+        "p50_us": 11.648000217974186,
+        "p80_us": 11.814399622380733,
+        "min_us": 11.327999643981457,
+        "max_us": 13.60000018030405,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 32
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.65103255212307e-05
+      },
+      "timing": {
+        "p20_us": 10.56000031530857,
+        "p50_us": 10.71999967098236,
+        "p80_us": 11.008000001311302,
+        "min_us": 10.304000228643417,
+        "max_us": 12.223999947309494,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 64
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 7.831724360585213e-05
+      },
+      "timing": {
+        "p20_us": 10.17600018531084,
+        "p50_us": 10.33599954098463,
+        "p80_us": 10.623999871313572,
+        "min_us": 9.8879998549819,
+        "max_us": 12.384000234305859,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bk128-bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 128,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 32
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.872966721653938e-05
+      },
+      "timing": {
+        "p20_us": 10.20160038024187,
+        "p50_us": 10.33599954098463,
+        "p80_us": 10.732799768447876,
+        "min_us": 9.983999654650688,
+        "max_us": 12.319999746978283,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bk64-bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 64,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 64
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 16,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 128,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 128
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000732421875,
+        "mean_abs_error": 8.537108078598976e-05
+      },
+      "timing": {
+        "p20_us": 9.375999681651592,
+        "p50_us": 9.535999968647957,
+        "p80_us": 9.79200005531311,
+        "min_us": 9.151999838650227,
+        "max_us": 11.392000131309032,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bm32-bn64-sk2",
+        "block_m": 32,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 16
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 32,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 256,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 256
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.093116149306297e-05
+      },
+      "timing": {
+        "p20_us": 13.113600201904774,
+        "p50_us": 13.279999606311321,
+        "p80_us": 13.504000380635262,
+        "min_us": 12.992000207304955,
+        "max_us": 15.168000012636185,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "scope": "K0",
+      "route_storage": "prebuilt",
+      "route_inclusion": "prebuilt_a_route_shrink_only",
+      "config": {
+        "key": "bm32-bn128-sk1-w2",
+        "block_m": 32,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 2,
+        "num_stages": 2,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 8,
+        "N": 64,
+        "K": 2048
+      },
+      "grid": {
+        "num_m_blocks_allocated": 8,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 8
+      },
+      "routing": {
+        "valid_pair_slots": 8,
+        "block_m": 32,
+        "virtual_num_experts": 256,
+        "allocated_pair_slots": 256,
+        "allocated_expert_blocks": 8,
+        "post_padding_pair_slots": 256
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0
+      },
+      "timing": {
+        "p20_us": 34.912001341581345,
+        "p50_us": 35.10399907827377,
+        "p80_us": 35.360001027584076,
+        "min_us": 34.4959981739521,
+        "max_us": 36.896001547575,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T23:39:33.468856+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "041a82a2c41d6f0d820cb0b653f0a801f6dde620",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+      "site": "down",
+      "config": "production",
+      "block_m": null,
+      "block_n": null,
+      "block_k": null,
+      "split_k": null,
+      "num_warps": null,
+      "num_stages": null,
+      "mode": "time",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "warmup": 20,
+      "samples": 200,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_qwen_sparse_down_production_cold_graph_confirm.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-sparse-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "site": "down",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 125829120,
+    "detected_l2_bytes": 62914560,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "results": [
+    {
+      "config": {
+        "key": "production",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "resolved production launcher"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 0.0001220703125,
+        "mean_abs_error": 8.38281266624108e-09
+      },
+      "timing": {
+        "p20_us": 12.736000120639801,
+        "p50_us": 12.912000063806772,
+        "p80_us": 13.151999562978745,
+        "min_us": 12.44799979031086,
+        "max_us": 14.879999682307243,
+        "num_samples": 200,
+        "launches_per_batch": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,223 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T00:52:09.568026+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "17ccc1b0a2ba7385c7e28a51479f094efcf51a4e",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-tiny-h200",
+      "pipeline": "all",
+      "a_provider": "indexed",
+      "indexed_gate_config": "bn8-bk128-w8",
+      "indexed_down_config": "bn8-bk128-w8",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 100,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_tiny_t1_r32_m0_indexed_gate_bn8_bk128_w8_down_bn8_bk128_w8_graph_w20_s100.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-tiny-h200",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 1,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 32,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A",
+  "a_provider": {
+    "name": "indexed",
+    "applied": true,
+    "configs": {
+      "gate": {
+        "selection": "explicit",
+        "key": "bn8-bk128-w8",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "down": {
+        "selection": "explicit",
+        "key": "bn8-bk128-w8",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      }
+    },
+    "substitution_scope": "gate_and_down_lora_a_only",
+    "retained_components": [
+      "production_lora_b",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "conservative unused production A route prewarm retained"
+  },
+  "route_inclusion": "raw_route_indexed_a_plus_production_b_routing; effective C1 retains conservative unused production A route prewarm",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "production_c0_indexed_c0_max_abs": 0.0001220703125,
+    "production_c0_indexed_c0_rtol": 0.06,
+    "production_c0_indexed_c0_atol": 0.06,
+    "c0_c1_max_abs": 0.0001220703125,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06,
+    "production_c0_reference": {
+      "status": "available"
+    }
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 125829120,
+  "factor_shapes": {
+    "gate_up_a": [
+      1,
+      256,
+      64,
+      2048
+    ],
+    "gate_up_b": [
+      1,
+      256,
+      1024,
+      32
+    ],
+    "down_a": [
+      1,
+      256,
+      32,
+      512
+    ],
+    "down_b": [
+      1,
+      256,
+      2048,
+      32
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending",
+    "indexed_a_per_expert_only",
+    "indexed_effective_c1_retains_unused_production_a_route_prewarm"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 94.4959968328476,
+        "p50_us": 94.91200000047684,
+        "p80_us": 95.13600170612335,
+        "min_us": 94.01600062847137,
+        "max_us": 98.04800152778625,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0001220703125,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 97.69599884748459,
+        "p50_us": 98.12800213694572,
+        "p80_us": 98.59839826822281,
+        "min_us": 97.37599641084671,
+        "max_us": 100.76799988746643,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_two_stream_requested_indexed_a",
+      "a_provider": "indexed",
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": true,
+      "c1_route_prewarm": "production_a_and_b_routes_including_conservative_unused_a_overhead",
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 9.1552734375e-05,
+        "rtol": 0.06,
+        "atol": 0.06
+      },
+      "timing": {
+        "p20_us": 89.84959870576859,
+        "p50_us": 90.2400016784668,
+        "p80_us": 90.73279798030853,
+        "min_us": 89.4400030374527,
+        "max_us": 93.88799965381622,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}

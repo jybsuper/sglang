@@ -1,0 +1,708 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-21T23:55:24.898682+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "c08d0db80ed5bdc17c9f2784fcc3f35b4750bdc9",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": true,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-sparse-gb300",
+      "site": "down",
+      "config": "production",
+      "block_m": null,
+      "block_n": null,
+      "block_k": null,
+      "split_k": null,
+      "num_warps": null,
+      "num_stages": null,
+      "mode": "time",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/gb300_qwen_sparse_down_grouped_o0_cold.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-sparse-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "site": "down",
+  "scope": "O0",
+  "route_storage": "allocate",
+  "scope_note": "benchmark-equivalent A-only route construction plus shrink; the A output is preallocated and reused",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 271056896,
+    "detected_l2_bytes": 135528448,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "results": [
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "production",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "resolved production launcher"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 128.8066,
+        "p50_us": 136.03300000000002,
+        "p80_us": 143.3736,
+        "min_us": 122.144,
+        "max_us": 171.361,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn16-sk1",
+        "block_m": 16,
+        "block_n": 16,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "narrow N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 4,
+        "split_k": 1,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 126.76480000000001,
+        "p50_us": 131.2645,
+        "p80_us": 139.65540000000001,
+        "min_us": 118.272,
+        "max_us": 160.288,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn32-sk1",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two/four N tiles, no split-K"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 2,
+        "split_k": 1,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 128.47359999999998,
+        "p50_us": 134.3365,
+        "p80_us": 142.132,
+        "min_us": 120.672,
+        "max_us": 175.009,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn64-sk1",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "two N tiles at gate rank 64"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 127.39200000000001,
+        "p50_us": 133.393,
+        "p80_us": 145.77360000000002,
+        "min_us": 117.568,
+        "max_us": 162.72,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn128-sk1",
+        "block_m": 16,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": "current gate rank-64 tile"
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 137.0568,
+        "p50_us": 142.1605,
+        "p80_us": 150.3816,
+        "min_us": 123.937,
+        "max_us": 172.353,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn32-sk2",
+        "block_m": 16,
+        "block_n": 32,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 2,
+        "split_k": 2,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.992397847061511e-05
+      },
+      "timing": {
+        "p20_us": 145.45280000000002,
+        "p50_us": 152.9765,
+        "p80_us": 159.6872,
+        "min_us": 135.904,
+        "max_us": 179.905,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn64-sk2",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.992397847061511e-05
+      },
+      "timing": {
+        "p20_us": 147.7442,
+        "p50_us": 152.48000000000002,
+        "p80_us": 162.772,
+        "min_us": 139.393,
+        "max_us": 181.665,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.992397847061511e-05
+      },
+      "timing": {
+        "p20_us": 151.2968,
+        "p50_us": 157.9205,
+        "p80_us": 167.6936,
+        "min_us": 143.777,
+        "max_us": 185.057,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 2048
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.992397847061511e-05
+      },
+      "timing": {
+        "p20_us": 160.70499999999998,
+        "p50_us": 166.78449999999998,
+        "p80_us": 175.4952,
+        "min_us": 153.889,
+        "max_us": 192.673,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bk128-bn64-sk4",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 128,
+        "split_k": 4,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 4,
+        "programs": 1024
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 2.94035180559149e-05
+      },
+      "timing": {
+        "p20_us": 144.42239999999998,
+        "p50_us": 150.43200000000002,
+        "p80_us": 158.5994,
+        "min_us": 138.017,
+        "max_us": 179.105,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bk64-bn64-sk8",
+        "block_m": 16,
+        "block_n": 64,
+        "block_k": 64,
+        "split_k": 8,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 8,
+        "programs": 2048
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 16,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 3376
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.051487485412508e-05
+      },
+      "timing": {
+        "p20_us": 145.31199999999998,
+        "p50_us": 152.92849999999999,
+        "p80_us": 159.8472,
+        "min_us": 137.985,
+        "max_us": 180.096,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bm32-bn64-sk2",
+        "block_m": 32,
+        "block_n": 64,
+        "block_k": 256,
+        "split_k": 2,
+        "num_warps": 4,
+        "num_stages": 3,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 2,
+        "programs": 512
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 32,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 8192,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 6752
+      },
+      "zero_in_semantic_launch": true,
+      "correctness": {
+        "max_abs_error": 0.000244140625,
+        "mean_abs_error": 1.992397847061511e-05
+      },
+      "timing": {
+        "p20_us": 147.6162,
+        "p50_us": 154.625,
+        "p80_us": 160.0392,
+        "min_us": 135.584,
+        "max_us": 174.304,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    },
+    {
+      "scope": "O0",
+      "route_storage": "allocate",
+      "route_inclusion": "benchmark_equivalent_a_route_plus_shrink",
+      "config": {
+        "key": "bm32-bn128-sk1-w2",
+        "block_m": 32,
+        "block_n": 128,
+        "block_k": 256,
+        "split_k": 1,
+        "num_warps": 2,
+        "num_stages": 2,
+        "note": ""
+      },
+      "dimensions": {
+        "M_valid": 256,
+        "N": 64,
+        "K": 512
+      },
+      "grid": {
+        "num_m_blocks_allocated": 256,
+        "num_n_blocks": 1,
+        "split_k": 1,
+        "programs": 256
+      },
+      "routing": {
+        "valid_pair_slots": 256,
+        "block_m": 32,
+        "virtual_num_experts": 2048,
+        "allocated_pair_slots": 8192,
+        "allocated_expert_blocks": 256,
+        "post_padding_pair_slots": 6752
+      },
+      "zero_in_semantic_launch": false,
+      "correctness": {
+        "max_abs_error": 3.0517578125e-05,
+        "mean_abs_error": 2.0963852875865996e-09
+      },
+      "timing": {
+        "p20_us": 139.8026,
+        "p50_us": 146.433,
+        "p80_us": 154.6754,
+        "min_us": 131.584,
+        "max_us": 181.473,
+        "num_samples": 100,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "isolated_wall_host_to_device_completion"
+    }
+  ]
+}

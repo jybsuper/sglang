@@ -1,0 +1,142 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T07:47:03.595033+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "shape-nemotron-3-super-h200",
+      "target": "gate_ab",
+      "variant": "production",
+      "b_input_source": "production-a",
+      "b_config_selector": "logical-t",
+      "b_block_m": 64,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 4,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 5,
+      "samples": 10,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_exec_20260722/guardrail/nemotron-3-super_h200_gpu4_gate_ab.json"
+    }
+  },
+  "case": {
+    "case_id": "shape-nemotron-3-super-h200",
+    "model": "nemotron-3-super",
+    "T": 32,
+    "H_moe": 1024,
+    "I": 2688,
+    "E_local": 512,
+    "K": 22,
+    "P_capacity": 704,
+    "R": 32,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "target": "gate_ab",
+  "scope": "K0",
+  "requested_variant": "production",
+  "effective_expand": "direct",
+  "b_intermediate": {
+    "source": "not_applicable",
+    "seed": null,
+    "shape": null,
+    "a_producer_launched": null
+  },
+  "correctness_oracle_expand": "direct",
+  "b_config": {
+    "requested_selector": "logical-t",
+    "site": "gate",
+    "lookup_m": 32,
+    "resolution_status": "production_resolver",
+    "resolution_error": null,
+    "held_override": false,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "flat",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 32,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      8,
+      512,
+      32,
+      1024
+    ],
+    "b": [
+      8,
+      512,
+      2688,
+      32
+    ]
+  },
+  "factor_bytes_allocated": 973078528,
+  "routing": {
+    "valid_pairs": 704,
+    "experts_hit": 479,
+    "virtual_expert_capacity": 4096,
+    "prewarm": "a_and_b",
+    "a_execution": "production",
+    "plans": [
+      {
+        "num_experts": 512,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 11264,
+        "allocated_expert_blocks": 704,
+        "actual_pair_slots": 7664,
+        "post_padding_pair_slots": 7664,
+        "padding_pair_slots": 6960
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 81.61856055259705,
+    "p50_us": 82.14719891548157,
+    "p80_us": 82.65920042991638,
+    "min_us": 80.60160279273987,
+    "max_us": 83.49440097808838,
+    "num_samples": 10,
+    "launches_per_batch": 10
+  },
+  "timing_domain": "cuda_event_device"
+}

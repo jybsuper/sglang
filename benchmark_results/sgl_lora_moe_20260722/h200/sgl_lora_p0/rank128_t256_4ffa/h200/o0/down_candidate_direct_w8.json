@@ -1,0 +1,148 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T04:38:56.423972+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-routing-hot-h200",
+      "target": "down_b",
+      "variant": "direct",
+      "b_input_source": "synthetic",
+      "b_config_selector": "explicit",
+      "b_block_m": 16,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 8,
+      "b_num_warps": 8,
+      "b_num_stages": 4,
+      "scope": "O0",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 10,
+      "samples": 200,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/rank128_t256_4ffa/h200/o0/down_candidate_direct_w8.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-routing-hot-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 256,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 2048,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "target": "down_b",
+  "scope": "O0",
+  "requested_variant": "direct",
+  "effective_expand": "direct",
+  "b_intermediate": {
+    "source": "synthetic",
+    "seed": 20260722,
+    "shape": [
+      256,
+      8,
+      128
+    ],
+    "a_producer_launched": false
+  },
+  "correctness_oracle_expand": "generic",
+  "b_config": {
+    "requested_selector": "explicit",
+    "site": "down",
+    "lookup_m": null,
+    "resolution_status": "benchmark_explicit",
+    "resolution_error": null,
+    "held_override": true,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 64,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 8,
+      "num_warps": 8,
+      "num_stages": 4
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "flat",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 128,
+      "GROUP_SIZE_M": 8,
+      "num_warps": 8,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "route_inclusive_b_with_synthetic_intermediate",
+  "cache_measurement": "b_route_rebuild_with_fixed_a_intermediate",
+  "factor_shapes": {
+    "a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "factor_bytes_allocated": 1342177280,
+  "routing": {
+    "valid_pairs": 2048,
+    "experts_hit": 256,
+    "virtual_expert_capacity": 2048,
+    "prewarm": "a_and_b",
+    "a_execution": "skipped",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 32768,
+        "allocated_expert_blocks": 2048,
+        "actual_pair_slots": 32768,
+        "post_padding_pair_slots": 32768,
+        "padding_pair_slots": 30720
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 392.082,
+    "p50_us": 393.636,
+    "p80_us": 395.93219999999997,
+    "min_us": 389.885,
+    "max_us": 408.458,
+    "num_samples": 200,
+    "launches_per_batch": 1
+  },
+  "timing_domain": "isolated_wall_host_to_device_completion"
+}
