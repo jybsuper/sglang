@@ -21,6 +21,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Sequence
 
+from sglang.srt.lora.sgl_lora.shared_outer_gate_policy import (
+    SharedOuterGateAPlan,
+    build_shared_outer_gate_a_plan,
+)
+
 
 class MoeLoraExecutionPath(str, Enum):
     C0_SERIAL = "c0_serial"
@@ -41,6 +46,7 @@ class MoeLoraExecutionPlan:
     finalize_block_size_h: int = 32
     finalize_num_warps: int = 4
     provider_key: str = "deepgemm_bf16"
+    shared_outer_gate_a_plan: SharedOuterGateAPlan | None = None
     reason: str = ""
 
     @property
@@ -119,6 +125,12 @@ def build_moe_lora_execution_plan(
     fused_supported: bool = True,
     base_lora_expert_domains_match: bool = True,
     provider_key: str = "deepgemm_bf16",
+    shared_outer: bool = False,
+    device_capability: tuple[int, int] | None = None,
+    hidden_size: int = 0,
+    top_k: int = 0,
+    num_segments: int = 0,
+    max_segment_len: int = 0,
 ) -> MoeLoraExecutionPlan:
     """Return one immutable production plan for a resolved forward shape."""
     if phase not in {"decode", "prefill", "other"}:
@@ -134,6 +146,19 @@ def build_moe_lora_execution_plan(
         has_base_rows=has_base_rows,
     )
     finalizer_block_h, finalizer_warps = _finalizer_config(rank)
+    shared_outer_gate_a_plan = build_shared_outer_gate_a_plan(
+        shared_outer=shared_outer,
+        device_capability=device_capability,
+        phase=phase,
+        graph_mode=graph_mode,
+        num_tokens=num_tokens,
+        hidden_size=hidden_size,
+        rank=rank,
+        top_k=top_k,
+        has_base_rows=has_base_rows,
+        num_segments=num_segments,
+        max_segment_len=max_segment_len,
+    )
 
     common = dict(
         phase=phase,
@@ -145,6 +170,7 @@ def build_moe_lora_execution_plan(
         finalize_block_size_h=finalizer_block_h,
         finalize_num_warps=finalizer_warps,
         provider_key=provider_key,
+        shared_outer_gate_a_plan=shared_outer_gate_a_plan,
     )
 
     if not base_lora_expert_domains_match:

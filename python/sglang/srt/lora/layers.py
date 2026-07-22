@@ -1102,6 +1102,7 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
             forward_phase=getattr(batch_info, "forward_phase", "other"),
             use_cuda_graph=bool(batch_info.use_cuda_graph),
             has_base_rows=bool(getattr(batch_info, "has_base_rows", True)),
+            max_segment_len=moe_lora_info.max_segment_len,
         )
 
     def forward(self, hidden_states: torch.Tensor, topk_output: TopKOutput, **kwargs):

@@ -11,7 +11,9 @@ import torch
 
 from sglang.srt.arg_groups.overrides import _moe_runner_fusion_disable
 from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
+from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatcher
 from sglang.srt.layers.moe.utils import MoeRunnerBackend
+from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.layers import FusedMoEWithLoRA
 from sglang.srt.lora.sgl_lora.lora_layer import (
     _effective_sgl_lora_runner_config,
@@ -176,6 +178,84 @@ class TestSglLoraExecutionSelection(unittest.TestCase):
         with self.assertRaisesRegex(NotImplementedError, "static-activation FP8"):
             build_sgl_lora_quant_info(SimpleNamespace(quant_method=quant_method))
 
+    @staticmethod
+    def _shared_expert_base(dispatcher, *, ep_size=1):
+        return SimpleNamespace(
+            dispatcher=dispatcher,
+            moe_ep_size=ep_size,
+            moe_runner_config=SimpleNamespace(
+                activation="silu",
+                is_gated=True,
+                gemm1_alpha=None,
+                gemm1_clamp_limit=None,
+                swiglu_limit=None,
+                apply_router_weight_on_input=False,
+                no_combine=False,
+                use_tp_all_gather_activation=False,
+                num_fused_shared_experts=1,
+            ),
+        )
+
+    def test_physical_shared_experts_are_scoped_to_supported_dispatch(self):
+        unsupported = self._shared_expert_base(object())
+        self.assertTrue(
+            any(
+                "Standard dispatch/combine ABI" in violation
+                for violation in _phase1a_contract_violations(unsupported)
+            )
+        )
+
+        standard = StandardDispatcher.__new__(StandardDispatcher)
+        with patch(
+            "sglang.srt.layers.moe.utils.uses_per_rank_fused_shared_slots",
+            return_value=False,
+        ):
+            self.assertEqual(
+                _phase1a_contract_violations(
+                    self._shared_expert_base(standard, ep_size=1)
+                ),
+                [],
+            )
+
+        with patch(
+            "sglang.srt.layers.moe.utils.uses_per_rank_fused_shared_slots",
+            return_value=True,
+        ):
+            violations = _phase1a_contract_violations(
+                self._shared_expert_base(standard, ep_size=2)
+            )
+        self.assertTrue(any("per-rank physical shared slots" in v for v in violations))
+
+    def test_moe_metadata_uses_the_selected_merged_segment_bound(self):
+        backend = BaseLoRABackend.__new__(BaseLoRABackend)
+        backend.is_moe_lora = True
+        batch_info = SimpleNamespace(
+            use_cuda_graph=False,
+            req_seg_indptr=None,
+            req_weight_indices=None,
+            num_segments=1,
+            seg_indptr=torch.tensor([0, 32], dtype=torch.int32),
+            weight_indices=torch.tensor([2], dtype=torch.int32),
+            lora_ranks=torch.tensor([64], dtype=torch.int32),
+            max_len=32,
+        )
+        forward_batch = SimpleNamespace(
+            extend_seq_lens_cpu=[],
+            forward_mode=SimpleNamespace(is_extend=lambda: False),
+            batch_size=32,
+        )
+        adapter_enabled = torch.ones(32, dtype=torch.bool)
+        mapping = torch.full((32,), 2, dtype=torch.int32)
+
+        with patch(
+            "sglang.srt.lora.backend.base_backend._compute_moe_lora_info",
+            return_value=(adapter_enabled, mapping),
+        ) as compute:
+            result = backend._add_moe_lora_info(forward_batch, batch_info)
+
+        self.assertEqual(compute.call_args.kwargs["max_len"], 32)
+        self.assertEqual(result.moe_lora_info.max_segment_len, 32)
+
     def test_decode_graph_variants_are_scoped_to_sgl_lora(self):
         ordinary_decode = SimpleNamespace(is_none=lambda: True)
         speculative = SimpleNamespace(is_none=lambda: False)
@@ -324,7 +404,7 @@ assert not loaded, loaded
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_alias_is_not_a_runtime_backend_and_engine_disables_fusion(self):
+    def test_alias_is_not_a_runtime_backend_and_engine_preserves_fusion(self):
         with self.assertRaises(ValueError):
             MoeRunnerBackend("sgl_lora")
         self.assertEqual(
@@ -333,7 +413,7 @@ assert not loaded, loaded
                     moe_runner_backend="auto", lora_execution_engine="sgl_lora"
                 )
             ),
-            {"disable_shared_experts_fusion": True},
+            {},
         )
 
     def test_fused_moe_dispatch_selects_engine_independent_of_base_runner(self):
