@@ -425,6 +425,7 @@ class SiteFixture:
     base_output: torch.Tensor | None
     intermediate: torch.Tensor
     routing_cache: dict
+    strict_reference_delta: torch.Tensor | None
 
     @property
     def is_down(self) -> bool:
@@ -559,6 +560,7 @@ def _build_fixture(
             intermediate_shape, dtype=torch.bfloat16, device=device
         ),
         routing_cache={},
+        strict_reference_delta=None,
     )
     if b_input_source == "synthetic":
         # Isolate B from unsupported or suboptimal production-A schedules while
@@ -706,17 +708,44 @@ def _production_config_reference(
         fixture.invoke(_target_stage(target), direct=direct)
     torch.cuda.synchronize()
     reference = _clone_operator_value(fixture, target)
+    if getattr(fixture, "is_down", False) and target in ("down_b", "down_ab"):
+        # Capture the LoRA delta into a zero destination as well as the real
+        # nonzero-base result above. Subtracting two BF16 base-added tensors
+        # cannot recover contributions below the base destination's ULP and
+        # makes atomic reduction-order noise look like a semantic failure.
+        fixture.output.zero_()
+        fixture.invoke(_target_stage(target), direct=direct)
+        torch.cuda.synchronize()
+        fixture.strict_reference_delta = fixture.output.clone()
+        fixture.reset_output()
     fixture.routing_cache.clear()
     return reference
 
 
-def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
+def _operator_delta(
+    fixture: SiteFixture, target: str, value: torch.Tensor
+) -> torch.Tensor:
+    """Return the value whose loss the correctness gate must detect.
+
+    Down-B writes into a nonzero base destination, so comparing the full BF16
+    output can make a missing LoRA contribution invisible.  Gate/up B already
+    produces a standalone delta and needs no subtraction.
+    """
+    if getattr(fixture, "is_down", False) and target in ("down_b", "down_ab"):
+        assert fixture.base_output is not None
+        return value.float() - fixture.base_output.float()
+    return value.float()
+
+
+def _check_operator(
+    op: PreparedOp, reference: torch.Tensor | None
+) -> dict[str, float | str] | None:
     """Compare the selected operator with its safe production-config oracle."""
     fixture = op.fixture
     if op.target == "routing":
         op.launch()
         torch.cuda.synchronize()
-        return
+        return None
 
     def run_once() -> torch.Tensor:
         fixture.reset_output()
@@ -728,18 +757,70 @@ def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
 
     first = run_once()
     second = run_once()
-    if op.target in ("gate_b", "gate_ab") and (
-        not op.direct or op.b_input_source == "synthetic"
-    ):
-        # Gate/up random factors produce small deltas.  A 6e-2 absolute bound
-        # can accept an entirely wrong half, so keep a BF16-friendly relative
-        # bound but make the absolute comparison discriminate the two slices.
-        rtol, atol = 3e-2, 2e-4
-    else:
-        rtol = atol = 3e-2 if op.target.endswith("_a") else 6e-2
     assert reference is not None
+    if op.target.endswith("_b") or op.target.endswith("_ab"):
+        is_down_b = getattr(fixture, "is_down", False)
+        if is_down_b:
+            reference_delta = getattr(fixture, "strict_reference_delta", None)
+            assert reference_delta is not None
+
+            def run_zero_destination_once() -> torch.Tensor:
+                fixture.output.zero_()
+                op.launch()
+                torch.cuda.synchronize()
+                return fixture.output.clone().float()
+
+            first_delta = run_zero_destination_once()
+            second_delta = run_zero_destination_once()
+            fixture.reset_output()
+            reference_delta = reference_delta.float()
+        else:
+            reference_delta = _operator_delta(fixture, op.target, reference)
+            first_delta = _operator_delta(fixture, op.target, first)
+            second_delta = _operator_delta(fixture, op.target, second)
+        signal = float(reference_delta.abs().max().item())
+        # A fully dropped delta must fail. Keep the established BF16-friendly
+        # relative bound, but cap absolute slack at one tenth of the observed
+        # signal. Down-B is checked in a zero destination so the base tensor's
+        # much larger BF16 ULP cannot hide or manufacture a LoRA contribution.
+        rtol = 3e-2
+        atol = min(2e-4, signal / 10.0) if signal else 0.0
+        torch.testing.assert_close(
+            first_delta, reference_delta, rtol=rtol, atol=atol
+        )
+        torch.testing.assert_close(second_delta, first_delta, rtol=rtol, atol=atol)
+        return {
+            "reference": "base_subtracted_lora_delta",
+            "reference_delta_max_abs": signal,
+            "candidate_delta_max_abs": float(first_delta.abs().max().item()),
+            "candidate_delta_max_abs_error": float(
+                (first_delta - reference_delta).abs().max().item()
+            ),
+            "repeat_delta_max_abs_error": float(
+                (second_delta - first_delta).abs().max().item()
+            ),
+            "full_output_max_abs_error": float(
+                (first.float() - reference.float()).abs().max().item()
+            ),
+            "rtol": rtol,
+            "atol": atol,
+        }
+
+    rtol = atol = 3e-2
     torch.testing.assert_close(first, reference, rtol=rtol, atol=atol)
     torch.testing.assert_close(second, first, rtol=rtol, atol=atol)
+    return {
+        "reference": "operator_value",
+        "reference_max_abs": float(reference.float().abs().max().item()),
+        "candidate_max_abs_error": float(
+            (first.float() - reference.float()).abs().max().item()
+        ),
+        "repeat_max_abs_error": float(
+            (second.float() - first.float()).abs().max().item()
+        ),
+        "rtol": rtol,
+        "atol": atol,
+    }
 
 
 def _case_summary(case: MoeLoraBenchCase) -> dict[str, object]:
@@ -842,8 +923,9 @@ def _execute_benchmark(
     )
     if args.skip_check:
         op.launch()
+        correctness = {"skipped": True}
     else:
-        _check_operator(op, reference)
+        correctness = _check_operator(op, reference)
     torch.cuda.synchronize()
 
     run_config = RunConfig(
@@ -894,6 +976,7 @@ def _execute_benchmark(
             if not args.skip_check and (is_b_only or args.target.endswith("_ab"))
             else "not_applicable"
         ),
+        "correctness": correctness,
         "b_config": {
             "requested_selector": selection.selector,
             "site": fixture.site,

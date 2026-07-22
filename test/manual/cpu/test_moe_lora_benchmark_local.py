@@ -230,6 +230,35 @@ def test_generic_gate_check_uses_direct_oracle_and_tight_tolerance(monkeypatch):
     assert tolerances == [(3e-2, 2e-4), (3e-2, 2e-4)]
 
 
+def test_down_check_compares_base_subtracted_delta(monkeypatch):
+    class Fixture:
+        case = SimpleNamespace(adapters=SimpleNamespace(rank=64))
+        is_down = True
+        routing_cache = {}
+        strict_reference_delta = torch.tensor([0.004, -0.002])
+        base_output = torch.tensor([10.0, -20.0])
+        output = base_output + torch.tensor([0.004, -0.002])
+        intermediate = torch.tensor([2.0])
+
+        def reset_output(self):
+            self.output.copy_(self.base_output)
+
+    fixture = Fixture()
+    delta = torch.tensor([0.004, -0.002])
+
+    def launch():
+        fixture.output.add_(delta)
+
+    monkeypatch.setattr(local.torch.cuda, "synchronize", lambda: None)
+    monkeypatch.setattr(local.torch.testing, "assert_close", lambda *_, **__: None)
+    op = local.PreparedOp(fixture, "down_b", "K0", True, launch, None)
+    result = local._check_operator(op, fixture.base_output + delta)
+
+    assert result["reference"] == "base_subtracted_lora_delta"
+    assert result["reference_delta_max_abs"] == pytest.approx(0.004, rel=1e-3)
+    assert result["atol"] == pytest.approx(0.0002)
+
+
 @pytest.mark.parametrize("target", ["gate_b", "down_b"])
 @pytest.mark.parametrize("variant", ["direct", "generic"])
 def test_synthetic_b_input_skips_a_and_uses_opposite_family_oracle(
@@ -268,11 +297,14 @@ def test_synthetic_b_input_skips_a_and_uses_opposite_family_oracle(
 
     timed_direct = variant == "direct"
     assert reference is not None
-    assert calls == [
+    expected_reference_calls = [
         ("routing", not timed_direct),
         ("expand", not timed_direct),
-        ("routing", timed_direct),
     ]
+    if target == "down_b":
+        expected_reference_calls.append(("expand", not timed_direct))
+    expected_reference_calls.append(("routing", timed_direct))
+    assert calls == expected_reference_calls
     op.launch()
     assert calls[-1] == ("expand", timed_direct)
     assert all(stage != "shrink" for stage, _ in calls)
