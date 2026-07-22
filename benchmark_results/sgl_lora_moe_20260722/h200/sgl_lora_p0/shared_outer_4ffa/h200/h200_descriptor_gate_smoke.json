@@ -1,0 +1,146 @@
+{
+  "schema": "sgl_lora_shared_outer_lab_v1",
+  "environment": {
+    "timestamp_utc": "2026-07-22T08:11:56.283544+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "all_cases": false,
+      "case_id": "smoke-t4-r16-l1",
+      "site": "gate-a",
+      "variant": "triton-token",
+      "scope": "K0",
+      "device": "h200",
+      "cache_state": "hot",
+      "execution": "cuda_graph",
+      "mode": "time",
+      "warmup": 5,
+      "samples": 10,
+      "profile_iterations": 1,
+      "gate_config": "auto",
+      "down_config": "auto",
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/shared_outer_4ffa/h200/h200_descriptor_gate_smoke.json"
+    }
+  },
+  "methodology": {
+    "production": "current shared-outer virtual-expert stage",
+    "repeated_pair": "PyTorch executable algebra control",
+    "factorized": "PyTorch executable algebra control, not a candidate kernel",
+    "selection_status": "diagnostic_only; no production dispatch change",
+    "timing": "CUDA event, prebuilt routing for production"
+  },
+  "runs": [
+    {
+      "case": {
+        "case_id": "smoke-t4-r16-l1",
+        "model": "synthetic",
+        "tokens": 4,
+        "hidden_size": 64,
+        "num_experts": 8,
+        "top_k": 2,
+        "rank": 16,
+        "active_adapters": 1,
+        "include_base": true,
+        "lora_capacity": 2,
+        "phase": "decode",
+        "active_tokens": 2,
+        "spans": [
+          {
+            "start": 0,
+            "stop": 2,
+            "adapter_id": 0
+          },
+          {
+            "start": 2,
+            "stop": 4,
+            "adapter_id": null
+          }
+        ],
+        "arithmetic_work": {
+          "gate_a_repeated_pair_multiplies": 8192,
+          "gate_a_deduplicated_multiplies": 4096,
+          "gate_a_gemm_reduction_ratio": 2.0,
+          "down_b_repeated_pair_multiplies": 4096,
+          "down_b_weighted_rank_reduce_multiplies": 2112,
+          "down_b_gemm_reduction_ratio": 2.0
+        },
+        "factor_shapes": {
+          "gate_up_a": [
+            2,
+            1,
+            32,
+            64
+          ],
+          "down_b": [
+            2,
+            1,
+            64,
+            16
+          ]
+        }
+      },
+      "device_label": "h200",
+      "results": [
+        {
+          "site": "gate-a",
+          "variant": "triton-token",
+          "scope": "K0",
+          "contract": "token_owned_[T,2R]_requires_gate_b_consumer_change",
+          "implementation_role": "benchmark_only_triton_candidate",
+          "production_policy_changed": false,
+          "candidate_config": {
+            "key": "bm16-bn64-bk64-w4",
+            "block_m": 16,
+            "block_n": 64,
+            "block_k": 64,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "tile_plan": {
+            "num_tiles": 1,
+            "block_m": 16,
+            "block_n": 64,
+            "planner_timing": "excluded_from_K0",
+            "status": "benchmark_metadata_not_runtime_ABI"
+          },
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 2.9153190553188324e-05,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "static_adapter_spans_no_synthetic_route_sort",
+          "timing": {
+            "p20_us": 10.041600093245506,
+            "p50_us": 10.383999906480312,
+            "p80_us": 12.121600098907948,
+            "min_us": 9.983999654650688,
+            "max_us": 15.584000386297703,
+            "num_samples": 10,
+            "launches_per_batch": 1
+          }
+        }
+      ]
+    }
+  ]
+}

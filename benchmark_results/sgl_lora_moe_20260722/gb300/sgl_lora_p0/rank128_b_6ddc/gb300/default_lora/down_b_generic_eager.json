@@ -1,0 +1,140 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T03:07:43.897170+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "6ddc168642293b516a35b4504b6478b671c04a15",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-gb300",
+      "target": "down_b",
+      "variant": "generic",
+      "b_input_source": "synthetic",
+      "b_config_selector": "logical-t",
+      "b_block_m": 64,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 4,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/rank128_b_6ddc/gb300/default_lora/down_b_generic_eager.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 256,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "target": "down_b",
+  "scope": "K0",
+  "requested_variant": "generic",
+  "effective_expand": "generic",
+  "b_intermediate": {
+    "source": "synthetic",
+    "seed": 20260722,
+    "shape": [
+      32,
+      8,
+      128
+    ],
+    "a_producer_launched": false
+  },
+  "correctness_oracle_expand": "direct",
+  "b_config": {
+    "requested_selector": "logical-t",
+    "site": "down",
+    "lookup_m": 32,
+    "resolution_status": "production_resolver",
+    "resolution_error": null,
+    "held_override": false,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1
+    },
+    "effective_config": {
+      "kernel_family": "generic_fused_moe",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 3
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "factor_bytes_allocated": 1342177280,
+  "routing": {
+    "valid_pairs": 256,
+    "experts_hit": 211,
+    "virtual_expert_capacity": 2048,
+    "prewarm": "a_and_b",
+    "a_execution": "skipped",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 4096,
+        "allocated_expert_blocks": 256,
+        "actual_pair_slots": 4096,
+        "post_padding_pair_slots": 4096,
+        "padding_pair_slots": 3840
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 51.46496057510376,
+    "p50_us": 52.28480100631714,
+    "p80_us": 53.19615960121155,
+    "min_us": 50.335997343063354,
+    "max_us": 63.475197553634644,
+    "num_samples": 100,
+    "launches_per_batch": 10
+  },
+  "timing_domain": "cuda_event_device"
+}

@@ -1,0 +1,21 @@
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  29%|██▉       | 4727/16384 [00:00<00:00, 47259.68it/s]DeepGEMM warmup:  58%|█████▊    | 9453/16384 [00:00<00:00, 43148.23it/s]DeepGEMM warmup:  84%|████████▍ | 13792/16384 [00:00<00:00, 42033.36it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 42371.07it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  31%|███       | 5070/16384 [00:00<00:00, 50695.94it/s]DeepGEMM warmup:  62%|██████▏   | 10140/16384 [00:00<00:00, 44275.54it/s]DeepGEMM warmup:  89%|████████▉ | 14620/16384 [00:00<00:00, 42663.81it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 43317.96it/s]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/mirror/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 2185, in <module>
+[rank0]:     raise SystemExit(main())
+[rank0]:                      ^^^^^^
+[rank0]:   File "/mirror/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1982, in main
+[rank0]:     else _check_neutral_baselines(
+[rank0]:          ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/mirror/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1396, in _check_neutral_baselines
+[rank0]:     _run_checked(fixture, "C0") if fixture.case.adapters.l_active else None
+[rank0]:     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/mirror/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 1163, in _run_checked
+[rank0]:     fixture.invoke(pipeline)
+[rank0]:   File "/mirror/sglang/benchmark/kernels/lora_moe/bench_moe_pipeline.py", line 633, in invoke
+[rank0]:     raise RuntimeError("active LoRA fixture was not constructed")
+[rank0]: RuntimeError: active LoRA fixture was not constructed

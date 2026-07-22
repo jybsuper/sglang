@@ -1,0 +1,144 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T02:15:56.226342+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "d74173b7d270bb08317eb68100e1e8be71fef897",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-decode-large-gb300",
+      "target": "gate_b",
+      "variant": "direct",
+      "b_config_selector": "explicit",
+      "b_block_m": 32,
+      "b_block_n": 32,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 3,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/bconfig_d741/gb300/direct_grid/decode-large_gate-b_bm32_g1_k0_cuda-graph.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-decode-large-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 256,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 2048,
+    "R": 32,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1
+  },
+  "target": "gate_b",
+  "scope": "K0",
+  "requested_variant": "direct",
+  "effective_expand": "direct",
+  "b_config": {
+    "requested_selector": "explicit",
+    "site": "gate",
+    "lookup_m": null,
+    "resolution_status": "benchmark_explicit",
+    "resolution_error": null,
+    "held_override": true,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 32,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 3
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "aligned_flat",
+      "BLOCK_SIZE_M": 32,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 32,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      1,
+      256,
+      64,
+      2048
+    ],
+    "b": [
+      1,
+      256,
+      1024,
+      32
+    ]
+  },
+  "factor_bytes_allocated": 83886080,
+  "routing": {
+    "valid_pairs": 2048,
+    "experts_hit": 256,
+    "virtual_expert_capacity": 256,
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 5888,
+        "allocated_expert_blocks": 368,
+        "actual_pair_slots": 4096,
+        "post_padding_pair_slots": 4096,
+        "padding_pair_slots": 2048
+      },
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 32,
+        "allocated_pair_slots": 9984,
+        "allocated_expert_blocks": 312,
+        "actual_pair_slots": 8192,
+        "post_padding_pair_slots": 8192,
+        "padding_pair_slots": 6144
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 6.089600175619125,
+    "p50_us": 6.284800171852112,
+    "p80_us": 6.291200220584869,
+    "min_us": 6.070400029420853,
+    "max_us": 6.950400024652481,
+    "num_samples": 100,
+    "launches_per_batch": 10
+  },
+  "timing_domain": "cuda_event_device"
+}

@@ -1,0 +1,1336 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T01:01:18.057168+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "17ccc1b0a2ba7385c7e28a51479f094efcf51a4e",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_configs": false,
+      "all_configs": true,
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-prefill-h200",
+      "site": "gate",
+      "config": "bn16-bk64-w4",
+      "scope": "K0",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "warmup": 10,
+      "samples": 30,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_p0/h200_prefill_t2048_r64_gate_indexed_all27_cold_k0_graph_w10_s30.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-prefill-h200",
+    "model": "qwen3.5-35b-a3b",
+    "T": 2048,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 16384,
+    "R": 64,
+    "L_active": 3,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "site": "gate",
+  "scope": "K0",
+  "reference": "chunked PyTorch FP32 route-pair oracle",
+  "route_inclusion": "raw_route_inputs_prebuilt",
+  "route_storage": "none_inline_raw",
+  "scope_note": "K0 and O0 launch the same candidate kernel because adapter/expert address resolution is inline and no route plan exists",
+  "pdl_policy": "architecture_auto",
+  "cache_control": {
+    "state": "cold",
+    "method": "preallocated_int32_read_write_on_current_stream",
+    "flush_bytes": 125829120,
+    "detected_l2_bytes": 62914560,
+    "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+  },
+  "baseline_driver": "benchmark/kernels/lora_moe/bench_shrink_schedules.py",
+  "results": [
+    {
+      "config": {
+        "key": "bn8-bk32-w2",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2132240746516345e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1798.0671882629395,
+        "p50_us": 1801.3760447502136,
+        "p80_us": 1803.0527591705322,
+        "min_us": 1771.3600397109985,
+        "max_us": 1805.1199913024902,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk32-w4",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2433812847141326e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 3224.1855144500732,
+        "p50_us": 3226.3200283050537,
+        "p80_us": 3227.827215194702,
+        "min_us": 3221.791982650757,
+        "max_us": 3231.519937515259,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk32-w8",
+        "block_n": 8,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2321889043582814e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 6431.033706665039,
+        "p50_us": 6433.680057525635,
+        "p80_us": 6437.279891967773,
+        "min_us": 6427.519798278809,
+        "max_us": 6439.743995666504,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w2",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1433.9072227478027,
+        "p50_us": 1434.4960451126099,
+        "p80_us": 1435.5456352233887,
+        "min_us": 1433.4399700164795,
+        "max_us": 1439.136028289795,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w4",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.838674267342412e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1795.6991910934448,
+        "p50_us": 1796.5439558029175,
+        "p80_us": 1797.3247528076172,
+        "min_us": 1794.592022895813,
+        "max_us": 1798.848032951355,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk64-w8",
+        "block_n": 8,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.77035291876382e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 3425.395107269287,
+        "p50_us": 3426.352024078369,
+        "p80_us": 3427.4559020996094,
+        "min_us": 3424.639940261841,
+        "max_us": 3428.607940673828,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w2",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1015.4495716094971,
+        "p50_us": 1016.1759853363037,
+        "p80_us": 1027.3536205291748,
+        "min_us": 1014.847993850708,
+        "max_us": 1029.8880338668823,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w4",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1488.2623434066772,
+        "p50_us": 1507.2799921035767,
+        "p80_us": 1508.62717628479,
+        "min_us": 1487.2959852218628,
+        "max_us": 1511.0080242156982,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn8-bk128-w8",
+        "block_n": 8,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 16,
+        "programs": 262144
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.5108709273146133e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 2031.2256813049316,
+        "p50_us": 2031.7280292510986,
+        "p80_us": 2032.4927806854248,
+        "min_us": 2029.9839973449707,
+        "max_us": 2033.4720611572266,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w2",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.1710626891576794e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1300.0832319259644,
+        "p50_us": 1306.2719702720642,
+        "p80_us": 1308.5888385772705,
+        "min_us": 1299.1039752960205,
+        "max_us": 1311.6799592971802,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w4",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2132240746516345e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 2156.6720485687256,
+        "p50_us": 2157.263994216919,
+        "p80_us": 2160.3456020355225,
+        "min_us": 2154.3679237365723,
+        "max_us": 2163.520097732544,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk32-w8",
+        "block_n": 16,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2433812847141326e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 3891.5839195251465,
+        "p50_us": 3892.4479484558105,
+        "p80_us": 3893.939256668091,
+        "min_us": 3889.72806930542,
+        "max_us": 3895.3919410705566,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w2",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1082.0543766021729,
+        "p50_us": 1090.0959968566895,
+        "p80_us": 1160.1664304733276,
+        "min_us": 1078.9439678192139,
+        "max_us": 1219.871997833252,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w4",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1348.512053489685,
+        "p50_us": 1352.6400327682495,
+        "p80_us": 1360.703945159912,
+        "min_us": 1347.264051437378,
+        "max_us": 1362.239956855774,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk64-w8",
+        "block_n": 16,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.838674267342412e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 2200.9920597076416,
+        "p50_us": 2209.9839448928833,
+        "p80_us": 2213.5680198669434,
+        "min_us": 2199.7439861297607,
+        "max_us": 2229.3760776519775,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w2",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1034.9440574645996,
+        "p50_us": 1041.487991809845,
+        "p80_us": 1042.2847747802734,
+        "min_us": 1033.1840515136719,
+        "max_us": 1044.6399450302124,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w4",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1199.353551864624,
+        "p50_us": 1274.3359804153442,
+        "p80_us": 1298.4832286834717,
+        "min_us": 1185.920000076294,
+        "max_us": 1325.0559568405151,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn16-bk128-w8",
+        "block_n": 16,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 8,
+        "programs": 131072
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1579.7248363494873,
+        "p50_us": 1592.4959778785706,
+        "p80_us": 1596.7296123504639,
+        "min_us": 1570.3359842300415,
+        "max_us": 1623.6480474472046,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w2",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.1710626891576794e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1423.2831954956055,
+        "p50_us": 1431.9040179252625,
+        "p80_us": 1438.4384155273438,
+        "min_us": 1410.3360176086426,
+        "max_us": 1450.4640102386475,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w4",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.1710626891576794e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 2021.6319561004639,
+        "p50_us": 2031.615972518921,
+        "p80_us": 2040.5824661254883,
+        "min_us": 2008.0320835113525,
+        "max_us": 2070.9118843078613,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk32-w8",
+        "block_n": 32,
+        "block_k": 32,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 5.2132240746516345e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 2931.9040298461914,
+        "p50_us": 2936.0480308532715,
+        "p80_us": 2940.671968460083,
+        "min_us": 2927.839994430542,
+        "max_us": 2950.3040313720703,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w2",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1374.5023965835571,
+        "p50_us": 1453.8560509681702,
+        "p80_us": 1508.6784362792969,
+        "min_us": 1261.3120079040527,
+        "max_us": 1582.6879739761353,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w4",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1279.6863794326782,
+        "p50_us": 1281.2960147857666,
+        "p80_us": 1284.3008041381836,
+        "min_us": 1276.0000228881836,
+        "max_us": 1289.471983909607,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk64-w8",
+        "block_n": 32,
+        "block_k": 64,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 3.749474508651929e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1748.3136415481567,
+        "p50_us": 1753.167986869812,
+        "p80_us": 1755.6032180786133,
+        "min_us": 1745.7599639892578,
+        "max_us": 1759.0080499649048,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w2",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1596.236777305603,
+        "p50_us": 1618.6559796333313,
+        "p80_us": 1631.6800117492676,
+        "min_us": 1563.3920431137085,
+        "max_us": 1657.6319932937622,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w4",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1703.865647315979,
+        "p50_us": 1723.9199876785278,
+        "p80_us": 1740.601634979248,
+        "min_us": 1693.503975868225,
+        "max_us": 1779.0720462799072,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    },
+    {
+      "config": {
+        "key": "bn32-bk128-w8",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 8,
+        "num_stages": 3
+      },
+      "dimensions": {
+        "T": 2048,
+        "top_k": 8,
+        "route_pairs": 16384,
+        "N": 128,
+        "H": 2048
+      },
+      "grid": {
+        "route_pair_programs": 16384,
+        "n_tiles_per_pair": 4,
+        "programs": 65536
+      },
+      "route_inputs": "raw_topk_ids_and_token_lora_mapping",
+      "compute_primitive": "indexed_vector_reduction_no_tensor_core",
+      "routing_preprocessing_kernels": 0,
+      "descriptors": false,
+      "pair_padding": 0,
+      "semantic_mode": "preserve_invalid",
+      "correctness": {
+        "max_abs_error": 0.00048828125,
+        "mean_abs_error": 4.052368218765423e-09,
+        "semantic_mode": "preserve_invalid",
+        "local_expert_offset_checked": 17,
+        "negative_adapter_preserved": true,
+        "out_of_range_adapter_preserved": true,
+        "negative_expert_preserved": true,
+        "nonlocal_expert_preserved": true
+      },
+      "timing": {
+        "p20_us": 1618.9439535140991,
+        "p50_us": 1620.2239990234375,
+        "p80_us": 1622.4512338638306,
+        "min_us": 1615.007996559143,
+        "max_us": 1625.0560283660889,
+        "num_samples": 30,
+        "launches_per_batch": 1
+      },
+      "timing_domain": "cuda_event_device"
+    }
+  ]
+}

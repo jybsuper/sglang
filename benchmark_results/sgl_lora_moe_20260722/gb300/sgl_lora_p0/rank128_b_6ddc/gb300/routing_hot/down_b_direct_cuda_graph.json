@@ -1,0 +1,146 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T03:09:25.655577+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "6ddc168642293b516a35b4504b6478b671c04a15",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-routing-hot-gb300",
+      "target": "down_b",
+      "variant": "direct",
+      "b_input_source": "synthetic",
+      "b_config_selector": "logical-t",
+      "b_block_m": 64,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 1,
+      "b_num_warps": 4,
+      "b_num_stages": 4,
+      "scope": "K0",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 100,
+      "inner_iterations": 10,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/rank128_b_6ddc/gb300/routing_hot/down_b_direct_cuda_graph.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-routing-hot-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 256,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 2048,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "target": "down_b",
+  "scope": "K0",
+  "requested_variant": "direct",
+  "effective_expand": "direct",
+  "b_intermediate": {
+    "source": "synthetic",
+    "seed": 20260722,
+    "shape": [
+      256,
+      8,
+      128
+    ],
+    "a_producer_launched": false
+  },
+  "correctness_oracle_expand": "generic",
+  "b_config": {
+    "requested_selector": "logical-t",
+    "site": "down",
+    "lookup_m": 256,
+    "resolution_status": "production_resolver",
+    "resolution_error": null,
+    "held_override": false,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 32,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "flat",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 128,
+      "GROUP_SIZE_M": 1,
+      "num_warps": 4,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "prebuilt",
+  "cache_measurement": "single_plan_diagnostic",
+  "factor_shapes": {
+    "a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "factor_bytes_allocated": 1342177280,
+  "routing": {
+    "valid_pairs": 2048,
+    "experts_hit": 256,
+    "virtual_expert_capacity": 2048,
+    "prewarm": "a_and_b",
+    "a_execution": "skipped",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 32768,
+        "allocated_expert_blocks": 2048,
+        "actual_pair_slots": 32768,
+        "post_padding_pair_slots": 32768,
+        "padding_pair_slots": 30720
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 234.64319705963135,
+    "p50_us": 234.87679958343506,
+    "p80_us": 234.98239517211914,
+    "min_us": 234.3679904937744,
+    "max_us": 235.7952117919922,
+    "num_samples": 100,
+    "launches_per_batch": 10
+  },
+  "timing_domain": "cuda_event_device"
+}

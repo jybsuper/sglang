@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "scope": "M0_local_bf16_c2_consumer_partial_experimental",
+  "contract": {
+    "w13_layout": "masked_gate_first_contiguous",
+    "activation": "ordinary_swiglu",
+    "elided_bridges": [
+      "gate_up_delta_TK2I",
+      "activation_TKI"
+    ],
+    "destinations": [
+      "masked_bf16_w2_input",
+      "canonical_TKR_down_b_input"
+    ],
+    "remaining_unfused_boundary": "base_finalize_then_existing_down_b_expand_add",
+    "planned_full_c2_completed": false,
+    "routing_fairness": "shared_whole_forward_cache_matching_c0",
+    "consumer_schedule": "aligned",
+    "scaling_semantics": "topk_weight_times_routed_scaling_applied_exactly_once_to_base_and_lora;harness_factor_is_1",
+    "production_dispatch_changed": false
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "environment": {
+    "timestamp_utc": "2026-07-22T08:54:20.556943+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "experimental_lora_master_effective": "0",
+    "cli": {
+      "device": "h200",
+      "case_id": "p0-qwen3.5-35b-a3b-cap1-h200",
+      "list_cases": false,
+      "variant": "all",
+      "consumer_schedule": "aligned",
+      "block_n": "64",
+      "num_warps": "4",
+      "execution": "cuda_graph",
+      "mode": "time",
+      "warmup": 2,
+      "samples": 3,
+      "counterbalance_repeats": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_exec_20260722/c2p_strict_h200.json"
+    }
+  },
+  "correctness": {
+    "bn64-w4": {
+      "c0_c2p_max_abs": 0.000152587890625,
+      "c0_c2p_rtol": 0.0,
+      "c0_c2p_atol": 0.003,
+      "reference_delta_max_abs": 0.0035400390625,
+      "candidate_delta_max_abs": 0.0035400390625,
+      "delta_max_abs_error": 0.000152587890625,
+      "delta_error_over_signal": 0.04310344827586207,
+      "delta_rtol": 0.02,
+      "delta_atol": 0.00035400390625
+    }
+  },
+  "runs": [
+    {
+      "variant": "C0",
+      "schedule": "not_applicable",
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 466.41278862953186,
+        "p50_us": 467.9679870605469,
+        "p80_us": 469.9455976486206,
+        "min_us": 465.37598967552185,
+        "max_us": 471.2640047073364,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 0,
+      "pair_order": [
+        "C0",
+        "C2P"
+      ]
+    },
+    {
+      "variant": "C2P",
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "execution": "cuda_graph",
+      "timing": {
+        "p20_us": 460.3712022304535,
+        "p50_us": 463.23201060295105,
+        "p80_us": 463.82721066474915,
+        "min_us": 458.46399664878845,
+        "max_us": 464.2240107059479,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.00018310546875,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "pair_index": 0,
+      "pair_order": [
+        "C0",
+        "C2P"
+      ]
+    }
+  ],
+  "counterbalanced_comparisons": [
+    {
+      "pair_index": 0,
+      "repeat": 0,
+      "order": [
+        "C0",
+        "C2P"
+      ],
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "c0_p50_us": 467.9679870605469,
+      "c2p_p50_us": 463.23201060295105,
+      "c2p_vs_c0_pct": -1.012030008151621
+    }
+  ],
+  "counterbalanced_summary": [
+    {
+      "schedule": {
+        "consumer_schedule": "aligned",
+        "block_n": 64,
+        "num_warps": 4
+      },
+      "num_pairs": 1,
+      "median_paired_pct": -1.012030008151621,
+      "min_paired_pct": -1.012030008151621,
+      "max_paired_pct": -1.012030008151621
+    }
+  ]
+}

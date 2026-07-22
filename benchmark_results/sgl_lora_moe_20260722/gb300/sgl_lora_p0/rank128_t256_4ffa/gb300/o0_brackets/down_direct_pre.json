@@ -1,0 +1,148 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T04:41:07.468232+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-routing-hot-gb300",
+      "target": "down_b",
+      "variant": "direct",
+      "b_input_source": "synthetic",
+      "b_config_selector": "explicit",
+      "b_block_m": 16,
+      "b_block_n": 64,
+      "b_block_k": 64,
+      "b_group_size_m": 8,
+      "b_num_warps": 8,
+      "b_num_stages": 4,
+      "scope": "O0",
+      "mode": "time",
+      "execution": "eager",
+      "warmup": 10,
+      "samples": 200,
+      "inner_iterations": 1,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/rank128_t256_4ffa/gb300/o0_brackets/down_direct_pre.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-routing-hot-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "T": 256,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "P_capacity": 2048,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8
+  },
+  "target": "down_b",
+  "scope": "O0",
+  "requested_variant": "direct",
+  "effective_expand": "direct",
+  "b_intermediate": {
+    "source": "synthetic",
+    "seed": 20260722,
+    "shape": [
+      256,
+      8,
+      128
+    ],
+    "a_producer_launched": false
+  },
+  "correctness_oracle_expand": "generic",
+  "b_config": {
+    "requested_selector": "explicit",
+    "site": "down",
+    "lookup_m": null,
+    "resolution_status": "benchmark_explicit",
+    "resolution_error": null,
+    "held_override": true,
+    "resolved_config": {
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 64,
+      "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 8,
+      "num_warps": 8,
+      "num_stages": 4
+    },
+    "effective_config": {
+      "kernel_family": "direct_lora_b",
+      "schedule": "flat",
+      "BLOCK_SIZE_M": 16,
+      "BLOCK_SIZE_N": 128,
+      "BLOCK_SIZE_R": 128,
+      "GROUP_SIZE_M": 8,
+      "num_warps": 8,
+      "num_stages": 1,
+      "resolved_fields_not_consumed": [
+        "BLOCK_SIZE_K",
+        "num_stages",
+        "BLOCK_SIZE_N"
+      ]
+    }
+  },
+  "route_inclusion": "route_inclusive_b_with_synthetic_intermediate",
+  "cache_measurement": "b_route_rebuild_with_fixed_a_intermediate",
+  "factor_shapes": {
+    "a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "factor_bytes_allocated": 1342177280,
+  "routing": {
+    "valid_pairs": 2048,
+    "experts_hit": 256,
+    "virtual_expert_capacity": 2048,
+    "prewarm": "a_and_b",
+    "a_execution": "skipped",
+    "plans": [
+      {
+        "num_experts": 256,
+        "shared_outer": false,
+        "block_m": 16,
+        "allocated_pair_slots": 32768,
+        "allocated_expert_blocks": 2048,
+        "actual_pair_slots": 32768,
+        "post_padding_pair_slots": 32768,
+        "padding_pair_slots": 30720
+      }
+    ]
+  },
+  "timing": {
+    "p20_us": 358.6836,
+    "p50_us": 363.586,
+    "p80_us": 370.7596,
+    "min_us": 348.033,
+    "max_us": 386.018,
+    "num_samples": 200,
+    "launches_per_batch": 1
+  },
+  "timing_domain": "isolated_wall_host_to_device_completion"
+}

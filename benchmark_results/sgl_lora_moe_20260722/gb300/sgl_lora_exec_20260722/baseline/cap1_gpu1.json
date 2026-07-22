@@ -1,0 +1,316 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T07:45:09.127808+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-cap1-gb300",
+      "pipeline": "all",
+      "c1_overlap_policy": "production_auto",
+      "a_provider": "production",
+      "indexed_gate_config": "auto",
+      "indexed_down_config": "auto",
+      "gate_b_variant": "production",
+      "down_b_variant": "production",
+      "gate_b_config": null,
+      "down_b_config": null,
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 10,
+      "samples": 40,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_exec_20260722/baseline/cap1_gpu1.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-cap1-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 64,
+    "L_active": 1,
+    "B_base": 0,
+    "L_capacity": 1,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1; C1 policy=production_auto",
+  "execution_policy": {
+    "requested": true,
+    "policy": "production_auto",
+    "production_auto_max_tokens": 256,
+    "production_auto_enabled": true,
+    "effective": true,
+    "benchmark_force_requested": false,
+    "benchmark_force_changed_decision": false,
+    "fallback_reason": null,
+    "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+    "overlap_scope": "gate_up_lora_a_b_vs_base_prepare_gateup;down_lora_serial",
+    "production_default_unchanged": true,
+    "pipeline": "C1",
+    "benchmarked": true
+  },
+  "phase_semantics": "synthetic_fixed_local_token_shape; phase is metadata and is not passed to the M0 runner",
+  "a_provider": {
+    "name": "production",
+    "applied": false,
+    "configs": null,
+    "substitution_scope": "none",
+    "retained_components": [
+      "production_lora_b",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "production"
+  },
+  "b_schedule": {
+    "gate": {
+      "requested_variant": "production",
+      "effective_variant": "direct",
+      "config": null,
+      "routing_config_overridden": false
+    },
+    "down": {
+      "requested_variant": "production",
+      "effective_variant": "direct",
+      "config": null,
+      "routing_config_overridden": false
+    },
+    "applied": false,
+    "benchmark_only": false,
+    "routing_config_overridden": false,
+    "substitution_scope": "none",
+    "production_policy_changed": false
+  },
+  "route_inclusion": "full_pipeline_including_lora_route_planning",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "c0_c1_max_abs": 0.000152587890625,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 251658240,
+  "factor_shapes": {
+    "gate_up_a": [
+      1,
+      256,
+      128,
+      2048
+    ],
+    "gate_up_b": [
+      1,
+      256,
+      1024,
+      64
+    ],
+    "down_a": [
+      1,
+      256,
+      64,
+      512
+    ],
+    "down_b": [
+      1,
+      256,
+      2048,
+      64
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "b_schedule": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "two_stream_policy": {
+        "requested": false,
+        "policy": "serial",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": false,
+        "effective": false,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": null,
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 283.14878940582275,
+        "p50_us": 285.43999791145325,
+        "p80_us": 288.2879972457886,
+        "min_us": 281.3439965248108,
+        "max_us": 293.63200068473816,
+        "num_samples": 40,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_production_a",
+      "a_provider": "production",
+      "b_schedule": {
+        "gate": {
+          "requested_variant": "production",
+          "effective_variant": "direct",
+          "config": null,
+          "routing_config_overridden": false
+        },
+        "down": {
+          "requested_variant": "production",
+          "effective_variant": "direct",
+          "config": null,
+          "routing_config_overridden": false
+        },
+        "applied": false,
+        "benchmark_only": false,
+        "routing_config_overridden": false,
+        "substitution_scope": "none",
+        "production_policy_changed": false
+      },
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "two_stream_policy": {
+        "requested": false,
+        "policy": "serial",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": false,
+        "effective": false,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": null,
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0001220703125,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 332.5696051120758,
+        "p50_us": 334.5920145511627,
+        "p80_us": 335.8207941055298,
+        "min_us": 330.49601316452026,
+        "max_us": 345.8240032196045,
+        "num_samples": 40,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_c1_production_auto_two_stream_production_a",
+      "a_provider": "production",
+      "b_schedule": {
+        "gate": {
+          "requested_variant": "production",
+          "effective_variant": "direct",
+          "config": null,
+          "routing_config_overridden": false
+        },
+        "down": {
+          "requested_variant": "production",
+          "effective_variant": "direct",
+          "config": null,
+          "routing_config_overridden": false
+        },
+        "applied": false,
+        "benchmark_only": false,
+        "routing_config_overridden": false,
+        "substitution_scope": "none",
+        "production_policy_changed": false
+      },
+      "retained_components": [
+        "production_lora_b",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": true,
+      "two_stream_policy": {
+        "requested": true,
+        "policy": "production_auto",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": true,
+        "effective": true,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": "gate_up_lora_a_b_vs_base_prepare_gateup;down_lora_serial",
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": "production",
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000244140625,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 322.30401039123535,
+        "p50_us": 323.0559974908829,
+        "p80_us": 325.0879943370819,
+        "min_us": 318.2080090045929,
+        "max_us": 330.3999900817871,
+        "num_samples": 40,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}

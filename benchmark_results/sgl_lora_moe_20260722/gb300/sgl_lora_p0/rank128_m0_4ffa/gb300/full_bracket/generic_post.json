@@ -1,0 +1,393 @@
+{
+  "environment": {
+    "timestamp_utc": "2026-07-22T03:53:08.901969+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": false,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "device": "gb300",
+      "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-gb300",
+      "pipeline": "all",
+      "c1_overlap_policy": "production_auto",
+      "a_provider": "indexed",
+      "indexed_gate_config": "bn32-bk128-w2",
+      "indexed_down_config": "bn32-bk128-w4",
+      "gate_b_variant": "generic",
+      "down_b_variant": "generic",
+      "gate_b_config": "16,128,32,1,4,3",
+      "down_b_config": "16,128,32,8,4,3",
+      "mode": "time",
+      "execution": "cuda_graph",
+      "warmup": 20,
+      "samples": 200,
+      "profile_iterations": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_p0/rank128_m0_4ffa/gb300/full_bracket/generic_post.json"
+    }
+  },
+  "case": {
+    "case_id": "p0-qwen3.5-35b-a3b-default-lora-full-gb300",
+    "model": "qwen3.5-35b-a3b",
+    "phase": "decode",
+    "T": 32,
+    "H_moe": 2048,
+    "I": 512,
+    "E_local": 256,
+    "K": 8,
+    "R": 128,
+    "L_active": 8,
+    "B_base": 0,
+    "L_capacity": 8,
+    "activation": "swiglu",
+    "num_slices": 2,
+    "tp_size": 1,
+    "ep_size": 1,
+    "moe_dp_size": 1
+  },
+  "scope": "M0",
+  "comparison": "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A and benchmark-selected B schedules; C1 policy=production_auto",
+  "execution_policy": {
+    "requested": true,
+    "policy": "production_auto",
+    "production_auto_max_tokens": 256,
+    "production_auto_enabled": true,
+    "effective": true,
+    "benchmark_force_requested": false,
+    "benchmark_force_changed_decision": false,
+    "fallback_reason": null,
+    "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+    "overlap_scope": "gate_up_lora_a_b_vs_base_prepare_gateup;down_lora_serial",
+    "production_default_unchanged": true,
+    "pipeline": "C1",
+    "benchmarked": true
+  },
+  "phase_semantics": "synthetic_fixed_local_token_shape; phase is metadata and is not passed to the M0 runner",
+  "a_provider": {
+    "name": "indexed",
+    "applied": true,
+    "configs": {
+      "gate": {
+        "selection": "explicit",
+        "key": "bn32-bk128-w2",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 2,
+        "num_stages": 3
+      },
+      "down": {
+        "selection": "explicit",
+        "key": "bn32-bk128-w4",
+        "block_n": 32,
+        "block_k": 128,
+        "num_warps": 4,
+        "num_stages": 3
+      }
+    },
+    "substitution_scope": "gate_and_down_lora_a_only",
+    "retained_components": [
+      "production_lora_b_with_benchmark_schedule_override",
+      "production_swiglu_activation",
+      "production_deepgemm_base"
+    ],
+    "production_policy_changed": false,
+    "c1_route_overhead": "conservative unused production A route prewarm retained"
+  },
+  "b_schedule": {
+    "gate": {
+      "requested_variant": "generic",
+      "effective_variant": "generic",
+      "config": {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 32,
+        "GROUP_SIZE_M": 1,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "routing_config_overridden": true
+    },
+    "down": {
+      "requested_variant": "generic",
+      "effective_variant": "generic",
+      "config": {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 32,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 3
+      },
+      "routing_config_overridden": true
+    },
+    "applied": true,
+    "benchmark_only": true,
+    "routing_config_overridden": true,
+    "substitution_scope": "gate_and_down_lora_b_family_and_config_only",
+    "production_policy_changed": false
+  },
+  "route_inclusion": "raw_route_indexed_a_plus_benchmark_selected_b_routing; effective C1 retains conservative unused production A route prewarm",
+  "correctness": {
+    "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
+    "all_outputs_finite": true,
+    "n0_repeat_max_abs": 0.0,
+    "n0_c0_zero_lora_max_abs": 0.0,
+    "n0_c0_zero_lora_rtol": 0.06,
+    "n0_c0_zero_lora_atol": 0.06,
+    "pre_b_override_candidate_c0_max_abs": 0.000244140625,
+    "pre_b_override_candidate_c0_reference_delta_max_abs": 0.0054931640625,
+    "pre_b_override_candidate_c0_candidate_delta_max_abs": 0.005615234375,
+    "pre_b_override_candidate_c0_delta_max_abs_error": 0.000244140625,
+    "pre_b_override_candidate_c0_delta_error_over_signal": 0.044444444444444446,
+    "pre_b_override_candidate_c0_delta_rtol": 0.06,
+    "pre_b_override_candidate_c0_delta_atol": 0.0015,
+    "c0_c1_max_abs": 0.00018310546875,
+    "c0_c1_rtol": 0.06,
+    "c0_c1_atol": 0.06,
+    "production_c0_reference": {
+      "status": "unsupported",
+      "error_type": "OutOfResources",
+      "error": "out of resource: shared memory, Required: 278528, Hardware limit: 232448. Reducing block sizes or `num_stages` may help."
+    },
+    "pre_b_override_reference": {
+      "status": "available"
+    }
+  },
+  "base_weight_bytes": 1610612736,
+  "lora_factor_bytes": 4026531840,
+  "factor_shapes": {
+    "gate_up_a": [
+      8,
+      256,
+      256,
+      2048
+    ],
+    "gate_up_b": [
+      8,
+      256,
+      1024,
+      128
+    ],
+    "down_a": [
+      8,
+      256,
+      128,
+      512
+    ],
+    "down_b": [
+      8,
+      256,
+      2048,
+      128
+    ]
+  },
+  "limitations": [
+    "gated_swiglu_only",
+    "bf16_only",
+    "tp1_ep1_moe_dp1_only",
+    "non_gated_models_pending",
+    "fp8_nvfp4_w4a16_pending",
+    "benchmark_b_schedule_override",
+    "indexed_a_per_expert_only",
+    "indexed_effective_c1_retains_unused_production_a_route_prewarm"
+  ],
+  "e0_server_driver": "sglang.benchmark.one_batch_server",
+  "pipelines": {
+    "N0": {
+      "pipeline": "N0",
+      "description": "matched_base_only_deepgemm",
+      "a_provider": "not_applicable",
+      "b_schedule": "not_applicable",
+      "retained_components": null,
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "two_stream_policy": {
+        "requested": false,
+        "policy": "serial",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": false,
+        "effective": false,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": null,
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 284.38401222229004,
+        "p50_us": 286.1120104789734,
+        "p80_us": 287.4560058116913,
+        "min_us": 281.2480032444,
+        "max_us": 292.60799288749695,
+        "num_samples": 200,
+        "launches_per_batch": 1
+      }
+    },
+    "C0": {
+      "pipeline": "C0",
+      "description": "sgl_lora_serial_indexed_a",
+      "a_provider": "indexed",
+      "b_schedule": {
+        "gate": {
+          "requested_variant": "generic",
+          "effective_variant": "generic",
+          "config": {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "routing_config_overridden": true
+        },
+        "down": {
+          "requested_variant": "generic",
+          "effective_variant": "generic",
+          "config": {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+            "GROUP_SIZE_M": 8,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "routing_config_overridden": true
+        },
+        "applied": true,
+        "benchmark_only": true,
+        "routing_config_overridden": true,
+        "substitution_scope": "gate_and_down_lora_b_family_and_config_only",
+        "production_policy_changed": false
+      },
+      "retained_components": [
+        "production_lora_b_with_benchmark_schedule_override",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": false,
+      "two_stream_overlap_effective": false,
+      "two_stream_policy": {
+        "requested": false,
+        "policy": "serial",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": false,
+        "effective": false,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": null,
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": null,
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.0003662109375,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 371.45599722862244,
+        "p50_us": 373.50401282310486,
+        "p80_us": 375.00799894332886,
+        "min_us": 369.31198835372925,
+        "max_us": 378.59201431274414,
+        "num_samples": 200,
+        "launches_per_batch": 1
+      }
+    },
+    "C1": {
+      "pipeline": "C1",
+      "description": "sgl_lora_c1_production_auto_two_stream_indexed_a",
+      "a_provider": "indexed",
+      "b_schedule": {
+        "gate": {
+          "requested_variant": "generic",
+          "effective_variant": "generic",
+          "config": {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "routing_config_overridden": true
+        },
+        "down": {
+          "requested_variant": "generic",
+          "effective_variant": "generic",
+          "config": {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+            "GROUP_SIZE_M": 8,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "routing_config_overridden": true
+        },
+        "applied": true,
+        "benchmark_only": true,
+        "routing_config_overridden": true,
+        "substitution_scope": "gate_and_down_lora_b_family_and_config_only",
+        "production_policy_changed": false
+      },
+      "retained_components": [
+        "production_lora_b_with_benchmark_schedule_override",
+        "production_swiglu_activation",
+        "production_deepgemm_base"
+      ],
+      "two_stream_requested": true,
+      "two_stream_overlap_effective": true,
+      "two_stream_policy": {
+        "requested": true,
+        "policy": "production_auto",
+        "production_auto_max_tokens": 256,
+        "production_auto_enabled": true,
+        "effective": true,
+        "benchmark_force_requested": false,
+        "benchmark_force_changed_decision": false,
+        "fallback_reason": null,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": "gate_up_lora_a_b_vs_base_prepare_gateup;down_lora_serial",
+        "production_default_unchanged": true
+      },
+      "c1_route_prewarm": "production_a_and_b_routes_including_conservative_unused_a_overhead",
+      "logical_invocations_per_batch": 1,
+      "graph_correctness": {
+        "eager_graph_max_abs": 0.000152587890625,
+        "rtol": 0.0,
+        "atol": 0.003
+      },
+      "timing": {
+        "p20_us": 362.96961307525635,
+        "p50_us": 364.25599455833435,
+        "p80_us": 365.31201004981995,
+        "min_us": 360.1920008659363,
+        "max_us": 371.19999527931213,
+        "num_samples": 200,
+        "launches_per_batch": 1
+      }
+    }
+  }
+}
