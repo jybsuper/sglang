@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:39:18.961183+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "qwen3.5-397b-a17b",
+      "tokens": "32",
+      "ranks": "16",
+      "schedules": "aligned",
+      "block_n": "16",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_cross_model/gb300_gpu2/isolated_full_v4/results/qwen3.5-397b-a17b_T32_R16_aligned_BN16.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "qwen3.5-397b-a17b"
+      ],
+      "tokens": [
+        32
+      ],
+      "ranks": [
+        16
+      ],
+      "schedules": [
+        "aligned"
+      ],
+      "block_n": [
+        16
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "qwen3.5-397b-a17b",
+        "activation": "swiglu",
+        "logical_i": 1024,
+        "physical_i": 1024,
+        "experts": 512,
+        "top_k": 10,
+        "tokens": 32,
+        "rank": 16
+      },
+      "semantic_contract": {
+        "activation": "swiglu",
+        "logical_slices": [
+          "gate",
+          "up"
+        ],
+        "lora_target_slices": [
+          "gate",
+          "up"
+        ],
+        "logical_intermediate_size": 1024,
+        "physical_intermediate_size": 1024,
+        "provider_slice_order": [
+          "gate",
+          "up"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "gated_swiglu_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "4093de9151e28aff2c283e08eb31f006371783c7d51738217ffc46b2c425c754",
+        "route_block_m": 16,
+        "pairs": 320,
+        "pairs_post_padded": 3936
+      },
+      "checks": {
+        "aligned-bn16": {
+          "sampled_pair_indices": [
+            0,
+            9,
+            10,
+            160,
+            289,
+            309,
+            319
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.0050048828125,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 1.52587890625e-05,
+          "down_rank_signal_max_abs": 0.0010986328125,
+          "down_rank_error_over_signal": 0.013888888888888888,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 5,
+          "base_only_tokens": 7
+        }
+      },
+      "runs": [
+        {
+          "schedule": "aligned",
+          "block_n": 16,
+          "timing": {
+            "p20_us": 42.899198830127716,
+            "p50_us": 43.02399978041649,
+            "p80_us": 44.998399913311005,
+            "min_us": 42.847998440265656,
+            "max_us": 48.35199937224388,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 2.288818359375e-05
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "aligned",
+        "block_n": 16,
+        "p50_us": 43.02399978041649,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}

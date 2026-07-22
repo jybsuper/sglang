@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:39:31.668380+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "kimi-k2.5",
+      "tokens": "1",
+      "ranks": "16",
+      "schedules": "pair",
+      "block_n": "64",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_cross_model/h200_gpu6/isolated_full_v4/results/kimi-k2.5_T1_R16_pair_BN64.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "kimi-k2.5"
+      ],
+      "tokens": [
+        1
+      ],
+      "ranks": [
+        16
+      ],
+      "schedules": [
+        "pair"
+      ],
+      "block_n": [
+        64
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "kimi-k2.5",
+        "activation": "swiglu",
+        "logical_i": 2048,
+        "physical_i": 2048,
+        "experts": 384,
+        "top_k": 8,
+        "tokens": 1,
+        "rank": 16
+      },
+      "semantic_contract": {
+        "activation": "swiglu",
+        "logical_slices": [
+          "gate",
+          "up"
+        ],
+        "lora_target_slices": [
+          "gate",
+          "up"
+        ],
+        "logical_intermediate_size": 2048,
+        "physical_intermediate_size": 2048,
+        "provider_slice_order": [
+          "gate",
+          "up"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "gated_swiglu_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "64dcd652f0ba952de029ec5d4f3748f01a16f85fec550a205ba5929d2fb8a905",
+        "route_block_m": 16,
+        "pairs": 8,
+        "pairs_post_padded": 112
+      },
+      "checks": {
+        "pair-bn64": {
+          "sampled_pair_indices": [
+            0,
+            4,
+            6,
+            7
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.00506591796875,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 3.0517578125e-05,
+          "down_rank_signal_max_abs": 0.0019989013671875,
+          "down_rank_error_over_signal": 0.015267175572519083,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 1,
+          "base_only_tokens": 0
+        }
+      },
+      "runs": [
+        {
+          "schedule": "pair",
+          "block_n": 64,
+          "timing": {
+            "p20_us": 26.464000344276428,
+            "p50_us": 26.607999578118324,
+            "p80_us": 26.88639983534813,
+            "min_us": 26.016000658273697,
+            "max_us": 30.01599945127964,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 3.0517578125e-05
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "pair",
+        "block_n": 64,
+        "p50_us": 26.607999578118324,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}

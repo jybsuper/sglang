@@ -179,6 +179,62 @@ def _fused_gate_up_b_swiglu_down_a_kernel(
 
 
 @triton.jit
+def _base_only_swiglu_activation_kernel(
+    gateup_ptr,
+    act_out_ptr,
+    src2dst_ptr,
+    topk_ids_ptr,
+    token_lora_mapping_ptr,
+    num_pairs,
+    inter,
+    num_local_experts,
+    stride_gum,
+    stride_gun,
+    stride_aom,
+    stride_aon,
+    top_k: tl.constexpr,
+    local_expert_offset: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    """Fill W2 activations for base-only rows omitted by the LoRA route."""
+
+    pair_idx = tl.program_id(0).to(tl.int64)
+    pid_n = tl.program_id(1).to(tl.int64)
+    token_idx = pair_idx // top_k
+    adapter = tl.load(token_lora_mapping_ptr + token_idx).to(tl.int64)
+    global_expert = tl.load(topk_ids_ptr + pair_idx).to(tl.int64)
+    local_expert = global_expert - local_expert_offset
+    valid_base_pair = (
+        (pair_idx < num_pairs)
+        & (adapter < 0)
+        & (local_expert >= 0)
+        & (local_expert < num_local_experts)
+    )
+    dst_row = tl.load(src2dst_ptr + pair_idx, mask=valid_base_pair, other=0).to(
+        tl.int64
+    )
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(tl.int64)
+    n_mask = offs_n < inter
+    row = gateup_ptr + dst_row * stride_gum
+    gate = tl.load(
+        row + offs_n * stride_gun,
+        mask=valid_base_pair & n_mask,
+        other=0.0,
+    ).to(tl.float32)
+    up = tl.load(
+        row + (inter + offs_n) * stride_gun,
+        mask=valid_base_pair & n_mask,
+        other=0.0,
+    ).to(tl.float32)
+    activated = (gate * tl.sigmoid(gate) * up).to(act_out_ptr.dtype.element_ty)
+    tl.store(
+        act_out_ptr + dst_row * stride_aom + offs_n * stride_aon,
+        activated,
+        mask=valid_base_pair & n_mask,
+    )
+
+
+@triton.jit
 def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     gateup_ptr,
     gate_intermediate_ptr,
@@ -194,6 +250,7 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     num_pairs,
     inter,
     num_virtual_experts,
+    num_local_experts,
     stride_gum,
     stride_gun,
     stride_gim,
@@ -210,6 +267,7 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     stride_dir,
     gate_rank: tl.constexpr,
     down_rank: tl.constexpr,
+    local_expert_offset: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_GATE_R: tl.constexpr,
@@ -225,10 +283,20 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     route_slots = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(tl.int64)
     pair_ids = tl.load(sorted_pair_ids_ptr + route_slots).to(tl.int64)
     pair_in_range = pair_ids < num_pairs
-    base_expert = tl.load(topk_ids_ptr + pair_ids, mask=pair_in_range, other=-1).to(
-        tl.int64
+    # Clamp the route-padding sentinel before constructing any tensor pointer.
+    # This also avoids relying on masked one-past-the-end vector addresses on
+    # SM103. Expert validity is explicitly local: a positive global ID outside
+    # this EP shard must not consume the provider-private ``src2dst`` value.
+    safe_pair_ids = tl.where(pair_in_range, pair_ids, 0)
+    base_expert = tl.load(
+        topk_ids_ptr + safe_pair_ids, mask=pair_in_range, other=-1
+    ).to(tl.int64)
+    local_expert = base_expert - local_expert_offset
+    valid_pair = (
+        pair_in_range
+        & (local_expert >= 0)
+        & (local_expert < num_local_experts)
     )
-    valid_pair = pair_in_range & (base_expert >= 0)
 
     virtual_expert = tl.load(virtual_expert_ids_ptr + pid_m).to(tl.int64)
     valid_virtual_expert = (virtual_expert >= 0) & (
@@ -239,7 +307,9 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     )
     has_lora = valid_pair & valid_virtual_expert
 
-    dst_rows = tl.load(src2dst_ptr + pair_ids, mask=valid_pair, other=0).to(tl.int64)
+    dst_rows = tl.load(src2dst_ptr + safe_pair_ids, mask=valid_pair, other=0).to(
+        tl.int64
+    )
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(tl.int64)
     n_mask = offs_n < inter
     offs_gate_r = tl.arange(0, BLOCK_GATE_R).to(tl.int64)
@@ -257,7 +327,9 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
         other=0.0,
     ).to(tl.float32)
 
-    gate_intermediate_rows = gate_intermediate_ptr + pair_ids[:, None] * stride_gim
+    gate_intermediate_rows = (
+        gate_intermediate_ptr + safe_pair_ids[:, None] * stride_gim
+    )
     gate_a = tl.load(
         gate_intermediate_rows + offs_gate_r[None, :] * stride_gir,
         mask=has_lora[:, None] & gate_r_mask[None, :],
@@ -309,7 +381,7 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     partial = partial.to(down_intermediate_ptr.dtype.element_ty)
     tl.atomic_add(
         down_intermediate_ptr
-        + pair_ids[:, None] * stride_dim
+        + safe_pair_ids[:, None] * stride_dim
         + offs_down_r[None, :] * stride_dir,
         partial,
         mask=has_lora[:, None] & down_r_mask[None, :],
@@ -399,6 +471,8 @@ def fused_gate_up_b_swiglu_down_a_aligned(
     num_pairs_post_padded: torch.Tensor,
     *,
     route_block_size_m: int,
+    token_lora_mapping: torch.Tensor | None = None,
+    local_expert_offset: int = 0,
     block_size_n: int = 64,
     num_warps: int = 4,
 ) -> None:
@@ -408,6 +482,10 @@ def fused_gate_up_b_swiglu_down_a_aligned(
     ``[adapter, expert, ...]`` shapes. Their first two dimensions are folded by
     view only and indexed with the virtual expert IDs in the supplied route.
     As in the pair-owned schedule, ``down_intermediate`` must be zero on entry.
+    When ``token_lora_mapping`` is supplied, a preceding scan fills base-only
+    activations that the LoRA-aligned route is allowed to omit. Omitting that
+    mapping is correct only when there are no base rows or the route includes
+    them explicitly as ``virtual_expert == -1`` blocks.
     """
     num_pairs = topk_ids.numel()
     inter = act_out.shape[-1]
@@ -427,6 +505,27 @@ def fused_gate_up_b_swiglu_down_a_aligned(
         triton.cdiv(sorted_pair_ids.shape[0], route_block_size_m),
         triton.cdiv(inter, block_size_n),
     )
+    if token_lora_mapping is not None:
+        base_grid = (num_pairs, triton.cdiv(inter, block_size_n))
+        _base_only_swiglu_activation_kernel[base_grid](
+            gateup_output.view(-1, 2 * inter),
+            act_out.view(-1, inter),
+            src2dst,
+            topk_ids,
+            token_lora_mapping,
+            num_pairs,
+            inter,
+            gate_up_lora_b.shape[1],
+            gateup_output.stride(-2),
+            gateup_output.stride(-1),
+            act_out.stride(-2),
+            act_out.stride(-1),
+            top_k=topk_ids.shape[1],
+            local_expert_offset=local_expert_offset,
+            BLOCK_N=block_size_n,
+            num_warps=num_warps,
+            num_stages=1,
+        )
     _fused_gate_up_b_swiglu_down_a_aligned_kernel[grid](
         gateup_output.view(-1, 2 * inter),
         gate_up_intermediate.view(num_pairs, 2 * gate_rank),
@@ -442,6 +541,7 @@ def fused_gate_up_b_swiglu_down_a_aligned(
         num_pairs,
         inter,
         gate_b_virtual.shape[0],
+        gate_up_lora_b.shape[1],
         gateup_output.stride(-2),
         gateup_output.stride(-1),
         gate_up_intermediate.stride(-2),
@@ -458,6 +558,7 @@ def fused_gate_up_b_swiglu_down_a_aligned(
         down_intermediate.stride(-1),
         gate_rank=gate_rank,
         down_rank=down_rank,
+        local_expert_offset=local_expert_offset,
         BLOCK_M=route_block_size_m,
         BLOCK_N=block_size_n,
         BLOCK_GATE_R=triton.next_power_of_2(gate_rank),

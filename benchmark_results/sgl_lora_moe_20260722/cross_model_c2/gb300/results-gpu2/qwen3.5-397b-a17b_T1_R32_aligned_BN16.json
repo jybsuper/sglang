@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:37:40.929921+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "qwen3.5-397b-a17b",
+      "tokens": "1",
+      "ranks": "32",
+      "schedules": "aligned",
+      "block_n": "16",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_cross_model/gb300_gpu2/isolated_full_v4/results/qwen3.5-397b-a17b_T1_R32_aligned_BN16.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "qwen3.5-397b-a17b"
+      ],
+      "tokens": [
+        1
+      ],
+      "ranks": [
+        32
+      ],
+      "schedules": [
+        "aligned"
+      ],
+      "block_n": [
+        16
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "qwen3.5-397b-a17b",
+        "activation": "swiglu",
+        "logical_i": 1024,
+        "physical_i": 1024,
+        "experts": 512,
+        "top_k": 10,
+        "tokens": 1,
+        "rank": 32
+      },
+      "semantic_contract": {
+        "activation": "swiglu",
+        "logical_slices": [
+          "gate",
+          "up"
+        ],
+        "lora_target_slices": [
+          "gate",
+          "up"
+        ],
+        "logical_intermediate_size": 1024,
+        "physical_intermediate_size": 1024,
+        "provider_slice_order": [
+          "gate",
+          "up"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "gated_swiglu_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "c1967b4dbb695b3cade4cfe90fc6720280bbefb69b1e4ff165532a81ed188687",
+        "route_block_m": 16,
+        "pairs": 10,
+        "pairs_post_padded": 144
+      },
+      "checks": {
+        "aligned-bn16": {
+          "sampled_pair_indices": [
+            0,
+            5,
+            8,
+            9
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.0048828125,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 3.0517578125e-05,
+          "down_rank_signal_max_abs": 0.002044677734375,
+          "down_rank_error_over_signal": 0.014925373134328358,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 1,
+          "base_only_tokens": 0
+        }
+      },
+      "runs": [
+        {
+          "schedule": "aligned",
+          "block_n": 16,
+          "timing": {
+            "p20_us": 9.465600363910198,
+            "p50_us": 9.8879998549819,
+            "p80_us": 10.63039992004633,
+            "min_us": 9.312000125646591,
+            "max_us": 17.376000061631203,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 3.4332275390625e-05
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "aligned",
+        "block_n": 16,
+        "p50_us": 9.8879998549819,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}

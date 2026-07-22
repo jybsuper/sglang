@@ -186,6 +186,7 @@ def run_sgl_lora_moe_c2_experimental(
             virtual_expert_ids,
             num_pairs_post_padded,
             route_block_size_m=route_key[2],
+            token_lora_mapping=token_lora_mapping,
             block_size_n=block_size_n,
             num_warps=num_warps,
         )

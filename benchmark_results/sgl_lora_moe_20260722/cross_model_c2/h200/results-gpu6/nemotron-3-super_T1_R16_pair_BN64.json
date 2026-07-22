@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T09:46:00.832117+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "nemotron-3-super",
+      "tokens": "1",
+      "ranks": "16",
+      "schedules": "pair",
+      "block_n": "64",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_cross_model/h200_gpu6/isolated_full_v4/results/nemotron-3-super_T1_R16_pair_BN64.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "nemotron-3-super"
+      ],
+      "tokens": [
+        1
+      ],
+      "ranks": [
+        16
+      ],
+      "schedules": [
+        "pair"
+      ],
+      "block_n": [
+        64
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "nemotron-3-super",
+        "activation": "relu2",
+        "logical_i": 2688,
+        "physical_i": 2688,
+        "experts": 512,
+        "top_k": 22,
+        "tokens": 1,
+        "rank": 16
+      },
+      "semantic_contract": {
+        "activation": "relu2",
+        "logical_slices": [
+          "value"
+        ],
+        "lora_target_slices": [
+          "value"
+        ],
+        "logical_intermediate_size": 2688,
+        "physical_intermediate_size": 2688,
+        "provider_slice_order": [
+          "value"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "nongated_relu2_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "be4ac4f7a386666cbca99ad3eb6e6c9c579b1b22ff5009386b383b5b56a748d6",
+        "route_block_m": 16,
+        "pairs": 22,
+        "pairs_post_padded": 336
+      },
+      "checks": {
+        "pair-bn64": {
+          "sampled_pair_indices": [
+            0,
+            11,
+            20,
+            21
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.01007080078125,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 9.1552734375e-05,
+          "down_rank_signal_max_abs": 0.00506591796875,
+          "down_rank_error_over_signal": 0.018072289156626505,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 1,
+          "base_only_tokens": 0
+        }
+      },
+      "runs": [
+        {
+          "schedule": "pair",
+          "block_n": 64,
+          "timing": {
+            "p20_us": 53.94560098648071,
+            "p50_us": 54.4000007212162,
+            "p80_us": 54.83520030975342,
+            "min_us": 53.05600166320801,
+            "max_us": 58.04799869656563,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 0.0001373291015625
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "pair",
+        "block_n": 64,
+        "p50_us": 54.4000007212162,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}

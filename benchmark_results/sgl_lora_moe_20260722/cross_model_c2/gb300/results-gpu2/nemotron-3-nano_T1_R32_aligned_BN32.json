@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "environment": {
+    "timestamp_utc": "2026-07-22T10:11:38.739384+00:00",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu130",
+    "cuda_runtime": "13.0",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "git_revision": "working-tree",
+    "cli": {
+      "models": "nemotron-3-nano",
+      "tokens": "1",
+      "ranks": "32",
+      "schedules": "aligned",
+      "block_n": "32",
+      "execution": "cuda_graph",
+      "warmup": 5,
+      "samples": 20,
+      "shard_index": 0,
+      "num_shards": 1,
+      "skip_check": false,
+      "json_output": "/mirror/artifacts/sgl_lora_cross_model/gb300_gpu2/isolated_full_v4/results/nemotron-3-nano_T1_R32_aligned_BN32.json"
+    }
+  },
+  "scope": {
+    "kind": "benchmark_only_C2_K0_cross_model_guardrail",
+    "production_dispatch_changed": false,
+    "required_dimensions": {
+      "models": [
+        "nemotron-3-nano"
+      ],
+      "tokens": [
+        1
+      ],
+      "ranks": [
+        32
+      ],
+      "schedules": [
+        "aligned"
+      ],
+      "block_n": [
+        32
+      ]
+    },
+    "abi_conclusion": "provider_semantics_keyed_not_model_name_keyed: standard contiguous two-slice SwiGLU shares gated_swiglu_v1; one-slice ReLU2 and explicit logical/physical padding share nongated_relu2_v1; partial or reordered slices require another provider specialization"
+  },
+  "records": [
+    {
+      "case": {
+        "model": "nemotron-3-nano",
+        "activation": "relu2",
+        "logical_i": 1856,
+        "physical_i": 1920,
+        "experts": 128,
+        "top_k": 6,
+        "tokens": 1,
+        "rank": 32
+      },
+      "semantic_contract": {
+        "activation": "relu2",
+        "logical_slices": [
+          "value"
+        ],
+        "lora_target_slices": [
+          "value"
+        ],
+        "logical_intermediate_size": 1856,
+        "physical_intermediate_size": 1920,
+        "provider_slice_order": [
+          "value"
+        ],
+        "provider_row_domain": "masked_destination",
+        "provider_padding_policy": "zero",
+        "kernel_family": "nongated_relu2_v1"
+      },
+      "route": {
+        "pattern": "deterministic_lattice_with_invalid_guardrail",
+        "local_expert_offset": 11,
+        "hash_sha256_int32_row_major": "aa8de8da3acb9eef9baebf9e671e7e578d04c70ef7f5d3b8a4d845280d886cc7",
+        "route_block_m": 16,
+        "pairs": 6,
+        "pairs_post_padded": 80
+      },
+      "checks": {
+        "aligned-bn32": {
+          "sampled_pair_indices": [
+            0,
+            3,
+            4,
+            5
+          ],
+          "activation_max_abs_error": 0.0,
+          "activation_signal_max_abs": 0.01019287109375,
+          "activation_error_over_signal": 0.0,
+          "down_rank_max_abs_error": 7.62939453125e-05,
+          "down_rank_signal_max_abs": 0.0032806396484375,
+          "down_rank_error_over_signal": 0.023255813953488372,
+          "routed_scaling": {
+            "factor": 1.75,
+            "destination_dtype": "torch.float32",
+            "max_abs_error": 0.0,
+            "applied_stage": "down_b_finalize_not_fused_consumer"
+          },
+          "invalid_pairs": 1,
+          "base_only_tokens": 0
+        }
+      },
+      "runs": [
+        {
+          "schedule": "aligned",
+          "block_n": 32,
+          "timing": {
+            "p20_us": 11.59680001437664,
+            "p50_us": 12.32000021263957,
+            "p80_us": 13.023999892175198,
+            "min_us": 11.008000001311302,
+            "max_us": 23.615999147295952,
+            "num_samples": 20,
+            "launches_per_batch": 1
+          },
+          "graph_correctness": {
+            "activation_max_abs": 0.0,
+            "down_rank_max_abs": 6.103515625e-05
+          }
+        }
+      ],
+      "selected_schedule": {
+        "schedule": "aligned",
+        "block_n": 32,
+        "p50_us": 12.32000021263957,
+        "selection_scope": "device_and_resolved_shape_guardrail_only"
+      }
+    }
+  ]
+}
