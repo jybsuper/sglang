@@ -15,8 +15,10 @@ import torch
 import triton
 import triton.language as tl
 
-from sglang.jit_kernel.moe_align import moe_align_block_size as jit_moe_align_block_size
-from sglang.jit_kernel.utils import is_arch_support_pdl
+from sglang.kernels.jit.utils import is_arch_support_pdl
+from sglang.kernels.ops.moe.moe_align import (
+    moe_align_block_size as jit_moe_align_block_size,
+)
 from sglang.srt.utils import is_hip
 
 _PDL_POLICY: ContextVar[bool | None] = ContextVar("sgl_lora_pdl_policy", default=None)
