@@ -89,6 +89,7 @@ def _invoke_partial_c2(
     consumer_block_n: int,
     consumer_warps: int,
     down_finalize=None,
+    has_base_rows: bool = True,
 ) -> None:
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
     from sglang.srt.lora.sgl_lora.experimental_c2 import (
@@ -109,6 +110,7 @@ def _invoke_partial_c2(
         block_size_n=consumer_block_n,
         num_warps=consumer_warps,
         down_finalize=down_finalize,
+        has_base_rows=has_base_rows,
     )
     fixture.last_output = result.hidden_states
 
@@ -121,6 +123,7 @@ def _invoke_full_c2(
     consumer_warps: int,
     finalize_block_h: int,
     finalize_warps: int,
+    has_base_rows: bool = True,
 ) -> None:
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
     from sglang.srt.lora.sgl_lora.experimental_c2_full import (
@@ -142,6 +145,7 @@ def _invoke_full_c2(
         consumer_num_warps=consumer_warps,
         finalize_block_size_h=finalize_block_h,
         finalize_num_warps=finalize_warps,
+        has_base_rows=has_base_rows,
     )
     fixture.last_output = result.hidden_states
 

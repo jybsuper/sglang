@@ -31,6 +31,7 @@ def run_sgl_lora_moe_c2_full_experimental(
     consumer_num_warps: int = 4,
     finalize_block_size_h: int = 32,
     finalize_num_warps: int = 4,
+    has_base_rows: bool = True,
 ) -> StandardCombineInput:
     """Run complete serial C2 without changing serving dispatch."""
     from sglang.srt.lora.sgl_lora.experimental_c2 import (
@@ -83,6 +84,7 @@ def run_sgl_lora_moe_c2_full_experimental(
         block_size_n=consumer_block_size_n,
         num_warps=consumer_num_warps,
         down_finalize=down_finalize,
+        has_base_rows=has_base_rows,
     )
 
 
