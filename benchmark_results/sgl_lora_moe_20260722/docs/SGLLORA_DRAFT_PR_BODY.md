@@ -53,8 +53,9 @@ negative results remain the next provider-fusion/launch-reduction target.
 
 ## Review map
 
-Final rebased source: `f2f406e056` (replace after the last upstream rebase).
-The final commit hashes and recommended review groups are filled after that rebase:
+Final tested source: `f2f406e056`; evidence/docs packaging: `78c1be3c84`.
+The exact 63-commit review order is in
+[`REBASED_COMMIT_MAP.md`](https://github.com/jybsuper/sglang/blob/sgl-lora/benchmark_results/sgl_lora_moe_20260722/REBASED_COMMIT_MAP.md):
 
 1. Engine and semantic ABI.
 2. Benchmark methodology and correctness repairs.
@@ -70,8 +71,17 @@ The final PR update includes the post-rebase smoke, D0/E0/lifecycle matrices,
 profiler artifacts, source state, and SHA-256 manifest. Shared closure already records
 9 host tests plus 56 tests and 10 subtests on each device. The Marlin per-invocation
 workspace/dirty-destination repair passed the terminal `f2f406e056` H200 and GB300 smoke.
+The final exact-source shards passed 128 branch-relevant GPU tests plus 185 host
+tests on H200 and 129 plus 185 on GB300, followed by real TP8/EP2/MoE-DP2 and
+TP4/EP4 NCCL graph replays. The checksummed bundle is
+[`benchmark_results/sgl_lora_moe_20260722/`](https://github.com/jybsuper/sglang/tree/sgl-lora/benchmark_results/sgl_lora_moe_20260722).
 Canonical results are unprofiled; Nsight Systems verifies stream/graph structure and
 Nsight Compute explains shortlisted kernels.
+
+A broader, non-LoRA GB300 FP8 JIT/AOT bit-exact diagnostic also found an upstream
+unmasked-path mismatch; one case reproduces against official main while every
+branch-added masked-layout/provider case passes. The matched control and raw logs
+are retained under `final_validation/` and excluded from LoRA acceptance counts.
 
 ## Deliberate follow-on scope
 

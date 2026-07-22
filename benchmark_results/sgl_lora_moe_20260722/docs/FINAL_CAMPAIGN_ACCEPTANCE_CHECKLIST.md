@@ -5,7 +5,7 @@ new architecture document. The final architecture remains
 `sgl_lora_lifecycle_and_orchestration_design.md`; the final evidence narrative
 remains `sgl_lora_moe_kernel_benchmark_architecture_audit.md`.
 
-Final rebased source placeholder: `f2f406e056` (replace after the terminal rebase).
+Final tested source: `f2f406e056`, rebased on OSS main `4eaa5ca651`.
 
 ## Correctness and review findings
 
@@ -69,7 +69,7 @@ Final rebased source placeholder: `f2f406e056` (replace after the terminal rebas
 - [x] Update the review-disposition ledger with final commit hashes.
 - [x] Remove stale current-status claims from plan/audit/worklog/design docs.
 - [x] Run final focused CPU tests, formatting, source-isolation audit, and GPU smoke.
-- [ ] Push the branch and update draft PR #31882 with the commit/evidence map.
+- [x] Push the branch and update draft PR #31882 with the commit/evidence map.
 
 Phase 2 dense/special-layer execution, Phase 3 adapter residency/control-plane
 redesign, MTP/EAGLE, advanced A2A, and broad production model graduation are
