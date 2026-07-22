@@ -62,6 +62,9 @@ def test_indexed_a_cli_defaults_to_production_and_auto_configs():
     assert args.route_pattern == "lattice_control"
     assert args.route_seed == 0
     assert args.all_base_sgl_c0_sentinel is False
+    assert args.cache_state == "hot"
+    assert args.pipeline_order == "forward"
+    assert args.host_load_workers == 0
 
     forced = parse_args(["--c1-overlap-policy", "force"])
     assert forced.c1_overlap_policy == "force"
