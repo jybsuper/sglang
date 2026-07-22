@@ -95,6 +95,35 @@ P0_CELLS: tuple[tuple[str, int, int, int, int, int, str, str], ...] = (
 )
 
 
+# (id, T, L_active, B_base, L_capacity, R, R_max, phase)
+#
+# These are deliberately a compact cross product: the two required R<R_max
+# anchors, the three adapter/base occupancy classes that change dispatch work,
+# and one representative decode/prefill shape.  The benchmark driver compares
+# padded-R_max and load-time rank-packed execution for each resolved case.
+MIXED_RANK_CELLS: tuple[tuple[str, int, int, int, int, int, int, str], ...] = tuple(
+    (
+        f"{phase}-{occupancy}-r{rank}-rmax128",
+        tokens,
+        active,
+        base,
+        capacity,
+        rank,
+        128,
+        phase,
+    )
+    for phase, tokens in (("decode", 32), ("prefill", 2048))
+    for occupancy, active, base, capacity in (
+        ("all-base", 0, 1, 8),
+        ("mixed", 1, 1, 8),
+        ("full-lora", 8, 0, 8),
+    )
+    # R128 is the same-physical-rank null control: both representations execute
+    # identical tensor shapes and quantify fixture/process timing noise.
+    for rank in (32, 64, 128)
+)
+
+
 def get_model_shape(model_key: str) -> ModelShape:
     try:
         return MODEL_PRESETS[model_key]
@@ -167,6 +196,52 @@ def model_shape_cases(device: Device) -> tuple[MoeLoraBenchCase, ...]:
                 graph_mode="eager",
                 routing="deterministic_lattice",
                 cache_state="cold",
+            )
+        )
+    return tuple(cases)
+
+
+def mixed_rank_cases(
+    device: Device,
+    *,
+    model_key: str = "qwen3.5-35b-a3b",
+) -> tuple[MoeLoraBenchCase, ...]:
+    """Required core ``(R, R_max)`` cases for the rank-policy lane."""
+
+    model = get_model_shape(model_key)
+    cases = []
+    for (
+        cell_id,
+        tokens,
+        active,
+        base,
+        capacity,
+        rank,
+        max_rank,
+        phase,
+    ) in MIXED_RANK_CELLS:
+        cases.append(
+            MoeLoraBenchCase(
+                case_id=f"mixed-rank-{model.key}-{cell_id}-{device}",
+                model=model,
+                adapters=AdapterBatch(
+                    l_active=active,
+                    b_base=base,
+                    l_capacity=capacity,
+                    rank=rank,
+                    max_rank=max_rank,
+                    physical_rank=max_rank,
+                ),
+                t_local=tokens,
+                phase=phase,
+                device=device,
+                provider="deepgemm_bf16",
+                scope="M0",
+                stage="M0",
+                pipeline="N0" if active == 0 else "C0",
+                graph_mode="eager",
+                routing="uniform_iid_without_replacement",
+                cache_state="producer",
             )
         )
     return tuple(cases)

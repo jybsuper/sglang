@@ -6,6 +6,7 @@ from benchmark.kernels.lora_moe.cases import AdapterBatch
 from benchmark.kernels.lora_moe.matrix import (
     MODEL_PRESETS,
     get_model_shape,
+    mixed_rank_cases,
     model_shape_cases,
     p0_cases,
 )
@@ -124,3 +125,32 @@ def test_case_records_are_frozen_and_scalar_resolved():
 def test_unknown_model_has_a_clear_error():
     with pytest.raises(ValueError, match="unknown model preset"):
         get_model_shape("missing")
+
+
+def test_mixed_rank_cells_cover_required_rank_occupancy_and_phase_axes():
+    cases = mixed_rank_cases("h200")
+    assert len(cases) == 18
+    observed = {
+        (
+            case.phase,
+            case.adapters.rank,
+            case.adapters.max_rank,
+            case.adapters.l_active,
+            case.adapters.b_base,
+            case.adapters.l_capacity,
+        )
+        for case in cases
+    }
+    assert observed == {
+        (phase, rank, 128, active, base, 8)
+        for phase in ("decode", "prefill")
+        for rank in (32, 64, 128)
+        for active, base in ((0, 1), (1, 1), (8, 0))
+    }
+    assert {case.t_local for case in cases if case.phase == "decode"} == {32}
+    assert {case.t_local for case in cases if case.phase == "prefill"} == {2048}
+    assert all(case.adapters.physical_rank == 128 for case in cases)
+    assert all(
+        case.pipeline == ("N0" if case.adapters.l_active == 0 else "C0")
+        for case in cases
+    )
