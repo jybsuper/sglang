@@ -1035,6 +1035,18 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         down_lora_b_weights: torch.Tensor = None,
     ):
         """Set LoRA weight tensors from memory pool."""
+        if self._lora_execution_engine == "sgl_lora":
+            from sglang.srt.lora.sgl_lora.lora_layer import (
+                validate_sgl_lora_factor_dtypes,
+            )
+
+            validate_sgl_lora_factor_dtypes(
+                self._sgl_lora_base_gemm.contract,
+                gate_up_lora_a_weights=gate_up_lora_a_weights,
+                gate_up_lora_b_weights=gate_up_lora_b_weights,
+                down_lora_a_weights=down_lora_a_weights,
+                down_lora_b_weights=down_lora_b_weights,
+            )
         self.set_lora = True
         self.gate_up_lora_a_weights = gate_up_lora_a_weights
         self.gate_up_lora_b_weights = gate_up_lora_b_weights

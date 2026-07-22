@@ -1088,6 +1088,11 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
             or ws.topk_weights is None
         ):
             raise RuntimeError("Marlin routing plan is incomplete")
+        # Marlin's split-K path atomically accumulates into the destination and
+        # skips invalid/padded rows.  The stock runner therefore zeroes its
+        # shared W13/W2 cache before every invocation; preserve that contract
+        # even when this provider is called with a recycled runner buffer.
+        out.zero_()
         self._gemm(
             activation,
             out,

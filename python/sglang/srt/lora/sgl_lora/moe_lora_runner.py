@@ -98,28 +98,6 @@ def run_sgl_lora_moe(
     output_dtype = hidden_states.dtype if output_dtype is None else output_dtype
     base.validate_runtime_inputs(hidden_states, output_dtype=output_dtype)
 
-    # Quantized base weights never change the LoRA arithmetic contract.  Keep
-    # every delta and down-A source in BF16, including when the final consumer
-    # asks for FP32 (for example a DSA-style accumulation destination).
-    for weight_name in (
-        "gate_up_lora_a_weights",
-        "gate_up_lora_b_weights",
-        "down_lora_a_weights",
-        "down_lora_b_weights",
-    ):
-        weight_or_weights = getattr(lora_info, weight_name)
-        weights = (
-            weight_or_weights
-            if isinstance(weight_or_weights, (tuple, list))
-            else (weight_or_weights,)
-        )
-        for weight in weights:
-            if weight.dtype != base.contract.lora_delta_dtype:
-                raise TypeError(
-                    f"sgl_lora requires {base.contract.lora_delta_dtype} "
-                    f"{weight_name}, got {weight.dtype}"
-                )
-
     num_tokens = hidden_states.shape[0]
     inter = quant_info.intermediate_size
 
