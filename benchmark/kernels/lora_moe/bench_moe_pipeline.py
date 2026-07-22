@@ -67,6 +67,15 @@ from benchmark.kernels.lora_moe.profiling import (
 
 PIPELINES = ("N0", "C0", "C1")
 C1_OVERLAP_POLICIES = ("production_auto", "force")
+B_VARIANTS = ("production", "direct", "generic")
+_B_CONFIG_FIELDS = (
+    "BLOCK_SIZE_M",
+    "BLOCK_SIZE_N",
+    "BLOCK_SIZE_K",
+    "GROUP_SIZE_M",
+    "num_warps",
+    "num_stages",
+)
 
 _INDEXED_AUTO_CONFIG_KEYS = {
     "h200": {
@@ -95,6 +104,80 @@ class IndexedAConfigs:
             "gate": {"selection": self.gate_source, **asdict(self.gate)},
             "down": {"selection": self.down_source, **asdict(self.down)},
         }
+
+
+@dataclass(frozen=True, slots=True)
+class BScheduleOverrides:
+    gate_variant: str = "production"
+    down_variant: str = "production"
+    gate_config: dict[str, int] | None = None
+    down_config: dict[str, int] | None = None
+
+    @property
+    def applied(self) -> bool:
+        return (
+            self.gate_variant != "production"
+            or self.down_variant != "production"
+            or self.gate_config is not None
+            or self.down_config is not None
+        )
+
+    @property
+    def routing_config_overridden(self) -> bool:
+        return self.gate_config is not None or self.down_config is not None
+
+    def for_call(self, *, mul_routed_weight: bool) -> tuple[str, dict[str, int] | None]:
+        if mul_routed_weight:
+            return self.down_variant, self.down_config
+        return self.gate_variant, self.gate_config
+
+    def metadata(
+        self,
+        *,
+        production_variant: str | None = None,
+        shared_outer_b: bool = False,
+    ) -> dict[str, object]:
+        def site_metadata(
+            variant: str, config: dict[str, int] | None
+        ) -> dict[str, object]:
+            selected = production_variant if variant == "production" else variant
+            effective = (
+                "generic" if selected == "direct" and shared_outer_b else selected
+            )
+            return {
+                "requested_variant": variant,
+                "effective_variant": effective,
+                "config": config,
+                "routing_config_overridden": config is not None,
+            }
+
+        return {
+            "gate": site_metadata(self.gate_variant, self.gate_config),
+            "down": site_metadata(self.down_variant, self.down_config),
+            "applied": self.applied,
+            "benchmark_only": self.applied,
+            "routing_config_overridden": self.routing_config_overridden,
+            "substitution_scope": (
+                "gate_and_down_lora_b_family_and_config_only"
+                if self.applied
+                else "none"
+            ),
+            "production_policy_changed": False,
+        }
+
+
+def _parse_b_config(value: str | None) -> dict[str, int] | None:
+    if value is None:
+        return None
+    try:
+        values = tuple(int(part) for part in value.split(","))
+    except ValueError as exc:
+        raise ValueError("B config must contain six comma-separated integers") from exc
+    if len(values) != len(_B_CONFIG_FIELDS) or any(item <= 0 for item in values):
+        raise ValueError(
+            "B config must be positive BM,BN,BK,GROUP_SIZE_M,num_warps,num_stages"
+        )
+    return dict(zip(_B_CONFIG_FIELDS, values, strict=True))
 
 
 def _smoke_case(device: str) -> MoeLoraBenchCase:
@@ -565,15 +648,68 @@ def _build_fixture(
 
 
 @contextmanager
+def _exit_context_normally(manager) -> Iterator[None]:
+    """Resume a generator context normally even when the wrapped call raises."""
+    manager.__enter__()
+    try:
+        yield
+    finally:
+        manager.__exit__(None, None, None)
+
+
+@contextmanager
+def _held_b_config(config: dict[str, int] | None) -> Iterator[None]:
+    if config is None:
+        yield
+        return
+    from sglang.srt.layers.moe.moe_runner.triton_utils import override_config
+
+    with _exit_context_normally(override_config(config)):
+        yield
+
+
+@contextmanager
+def _b_schedule_override(schedules: BScheduleOverrides) -> Iterator[None]:
+    """Override only the benchmarked B family/config at each LoRA MoE site."""
+    if not schedules.applied:
+        yield
+        return
+
+    from sglang.srt.lora.sgl_lora.triton_ops import virtual_experts
+
+    wrapped_ab = virtual_experts.merged_experts_fused_moe_lora_add
+
+    def scheduled_b(*args, **kwargs):
+        if args:
+            raise TypeError("B schedule benchmark wrapper requires keyword arguments")
+        variant, config = schedules.for_call(
+            mul_routed_weight=kwargs["mul_routed_weight"]
+        )
+        call_kwargs = dict(kwargs)
+        if variant != "production":
+            call_kwargs["use_direct_expand_add"] = variant == "direct"
+        with _held_b_config(config):
+            return wrapped_ab(**call_kwargs)
+
+    virtual_experts.merged_experts_fused_moe_lora_add = scheduled_b
+    try:
+        yield
+    finally:
+        virtual_experts.merged_experts_fused_moe_lora_add = wrapped_ab
+
+
+@contextmanager
 def _indexed_a_override(
     fixture: PipelineFixture, configs: IndexedAConfigs
 ) -> Iterator[None]:
-    """Replace only LoRA-A inside the production A+B entrypoint.
+    """Replace only LoRA-A inside the delegated A+B entrypoint.
 
     C1's ``stage="routing"`` call deliberately stays production-equivalent. It
     therefore retains the now-unused production A route prewarm as conservative
     overhead, while the subsequent ``stage="all"`` call uses indexed A followed
-    by the unchanged production B ``stage="expand"`` path.
+    by the delegated B ``stage="expand"`` path. A benchmark-only B schedule may
+    be installed beneath this wrapper; its configuration is then held only while
+    delegated routing/B work runs, never while indexed A runs.
     """
     from benchmark.kernels.lora_moe.bench_indexed_shrink import (
         invoke_indexed_lora_a,
@@ -584,14 +720,14 @@ def _indexed_a_override(
     if down_intermediate is None:
         raise RuntimeError("indexed A requires a retained down intermediate")
 
-    production_ab = virtual_experts.merged_experts_fused_moe_lora_add
+    delegated_ab = virtual_experts.merged_experts_fused_moe_lora_add
 
-    def indexed_a_production_b(*args, **kwargs):
+    def indexed_a_delegated_b(*args, **kwargs):
         if args:
             raise TypeError("indexed A benchmark wrapper requires keyword arguments")
         stage = kwargs.get("stage", "all")
         if stage == "routing":
-            return production_ab(**kwargs)
+            return delegated_ab(**kwargs)
         if stage != "all":
             raise ValueError(
                 "indexed A benchmark wrapper supports only stage='routing' or "
@@ -625,13 +761,13 @@ def _indexed_a_override(
         expand_kwargs = dict(kwargs)
         expand_kwargs["stage"] = "expand"
         expand_kwargs["intermediate_buffer"] = intermediate
-        return production_ab(**expand_kwargs)
+        return delegated_ab(**expand_kwargs)
 
-    virtual_experts.merged_experts_fused_moe_lora_add = indexed_a_production_b
+    virtual_experts.merged_experts_fused_moe_lora_add = indexed_a_delegated_b
     try:
         yield
     finally:
-        virtual_experts.merged_experts_fused_moe_lora_add = production_ab
+        virtual_experts.merged_experts_fused_moe_lora_add = delegated_ab
 
 
 def _run_checked(fixture: PipelineFixture, pipeline: str) -> torch.Tensor:
@@ -665,11 +801,43 @@ def _max_abs_diff(lhs: torch.Tensor, rhs: torch.Tensor) -> float:
     return float((lhs.float() - rhs.float()).abs().max().item())
 
 
+def _check_lora_delta(
+    checks: dict[str, object],
+    prefix: str,
+    reference: torch.Tensor,
+    candidate: torch.Tensor,
+    base_only: torch.Tensor,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """Compare active LoRA deltas so the much larger base cannot mask errors."""
+    reference_delta = reference.float() - base_only.float()
+    candidate_delta = candidate.float() - base_only.float()
+    signal = float(reference_delta.abs().max().item())
+    error = _max_abs_diff(reference_delta, candidate_delta)
+    checks[f"{prefix}_reference_delta_max_abs"] = signal
+    checks[f"{prefix}_candidate_delta_max_abs"] = float(
+        candidate_delta.abs().max().item()
+    )
+    checks[f"{prefix}_delta_max_abs_error"] = error
+    checks[f"{prefix}_delta_error_over_signal"] = error / signal if signal else None
+    checks[f"{prefix}_delta_rtol"] = rtol
+    checks[f"{prefix}_delta_atol"] = atol
+    torch.testing.assert_close(
+        reference_delta,
+        candidate_delta,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
 def _check_pipelines(
     fixture: PipelineFixture,
     pipelines: tuple[str, ...],
     *,
     production_c0_reference: torch.Tensor | None = None,
+    pre_b_override_reference: torch.Tensor | None = None,
 ) -> dict[str, object]:
     checks: dict[str, object] = {
         "n0_role": "matched_base_only_latency_reference_not_active_lora_reference",
@@ -700,13 +868,26 @@ def _check_pipelines(
 
         serial = _run_checked(fixture, "C0")
         if production_c0_reference is not None:
-            checks["production_c0_indexed_c0_max_abs"] = _max_abs_diff(
+            checks["production_c0_candidate_c0_max_abs"] = _max_abs_diff(
                 production_c0_reference, serial
             )
-            checks["production_c0_indexed_c0_rtol"] = 6e-2
-            checks["production_c0_indexed_c0_atol"] = 6e-2
+            checks["production_c0_candidate_c0_rtol"] = 6e-2
+            checks["production_c0_candidate_c0_atol"] = 6e-2
             torch.testing.assert_close(
                 production_c0_reference, serial, rtol=6e-2, atol=6e-2
+            )
+        if pre_b_override_reference is not None:
+            checks["pre_b_override_candidate_c0_max_abs"] = _max_abs_diff(
+                pre_b_override_reference, serial
+            )
+            _check_lora_delta(
+                checks,
+                "pre_b_override_candidate_c0",
+                pre_b_override_reference,
+                serial,
+                sgl_base_only,
+                rtol=6e-2,
+                atol=1.5e-3,
             )
         overlap = _run_checked(fixture, "C1")
         checks["c0_c1_max_abs"] = _max_abs_diff(serial, overlap)
@@ -813,6 +994,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="AUTO_OR_KEY",
         help="indexed down-A schedule (default: device-specific cold-cache shortlist)",
     )
+    parser.add_argument(
+        "--gate-b-variant",
+        choices=B_VARIANTS,
+        default="production",
+        help="gate/up LoRA-B family; benchmark-only when not production",
+    )
+    parser.add_argument(
+        "--down-b-variant",
+        choices=B_VARIANTS,
+        default="production",
+        help="down LoRA-B family; benchmark-only when not production",
+    )
+    parser.add_argument(
+        "--gate-b-config",
+        metavar="BM,BN,BK,G,W,S",
+        help="optional explicit gate/up B launch config",
+    )
+    parser.add_argument(
+        "--down-b-config",
+        metavar="BM,BN,BK,G,W,S",
+        help="optional explicit down B launch config",
+    )
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument("--warmup", type=int, default=10)
@@ -831,6 +1034,7 @@ def _benchmark_pipeline(
     *,
     check: bool,
     a_provider: str = "production",
+    b_schedules: BScheduleOverrides = BScheduleOverrides(),
 ) -> dict[str, object]:
     from sglang.srt.model_executor.runner_utils.capture_mode import model_capture_mode
 
@@ -872,11 +1076,25 @@ def _benchmark_pipeline(
             ),
         }[pipeline],
         "a_provider": effective_a_provider,
+        "b_schedule": (
+            b_schedules.metadata(
+                production_variant=(
+                    "direct" if case.adapters.max_rank <= 64 else "generic"
+                ),
+                shared_outer_b=case.adapters.shared_outer,
+            )
+            if pipeline != "N0"
+            else "not_applicable"
+        ),
         "retained_components": (
             None
             if pipeline == "N0"
             else [
-                "production_lora_b",
+                (
+                    "production_lora_b"
+                    if not b_schedules.applied
+                    else "production_lora_b_with_benchmark_schedule_override"
+                ),
                 "production_swiglu_activation",
                 "production_deepgemm_base",
             ]
@@ -908,11 +1126,11 @@ def _benchmark_pipeline(
         graph_diff = _max_abs_diff(eager_reference, fixture.last_output)
         result["graph_correctness"] = {
             "eager_graph_max_abs": graph_diff,
-            "rtol": 6e-2,
-            "atol": 6e-2,
+            "rtol": 0.0,
+            "atol": 3e-3,
         }
         torch.testing.assert_close(
-            eager_reference, fixture.last_output, rtol=6e-2, atol=6e-2
+            eager_reference, fixture.last_output, rtol=0.0, atol=3e-3
         )
 
     if run_config.mode == "time":
@@ -933,6 +1151,7 @@ def _benchmark_pipeline(
         fixture.reset_hidden()
         label = (
             f"sgl_lora_moe::M0::{pipeline}::{case.case_id}::A={effective_a_provider}::"
+            f"GateB={b_schedules.gate_variant}::DownB={b_schedules.down_variant}::"
             f"C1_POLICY={two_stream['policy']}::overlap={two_stream_effective}::"
             f"{run_config.execution}::pdl=auto"
         )
@@ -970,7 +1189,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         indexed_configs = _resolve_indexed_a_configs(
             device, args.indexed_gate_config, args.indexed_down_config
         )
+    b_schedules = BScheduleOverrides(
+        gate_variant=args.gate_b_variant,
+        down_variant=args.down_b_variant,
+        gate_config=_parse_b_config(args.gate_b_config),
+        down_config=_parse_b_config(args.down_b_config),
+    )
     pipelines = _resolve_pipelines(args.pipeline, case)
+    if b_schedules.applied and not any(pipeline != "N0" for pipeline in pipelines):
+        raise ValueError("B schedule overrides require a benchmarked LoRA pipeline")
     if args.mode != "time" and len(pipelines) != 1:
         raise ValueError("Nsight capture requires one explicit --pipeline")
     if (
@@ -1020,6 +1247,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif indexed_applied:
             production_c0_reference_status = {"status": "skipped"}
 
+        # Capture the same A provider with production B before installing the
+        # candidate B schedule. This becomes the chain-level semantic oracle.
+        # Indexed A is entered temporarily, then re-entered outside the B
+        # configuration below so its launch is never affected by that global
+        # benchmark override.
+        pre_b_override_reference = None
+        pre_b_override_reference_status: dict[str, object] = {
+            "status": "not_applicable"
+        }
+        if b_schedules.applied and need_lora and not args.skip_check:
+            if indexed_applied:
+                assert indexed_configs is not None
+                with _indexed_a_override(fixture, indexed_configs):
+                    (
+                        pre_b_override_reference,
+                        pre_b_override_reference_status,
+                    ) = _capture_production_c0_reference(fixture)
+            else:
+                (
+                    pre_b_override_reference,
+                    pre_b_override_reference_status,
+                ) = _capture_production_c0_reference(fixture)
+        elif b_schedules.applied and need_lora:
+            pre_b_override_reference_status = {"status": "skipped"}
+
+        # Install B first and indexed A second: indexed A is the outer call
+        # wrapper and delegates only routing/B work into the held B config.
+        if b_schedules.applied:
+            stack.enter_context(_b_schedule_override(b_schedules))
         if indexed_applied:
             assert indexed_configs is not None
             stack.enter_context(_indexed_a_override(fixture, indexed_configs))
@@ -1031,22 +1287,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fixture,
                 pipelines,
                 production_c0_reference=production_c0_reference,
+                pre_b_override_reference=pre_b_override_reference,
             )
         )
         if indexed_applied:
             correctness["production_c0_reference"] = production_c0_reference_status
+        if b_schedules.applied:
+            correctness["pre_b_override_reference"] = pre_b_override_reference_status
         torch.cuda.synchronize()
+
+        substitutions = []
+        if indexed_applied:
+            substitutions.append("indexed A")
+        if b_schedules.applied:
+            substitutions.append("benchmark-selected B schedules")
+        substitution_text = (
+            f" with {' and '.join(substitutions)}" if substitutions else ""
+        )
+        b_routing = (
+            "benchmark_selected_b_routing"
+            if b_schedules.routing_config_overridden
+            else "production_b_routing"
+        )
 
         result: dict[str, object] = {
             "environment": _environment(args),
             "case": _case_summary(case),
             "scope": "M0",
             "comparison": (
-                "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A; "
-                f"C1 policy={args.c1_overlap_policy}"
-                if indexed_applied
-                else "matched DeepGEMM N0 versus SGL LoRA C0/C1; "
-                f"C1 policy={args.c1_overlap_policy}"
+                "matched DeepGEMM N0 versus SGL LoRA C0/C1"
+                f"{substitution_text}; C1 policy={args.c1_overlap_policy}"
             ),
             "execution_policy": {
                 **c1_two_stream,
@@ -1068,7 +1338,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 "retained_components": (
                     [
-                        "production_lora_b",
+                        (
+                            "production_lora_b"
+                            if not b_schedules.applied
+                            else "production_lora_b_with_benchmark_schedule_override"
+                        ),
                         "production_swiglu_activation",
                         "production_deepgemm_base",
                     ]
@@ -1090,14 +1364,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 ),
             },
+            "b_schedule": b_schedules.metadata(
+                production_variant=(
+                    "direct" if case.adapters.max_rank <= 64 else "generic"
+                ),
+                shared_outer_b=case.adapters.shared_outer,
+            ),
             "route_inclusion": (
-                "raw_route_indexed_a_plus_production_b_routing; effective C1 "
+                f"raw_route_indexed_a_plus_{b_routing}; effective C1 "
                 "retains conservative unused production A route prewarm"
                 if effective_indexed_c1
                 else (
-                    "raw_route_indexed_a_plus_production_b_routing"
+                    f"raw_route_indexed_a_plus_{b_routing}"
                     if indexed_applied
-                    else "full_pipeline_including_lora_route_planning"
+                    else (
+                        "full_pipeline_including_benchmark_selected_b_route_planning"
+                        if b_schedules.routing_config_overridden
+                        else "full_pipeline_including_lora_route_planning"
+                    )
                 )
             ),
             "correctness": correctness,
@@ -1125,6 +1409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "tp1_ep1_moe_dp1_only",
                 "non_gated_models_pending",
                 "fp8_nvfp4_w4a16_pending",
+                *(["benchmark_b_schedule_override"] if b_schedules.applied else []),
                 *(
                     [
                         "indexed_a_per_expert_only",
@@ -1147,6 +1432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 case,
                 check=not args.skip_check,
                 a_provider=args.a_provider,
+                b_schedules=b_schedules,
             )
 
         if args.json_output is not None:

@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -8,8 +9,12 @@ import pytest
 import benchmark.kernels.lora_moe.bench_indexed_shrink as indexed_shrink
 import benchmark.kernels.lora_moe.bench_moe_pipeline as moe_pipeline
 from benchmark.kernels.lora_moe.bench_moe_pipeline import (
+    BScheduleOverrides,
+    _b_schedule_override,
     _capture_production_c0_reference,
+    _exit_context_normally,
     _indexed_a_override,
+    _parse_b_config,
     _pipeline_two_stream_metadata,
     _resolve_c1_overlap,
     _resolve_indexed_a_configs,
@@ -35,9 +40,54 @@ def test_indexed_a_cli_defaults_to_production_and_auto_configs():
     assert args.indexed_gate_config == "auto"
     assert args.indexed_down_config == "auto"
     assert args.c1_overlap_policy == "production_auto"
+    assert args.gate_b_variant == "production"
+    assert args.down_b_variant == "production"
+    assert args.gate_b_config is None
+    assert args.down_b_config is None
 
     forced = parse_args(["--c1-overlap-policy", "force"])
     assert forced.c1_overlap_policy == "force"
+
+
+def test_b_schedule_cli_and_config_parser():
+    args = parse_args(
+        [
+            "--gate-b-variant",
+            "direct",
+            "--down-b-variant",
+            "generic",
+            "--gate-b-config",
+            "16,128,64,1,4,1",
+            "--down-b-config",
+            "16,128,32,8,4,3",
+        ]
+    )
+    assert args.gate_b_variant == "direct"
+    assert args.down_b_variant == "generic"
+    assert _parse_b_config(args.gate_b_config) == {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 64,
+        "GROUP_SIZE_M": 1,
+        "num_warps": 4,
+        "num_stages": 1,
+    }
+    assert _parse_b_config(args.down_b_config)["GROUP_SIZE_M"] == 8
+    assert _parse_b_config(None) is None
+
+    for malformed in ("16,32", "16,32,64,1,4,0", "16,32,x,1,4,3"):
+        with pytest.raises(ValueError, match="B config"):
+            _parse_b_config(malformed)
+
+
+def test_b_schedule_metadata_distinguishes_routing_and_shared_outer_fallback():
+    family_only = BScheduleOverrides(gate_variant="direct")
+    metadata = family_only.metadata(production_variant="generic", shared_outer_b=True)
+    assert not family_only.routing_config_overridden
+    assert not metadata["routing_config_overridden"]
+    assert metadata["gate"]["requested_variant"] == "direct"
+    assert metadata["gate"]["effective_variant"] == "generic"
+    assert metadata["down"]["effective_variant"] == "generic"
 
 
 def test_production_two_stream_auto_policy_boundary():
@@ -256,3 +306,132 @@ def test_indexed_a_wrapper_replaces_only_all_stage_and_reuses_production_b(monke
     ]
     assert indexed_calls[0][1]["config"].key == "bn32-bk128-w4"
     assert indexed_calls[1][1]["config"].key == "bn16-bk128-w8"
+
+
+def test_b_schedule_wrapper_selects_gate_and_down_independently(monkeypatch):
+    production_calls = []
+    active_configs = []
+
+    def fake_production(*args, **kwargs):
+        production_calls.append((kwargs, tuple(active_configs)))
+        return kwargs["stage"]
+
+    @contextmanager
+    def fake_held_config(config):
+        active_configs.append(config)
+        try:
+            yield
+        finally:
+            active_configs.pop()
+
+    virtual_experts = _install_fake_virtual_experts(monkeypatch, fake_production)
+    monkeypatch.setattr(moe_pipeline, "_held_b_config", fake_held_config)
+    gate_config = _parse_b_config("16,128,64,1,4,1")
+    down_config = _parse_b_config("16,128,32,8,4,3")
+    schedules = BScheduleOverrides(
+        gate_variant="direct",
+        down_variant="generic",
+        gate_config=gate_config,
+        down_config=down_config,
+    )
+
+    with _b_schedule_override(schedules):
+        wrapped = virtual_experts.merged_experts_fused_moe_lora_add
+        assert wrapped(stage="routing", mul_routed_weight=False) == "routing"
+        assert wrapped(stage="expand", mul_routed_weight=True) == "expand"
+
+    assert virtual_experts.merged_experts_fused_moe_lora_add is fake_production
+    assert production_calls == [
+        (
+            {
+                "stage": "routing",
+                "mul_routed_weight": False,
+                "use_direct_expand_add": True,
+            },
+            (gate_config,),
+        ),
+        (
+            {
+                "stage": "expand",
+                "mul_routed_weight": True,
+                "use_direct_expand_add": False,
+            },
+            (down_config,),
+        ),
+    ]
+
+
+def test_b_schedule_is_nested_beneath_indexed_a(monkeypatch):
+    indexed_configs_seen = []
+    delegated_calls = []
+    active_configs = []
+
+    def fake_indexed(*args, **kwargs):
+        indexed_configs_seen.append((kwargs["config"], tuple(active_configs)))
+
+    def fake_production(*args, **kwargs):
+        delegated_calls.append((kwargs.copy(), tuple(active_configs)))
+        return kwargs["stage"]
+
+    @contextmanager
+    def fake_held_config(config):
+        active_configs.append(config)
+        try:
+            yield
+        finally:
+            active_configs.pop()
+
+    monkeypatch.setattr(indexed_shrink, "invoke_indexed_lora_a", fake_indexed)
+    monkeypatch.setattr(moe_pipeline, "_held_b_config", fake_held_config)
+    virtual_experts = _install_fake_virtual_experts(monkeypatch, fake_production)
+    indexed_configs = _resolve_indexed_a_configs("h200", "auto", "auto")
+    fixture = SimpleNamespace(indexed_down_intermediate=object())
+    gate_config = _parse_b_config("16,128,64,1,4,1")
+    schedules = BScheduleOverrides(
+        gate_variant="direct",
+        gate_config=gate_config,
+    )
+    common = {
+        "output": object(),
+        "hidden_states": object(),
+        "lora_a": object(),
+        "lora_b": object(),
+        "topk_ids": object(),
+        "topk_weights": object(),
+        "token_lora_mapping": object(),
+        "mul_routed_weight": False,
+        "experts_shared_outer_loras_a": False,
+        "experts_shared_outer_loras_b": False,
+        "local_expert_offset": 0,
+        "num_output_slices": 2,
+        "intermediate_buffer": object(),
+    }
+
+    # The entry order matches main(): B first, then indexed A as the outer wrapper.
+    with _b_schedule_override(schedules):
+        with _indexed_a_override(fixture, indexed_configs):
+            wrapped = virtual_experts.merged_experts_fused_moe_lora_add
+            assert wrapped(**common) == "expand"
+            assert wrapped(**{**common, "stage": "routing"}) == "routing"
+
+    assert virtual_experts.merged_experts_fused_moe_lora_add is fake_production
+    assert indexed_configs_seen == [(indexed_configs.gate, ())]
+    assert [call[0]["stage"] for call in delegated_calls] == ["expand", "routing"]
+    assert all(call[0]["use_direct_expand_add"] for call in delegated_calls)
+    assert all(call[1] == (gate_config,) for call in delegated_calls)
+
+
+def test_exit_context_normally_restores_after_delegated_error():
+    events = []
+
+    @contextmanager
+    def fragile_manager():
+        events.append("enter")
+        yield
+        events.append("normal_exit")
+
+    with pytest.raises(RuntimeError, match="delegated"):
+        with _exit_context_normally(fragile_manager()):
+            raise RuntimeError("delegated")
+
+    assert events == ["enter", "normal_exit"]
