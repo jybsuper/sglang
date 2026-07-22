@@ -22,6 +22,7 @@ host-to-device-completion wall-clock quantiles.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -68,6 +69,9 @@ VARIANTS = ("production", "direct", "generic")
 B_CONFIG_SELECTORS = ("logical-t", "flat-tk", "explicit")
 B_INPUT_SOURCES = ("production-a", "synthetic")
 SYNTHETIC_B_INPUT_SEED = 20260722
+ROUTING_PATTERNS = ("lattice", "iid", "skewed")
+TOPK_WEIGHT_SEED = 1701
+SKEW_EXPERT_PERMUTATION_SEED = 20260722
 _MISSING_SERVER_ARGS_ERROR = "Global server args is not set yet!"
 
 
@@ -375,17 +379,53 @@ def _environment(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def _make_routing(case: MoeLoraBenchCase, device: torch.device):
+def _make_routing(
+    case: MoeLoraBenchCase,
+    device: torch.device,
+    *,
+    pattern: str = "lattice",
+    seed: int = 17,
+):
     tokens = torch.arange(case.t_local, dtype=torch.int32, device=device)
-    slots = torch.arange(case.model.top_k, dtype=torch.int32, device=device)
-    topk_ids = (tokens[:, None] * 13 + slots[None, :] * 7) % case.e_local
-    generator = torch.Generator(device=device)
-    generator.manual_seed(17)
+    if pattern == "lattice":
+        slots = torch.arange(case.model.top_k, dtype=torch.int32, device=device)
+        topk_ids = (tokens[:, None] * 13 + slots[None, :] * 7) % case.e_local
+    else:
+        route_generator = torch.Generator(device=device).manual_seed(seed)
+        if pattern == "iid":
+            probabilities = torch.ones(
+                case.e_local, dtype=torch.float32, device=device
+            )
+        elif pattern == "skewed":
+            rank_probability = torch.arange(
+                1, case.e_local + 1, dtype=torch.float32, device=device
+            ).pow(-1.2)
+            permutation_generator = torch.Generator(device=device).manual_seed(
+                SKEW_EXPERT_PERMUTATION_SEED
+            )
+            permutation = torch.randperm(
+                case.e_local, device=device, generator=permutation_generator
+            )
+            probabilities = torch.empty_like(rank_probability)
+            probabilities[permutation] = rank_probability
+        else:
+            raise ValueError(f"unknown routing pattern {pattern!r}")
+        # Tokens draw independently; experts within one token are sampled
+        # without replacement, matching top-k's distinct-expert contract.
+        topk_ids = torch.multinomial(
+            probabilities.expand(case.t_local, -1),
+            case.model.top_k,
+            replacement=False,
+            generator=route_generator,
+        ).to(torch.int32)
+
+    weight_generator = torch.Generator(device=device)
+    weight_generator.manual_seed(TOPK_WEIGHT_SEED)
     topk_weights = torch.rand(
         (case.t_local, case.model.top_k),
         dtype=torch.float32,
         device=device,
-        generator=generator,
+        generator=weight_generator,
     )
     topk_weights /= topk_weights.sum(dim=1, keepdim=True)
 
@@ -492,12 +532,16 @@ def _build_fixture(
     site: str,
     *,
     b_input_source: str = "production-a",
+    routing_pattern: str = "lattice",
+    routing_seed: int = 17,
 ) -> SiteFixture:
     device = torch.device("cuda")
     generator = torch.Generator(device=device)
     generator.manual_seed(20260721)
     shapes = case.factor_shapes
-    topk_ids, topk_weights, token_map = _make_routing(case, device)
+    topk_ids, topk_weights, token_map = _make_routing(
+        case, device, pattern=routing_pattern, seed=routing_seed
+    )
     if site == "gate":
         a_shape, b_shape = shapes.gate_up_a, shapes.gate_up_b
         hidden = torch.empty(
@@ -898,6 +942,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--inner-iterations", type=int)
     parser.add_argument("--profile-iterations", type=int, default=1)
     parser.add_argument("--skip-check", action="store_true")
+    parser.add_argument(
+        "--routing-pattern", choices=ROUTING_PATTERNS, default="lattice"
+    )
+    parser.add_argument("--routing-seed", type=int, default=17)
     parser.add_argument("--json-output", type=Path)
     return parser.parse_args(argv)
 
@@ -1020,6 +1068,12 @@ def _execute_benchmark(
             + fixture.lora_b.numel() * fixture.lora_b.element_size()
         ),
         "routing": {
+            "pattern": args.routing_pattern,
+            "seed": args.routing_seed,
+            "topk_weights_seed": TOPK_WEIGHT_SEED,
+            "topk_ids_sha256": hashlib.sha256(
+                fixture.topk_ids.detach().cpu().contiguous().numpy().tobytes()
+            ).hexdigest(),
             "valid_pairs": fixture.topk_ids.numel(),
             "experts_hit": int(torch.unique(fixture.topk_ids).numel()),
             "virtual_expert_capacity": (case.e_local * case.adapters.l_capacity),
@@ -1096,7 +1150,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("route-inclusive O0 requires --inner-iterations 1")
 
     site = "down" if args.target.startswith("down") else "gate"
-    fixture = _build_fixture(case, site, b_input_source=args.b_input_source)
+    fixture = _build_fixture(
+        case,
+        site,
+        b_input_source=args.b_input_source,
+        routing_pattern=args.routing_pattern,
+        routing_seed=args.routing_seed,
+    )
     explicit = ExplicitBConfig(
         block_m=args.b_block_m,
         block_n=args.b_block_n,
