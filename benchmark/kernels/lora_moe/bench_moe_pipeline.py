@@ -526,8 +526,14 @@ def _indexed_a_override(
     def indexed_a_production_b(*args, **kwargs):
         if args:
             raise TypeError("indexed A benchmark wrapper requires keyword arguments")
-        if kwargs.get("stage", "all") != "all":
+        stage = kwargs.get("stage", "all")
+        if stage == "routing":
             return production_ab(**kwargs)
+        if stage != "all":
+            raise ValueError(
+                "indexed A benchmark wrapper supports only stage='routing' or "
+                f"stage='all', got {stage!r}"
+            )
         if kwargs["experts_shared_outer_loras_a"]:
             raise NotImplementedError("indexed A supports per-expert factors only")
 
@@ -573,6 +579,23 @@ def _run_checked(fixture: PipelineFixture, pipeline: str) -> torch.Tensor:
     if not bool(torch.isfinite(fixture.last_output).all()):
         raise AssertionError(f"{pipeline} produced a non-finite output")
     return fixture.last_output.clone()
+
+
+def _capture_production_c0_reference(
+    fixture: PipelineFixture,
+) -> tuple[torch.Tensor | None, dict[str, object]]:
+    """Run the production C0 oracle, preserving expected resource failures."""
+    from triton.runtime.errors import OutOfResources
+
+    try:
+        reference = _run_checked(fixture, "C0")
+    except OutOfResources as exc:
+        return None, {
+            "status": "unsupported",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+    return reference, {"status": "available"}
 
 
 def _max_abs_diff(lhs: torch.Tensor, rhs: torch.Tensor) -> float:
@@ -902,8 +925,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         # module-symbol wrapper. This catches any chain-level indexed-A drift in
         # addition to the existing base-only and C0/C1 checks.
         production_c0_reference = None
+        production_c0_reference_status: dict[str, object] = {"status": "not_applicable"}
         if indexed_applied and not args.skip_check:
-            production_c0_reference = _run_checked(fixture, "C0")
+            (
+                production_c0_reference,
+                production_c0_reference_status,
+            ) = _capture_production_c0_reference(fixture)
+        elif indexed_applied:
+            production_c0_reference_status = {"status": "skipped"}
 
         if indexed_applied:
             assert indexed_configs is not None
@@ -918,6 +947,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 production_c0_reference=production_c0_reference,
             )
         )
+        if indexed_applied:
+            correctness["production_c0_reference"] = production_c0_reference_status
         torch.cuda.synchronize()
 
         result: dict[str, object] = {

@@ -4,7 +4,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 import benchmark.kernels.lora_moe.bench_indexed_shrink as indexed_shrink
+import benchmark.kernels.lora_moe.bench_moe_pipeline as moe_pipeline
 from benchmark.kernels.lora_moe.bench_moe_pipeline import (
+    _capture_production_c0_reference,
     _indexed_a_override,
     _resolve_indexed_a_configs,
     parse_args,
@@ -33,6 +35,74 @@ def test_indexed_a_auto_configs_use_the_cold_cache_shortlist(
     assert configs.down.key == down
     assert configs.gate_source == "auto_cold_cache_shortlist"
     assert configs.down_source == "auto_cold_cache_shortlist"
+
+
+def _install_fake_triton_errors(monkeypatch):
+    class OutOfResources(RuntimeError):
+        pass
+
+    triton = ModuleType("triton")
+    runtime = ModuleType("triton.runtime")
+    errors = ModuleType("triton.runtime.errors")
+    errors.OutOfResources = OutOfResources
+    runtime.errors = errors
+    triton.runtime = runtime
+    monkeypatch.setitem(sys.modules, "triton", triton)
+    monkeypatch.setitem(sys.modules, "triton.runtime", runtime)
+    monkeypatch.setitem(sys.modules, "triton.runtime.errors", errors)
+    return OutOfResources
+
+
+def test_production_c0_reference_records_available(monkeypatch):
+    _install_fake_triton_errors(monkeypatch)
+    reference = object()
+    calls = []
+
+    def fake_run_checked(fixture, pipeline):
+        calls.append((fixture, pipeline))
+        return reference
+
+    fixture = object()
+    monkeypatch.setattr(moe_pipeline, "_run_checked", fake_run_checked)
+
+    actual, status = _capture_production_c0_reference(fixture)
+
+    assert actual is reference
+    assert status == {"status": "available"}
+    assert calls == [(fixture, "C0")]
+
+
+def test_production_c0_reference_records_triton_resource_limit(monkeypatch):
+    out_of_resources = _install_fake_triton_errors(monkeypatch)
+    error = out_of_resources("shared memory limit")
+
+    def fake_run_checked(fixture, pipeline):
+        raise error
+
+    monkeypatch.setattr(moe_pipeline, "_run_checked", fake_run_checked)
+
+    reference, status = _capture_production_c0_reference(object())
+
+    assert reference is None
+    assert status == {
+        "status": "unsupported",
+        "error_type": "OutOfResources",
+        "error": "shared memory limit",
+    }
+
+
+def test_production_c0_reference_reraises_unexpected_errors(monkeypatch):
+    _install_fake_triton_errors(monkeypatch)
+    error = RuntimeError("unexpected failure")
+
+    def fake_run_checked(fixture, pipeline):
+        raise error
+
+    monkeypatch.setattr(moe_pipeline, "_run_checked", fake_run_checked)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _capture_production_c0_reference(object())
+    assert exc_info.value is error
 
 
 def _install_fake_virtual_experts(monkeypatch, production_ab):
@@ -98,7 +168,9 @@ def test_indexed_a_wrapper_replaces_only_all_stage_and_reuses_production_b(monke
         with pytest.raises(TypeError, match="requires keyword arguments"):
             wrapped(object())
         assert wrapped(**{**common, "stage": "routing"}) == "routing"
-        assert wrapped(**{**common, "stage": "shrink"}) == "shrink"
+        for stage in ("shrink", "expand", "unexpected"):
+            with pytest.raises(ValueError, match="supports only"):
+                wrapped(**{**common, "stage": stage})
         assert wrapped(**common) == "expand"
         assert (
             wrapped(
@@ -114,7 +186,6 @@ def test_indexed_a_wrapper_replaces_only_all_stage_and_reuses_production_b(monke
     assert virtual_experts.merged_experts_fused_moe_lora_add is fake_production
     assert [call[1].get("stage", "all") for call in production_calls] == [
         "routing",
-        "shrink",
         "expand",
         "expand",
     ]
