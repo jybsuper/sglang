@@ -1,25 +1,29 @@
 # SGL-LoRA model shared-expert phase
 
 This bundle is the BF16 shared-expert graduation evidence for the new
-SGL-LoRA MoE runner.  It covers conventional separate shared experts, a
-side-stream overlap control, fused global physical slots, and the
-DeepEP/MegaMOE-style per-rank interleaved physical-slot contract.  One- and
-two-shared/sink-expert models are included.
+SGL-LoRA MoE runner. It covers conventional separate shared experts, a
+side-stream overlap control, fused global physical slots, and a benchmark
+proxy for the DeepEP/MegaMOE-style per-rank interleaved physical-slot
+contract. One- and two-shared/sink-expert models are included. The per-rank
+proxy measures the mapping primitive; it is not a production EP>1 attachment
+claim.
 
 The supported production outcome is intentionally narrow and safe:
 
 - LoRA factors target routed experts only.  A model shared/sink slot always
   maps to `-1` before virtual-expert routing and can never alias the next
   adapter's routed factor.
-- Non-contiguous physical IDs use one static attach-time lookup table consumed
-  by the existing virtual-ID kernel.  There is no per-forward metadata build
-  and no layout-conversion launch.
+- Validated Standard-dispatcher physical IDs use a static attach-time lookup
+  table consumed by the existing virtual-ID kernel. There is no per-forward
+  metadata build and no layout-conversion launch.
 - Fused-shared configurations use the provider-neutral C0 runner.  Current
   C2/C3 consumers still assume the base physical expert domain equals the
   routed LoRA factor domain, so the planner must not select them here.
-- The base provider decides whether shared experts are separate, globally
-  appended, or interleaved per rank.  LoRA does not normalize the provider's
-  physical weights into a second layout.
+- Production attachment is limited to the validated Standard dispatcher and
+  its safe layouts. Per-rank physical shared layouts with EP>1 and advanced
+  all-to-all dispatchers are rejected because those paths can remap physical
+  IDs before LoRA mapping. LoRA does not normalize provider weights into a
+  second layout.
 
 ## Architecture
 
@@ -158,3 +162,9 @@ and routed LoRA factor identity (which excludes them).  Reusing a raw top-k ID
 for both is incorrect.  Until that mapped ABI is implemented and benchmarked,
 the explicit C0 fallback is the complete supported behavior, not a silent
 partial C2/C3 path.
+
+Separately, promoting per-rank physical shared layouts with EP>1 or an
+advanced all-to-all dispatcher requires evidence at the post-dispatch ID
+boundary. The retained `fused_per_rank` results are useful proxy evidence for
+the map kernel and physical layout cost, but they do not override the current
+attach-time rejection.

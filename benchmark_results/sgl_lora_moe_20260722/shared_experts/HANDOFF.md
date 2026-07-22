@@ -53,12 +53,17 @@ Nsight Compute controls are under `raw/<device>/ncu/`:
 
 ## Production boundary
 
-The production implementation supports fused global and per-rank shared slots
-through C0.  Current C2/C3 consumers use one raw top-k ID as both the base
-physical row (which includes shared slots) and routed LoRA factor row (which
-excludes them); fused down-finalize also requires equal expert dimensions.
-Therefore the planner must explicitly select C0 whenever
-`num_fused_shared_experts > 0`.
+Production support is limited to the Standard dispatcher and its validated
+safe physical-ID layouts. Fused shared slots use C0. The `fused_per_rank`
+matrix is a mapping/layout proxy, not EP>1 serving graduation: current
+MegaMOE/DeepEP-style paths can remap per-rank physical IDs before LoRA mapping,
+so per-rank shared layouts with EP>1 and advanced all-to-all dispatchers remain
+rejected.
+
+Current C2/C3 consumers use one raw top-k ID as both the base physical row
+(which includes shared slots) and routed LoRA factor row (which excludes
+them); fused down-finalize also requires equal expert dimensions. Therefore
+the planner must explicitly select C0 whenever `num_fused_shared_experts > 0`.
 
 The deferred mapped-C2/C3 extension needs separate `base_physical_expert_id`
 and `routed_factor_expert_id` inputs in the fused consumer and finalizer.  It

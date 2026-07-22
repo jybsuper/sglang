@@ -1,0 +1,76 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_v2_jit_matches_aot[dtype6-1-2048-True-False] _______________
+
+dtype = torch.bfloat16, num_tokens = 1, hidden = 2048, fuse_silu_and_mul = True
+scale_ue8m0 = False
+
+    @pytest.mark.parametrize(
+        "dtype,num_tokens,hidden,fuse_silu_and_mul,scale_ue8m0", V2_QUANT_CASES
+    )
+    def test_v2_jit_matches_aot(dtype, num_tokens, hidden, fuse_silu_and_mul, scale_ue8m0):
+        """JIT v2 must be bit-exact with the AOT v2 across vanilla/silu and float/ue8m0
+        scales (NaiveScheduler)."""
+        torch.manual_seed(
+            hidden + num_tokens + int(fuse_silu_and_mul) + 7 * int(scale_ue8m0)
+        )
+        in_hidden = hidden * (2 if fuse_silu_and_mul else 1)
+        x = torch.randn(num_tokens, in_hidden, device="cuda", dtype=dtype)
+        out_shape = (num_tokens, hidden)
+    
+        q_ref, s_ref = _alloc(out_shape, scale_ue8m0)
+        sgl_per_token_group_quant_8bit(
+            x,
+            q_ref,
+            s_ref,
+            G,
+            1e-10,
+            float(fp8_min),
+            float(fp8_max),
+            scale_ue8m0,
+            fuse_silu_and_mul,
+            None,
+            enable_v2=True,
+        )
+    
+        x_q, x_s = _alloc(out_shape, scale_ue8m0)
+        per_token_group_quant_8bit_v2(
+            x,
+            x_q,
+            x_s,
+            G,
+            1e-10,
+            float(fp8_min),
+            float(fp8_max),
+            scale_ue8m0=scale_ue8m0,
+            fuse_silu_and_mul=fuse_silu_and_mul,
+        )
+        torch.cuda.synchronize()
+    
+>       assert torch.equal(x_q.view(torch.int8), q_ref.view(torch.int8)), "fp8 codes differ"
+E       AssertionError: fp8 codes differ
+E       assert False
+E        +  where False = <built-in method equal of type object at 0xf68fcc93cb70>(tensor([[-16, -25, -31,  ..., 108, 101, -23]], device='cuda:0',\n       dtype=torch.int8), tensor([[-16, -25, -31,  ..., 108, 101, -23]], device='cuda:0',\n       dtype=torch.int8))
+E        +    where <built-in method equal of type object at 0xf68fcc93cb70> = torch.equal
+E        +    and   tensor([[-16, -25, -31,  ..., 108, 101, -23]], device='cuda:0',\n       dtype=torch.int8) = <built-in method view of Tensor object at 0xf68c10f43480>(torch.int8)
+E        +      where <built-in method view of Tensor object at 0xf68c10f43480> = tensor([[-128.,  -60.,  -36.,  ...,   96.,   52.,  -72.]], device='cuda:0',\n       dtype=torch.float8_e4m3fn).view
+E        +      and   torch.int8 = torch.int8
+E        +    and   tensor([[-16, -25, -31,  ..., 108, 101, -23]], device='cuda:0',\n       dtype=torch.int8) = <built-in method view of Tensor object at 0xf68c110902d0>(torch.int8)
+E        +      where <built-in method view of Tensor object at 0xf68c110902d0> = tensor([[-128.,  -60.,  -36.,  ...,   96.,   52.,  -72.]], device='cuda:0',\n       dtype=torch.float8_e4m3fn).view
+E        +      and   torch.int8 = torch.int8
+
+../sglang-final-f2f406e/test/registered/jit/test_per_token_group_quant_8bit_v2.py:113: AssertionError
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/dist-packages/_pytest/config/__init__.py:1464
+  /usr/local/lib/python3.12/dist-packages/_pytest/config/__init__.py:1464: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:61
+  /usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/jit/test_per_token_group_quant_8bit_v2.py::test_v2_jit_matches_aot[dtype6-1-2048-True-False]
+1 failed, 2 warnings in 9.66s
