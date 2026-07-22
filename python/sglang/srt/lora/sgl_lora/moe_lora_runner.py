@@ -100,6 +100,24 @@ def run_sgl_lora_moe(
     num_tokens = hidden_states.shape[0]
     inter = quant_info.intermediate_size
 
+    from sglang.srt.model_executor.runner_utils.capture_mode import (
+        get_is_capture_mode,
+    )
+
+    inside_cuda_capture = (
+        hidden_states.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+    )
+    base.admit_workspace(
+        num_tokens=num_tokens,
+        top_k=top_k,
+        rank=lora_info.max_lora_rank,
+        max_loras=lora_info.gate_up_lora_a_weights.shape[0],
+        dtype=hidden_states.dtype,
+        device=hidden_states.device,
+        capture=get_is_capture_mode() or inside_cuda_capture,
+        memory_query_safe=not inside_cuda_capture,
+    )
+
     overlap = two_stream_enabled
     token_lora_mapping = lora_info.token_lora_mapping
     if token_lora_mapping.shape[0] != num_tokens:
@@ -180,6 +198,7 @@ def run_sgl_lora_moe(
     )
     dispose_tensor(gateup_out)
     dispose_tensor(gate_up_delta)
+    dispose_tensor(gate_up_lora_intermediate)
 
     down_out = hidden_states.new_empty(base.down_out_shape(ws))
     base.down(ws, act_out, down_out)

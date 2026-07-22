@@ -29,6 +29,13 @@ class _FakeBaseGemm:
         self.routed_scaling_factor = routed_scaling_factor
         self.calls = []
 
+    def admit_workspace(self, **kwargs):
+        self.calls.append("admit")
+        assert kwargs["num_tokens"] == self.num_tokens
+        assert kwargs["top_k"] == self.top_k
+        assert kwargs["dtype"] == torch.bfloat16
+        assert kwargs["memory_query_safe"]
+
     def prepare(self, hidden_states, topk_ids, top_k):
         self.calls.append("prepare")
         assert top_k == self.top_k
@@ -197,7 +204,7 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
         two_stream_enabled=False,
     )
 
-    assert base.calls == ["prepare", "gateup", "act", "down", "finalize"]
+    assert base.calls == ["admit", "prepare", "gateup", "act", "down", "finalize"]
     assert len(calls) == 2
     assert calls[0]["token_lora_mapping"].data_ptr() == token_lora_mapping.data_ptr()
     assert calls[1]["token_lora_mapping"].data_ptr() == token_lora_mapping.data_ptr()
