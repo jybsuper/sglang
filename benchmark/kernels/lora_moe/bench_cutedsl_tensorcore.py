@@ -89,12 +89,8 @@ TACTICS: dict[str, GroupedTactic] = {
     "m128n32": GroupedTactic(mma_m=128, mma_n=32),
     "m128n64": GroupedTactic(mma_m=128, mma_n=64),
     "m128n128": GroupedTactic(mma_m=128, mma_n=128),
-    "m128n64-gmem": GroupedTactic(
-        mma_m=128, mma_n=64, tensormap_update="GMEM"
-    ),
-    "m128n64-host": GroupedTactic(
-        mma_m=128, mma_n=64, host_problem_shapes=True
-    ),
+    "m128n64-gmem": GroupedTactic(mma_m=128, mma_n=64, tensormap_update="GMEM"),
+    "m128n64-host": GroupedTactic(mma_m=128, mma_n=64, host_problem_shapes=True),
     "2cta-m128n32": GroupedTactic(
         mma_m=128,
         mma_n=32,
@@ -221,9 +217,7 @@ def _provider(
             dtype=torch.bfloat16,
             device=fixture.device,
         )
-        src2dst = torch.arange(
-            case.pairs, dtype=torch.int32, device=fixture.device
-        )
+        src2dst = torch.arange(case.pairs, dtype=torch.int32, device=fixture.device)
         provider = GroupedC2Boundary(
             value=fixture.gateup_base,
             value_a=fixture.gate_rank_input,
@@ -327,9 +321,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--scopes", default="compute,boundary")
     parser.add_argument("--executions", default="eager,cuda_graph")
     parser.add_argument("--cache-states", default="hot")
-    parser.add_argument(
-        "--adapter-mode", choices=("multi", "mixed"), default="multi"
-    )
+    parser.add_argument("--adapter-mode", choices=("multi", "mixed"), default="multi")
     parser.add_argument(
         "--route-pattern", choices=("regular", "iid", "skewed"), default="iid"
     )
@@ -426,9 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             correctness = (
                                 None
                                 if args.skip_check
-                                else _check_site(
-                                    site, invoke, reference, outputs
-                                )
+                                else _check_site(site, invoke, reference, outputs)
                             )
                             for execution in executions:
                                 for cache_state in cache_states:
@@ -496,7 +486,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                                             warmup=args.warmup,
                                             samples=args.samples,
                                         )
-                                        if execution == "cuda_graph" and not args.skip_check:
+                                        if (
+                                            execution == "cuda_graph"
+                                            and not args.skip_check
+                                        ):
                                             replay_check = check()
                                         else:
                                             replay_check = None

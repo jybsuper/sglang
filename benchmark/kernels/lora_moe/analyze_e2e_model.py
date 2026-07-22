@@ -18,7 +18,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-
 _RESULT_RE = re.compile(r"^(base|lora)_r\d+\.jsonl$")
 _TRACE_STAGE_RE = re.compile(r"-(EXTEND|DECODE)\.trace\.json\.gz$")
 
@@ -112,9 +111,9 @@ def summarize_correctness(directory: Path) -> dict[str, Any]:
 
     result: dict[str, Any] = {"missing": missing}
     if {"base_before", "base_after"} <= values.keys():
-        result["base_before_after_ids_equal"] = (
-            _output_ids(values["base_before"]) == _output_ids(values["base_after"])
-        )
+        result["base_before_after_ids_equal"] = _output_ids(
+            values["base_before"]
+        ) == _output_ids(values["base_after"])
     if "mixed" in values and isinstance(values["mixed"], list):
         mixed = values["mixed"]
         result["mixed_size"] = len(mixed)
@@ -125,9 +124,7 @@ def summarize_correctness(directory: Path) -> dict[str, Any]:
             result["mixed_adapter_ids_equal"] = _output_ids(mixed[1]) == _output_ids(
                 values["adapter"]
             )
-    boolean_checks = [
-        value for key, value in result.items() if key.endswith("_equal")
-    ]
+    boolean_checks = [value for key, value in result.items() if key.endswith("_equal")]
     result["passed"] = not missing and bool(boolean_checks) and all(boolean_checks)
     return result
 

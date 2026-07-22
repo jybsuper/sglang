@@ -16,6 +16,7 @@ sort is hidden in the candidate.
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import torch
 
 from benchmark.kernels.lora_moe.shared_outer import AdapterSpan

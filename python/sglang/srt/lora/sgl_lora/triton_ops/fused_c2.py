@@ -293,9 +293,7 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
     ).to(tl.int64)
     local_expert = base_expert - local_expert_offset
     valid_pair = (
-        pair_in_range
-        & (local_expert >= 0)
-        & (local_expert < num_local_experts)
+        pair_in_range & (local_expert >= 0) & (local_expert < num_local_experts)
     )
 
     virtual_expert = tl.load(virtual_expert_ids_ptr + pid_m).to(tl.int64)
@@ -327,9 +325,7 @@ def _fused_gate_up_b_swiglu_down_a_aligned_kernel(
         other=0.0,
     ).to(tl.float32)
 
-    gate_intermediate_rows = (
-        gate_intermediate_ptr + safe_pair_ids[:, None] * stride_gim
-    )
+    gate_intermediate_rows = gate_intermediate_ptr + safe_pair_ids[:, None] * stride_gim
     gate_a = tl.load(
         gate_intermediate_rows + offs_gate_r[None, :] * stride_gir,
         mask=has_lora[:, None] & gate_r_mask[None, :],

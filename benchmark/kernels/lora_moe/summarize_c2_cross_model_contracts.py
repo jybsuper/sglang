@@ -99,9 +99,7 @@ def _aggregate(records: list[dict[str, object]], device: str) -> dict[str, objec
     failed = [record for record in records if record["status"] == "failed"]
     grouped: dict[tuple[str, int, int], list[dict[str, object]]] = defaultdict(list)
     for record in passed:
-        grouped[(record["model"], record["tokens"], record["rank"])].append(
-            record
-        )
+        grouped[(record["model"], record["tokens"], record["rank"])].append(record)
     selections = []
     for (model, tokens, rank), candidates in sorted(grouped.items()):
         fastest = min(candidates, key=lambda candidate: candidate["p50_us"])
@@ -145,9 +143,7 @@ def _aggregate(records: list[dict[str, object]], device: str) -> dict[str, objec
             "selection_counts": dict(
                 Counter(row["selected_schedule"] for row in model_selections)
             ),
-            "passed_configs": sum(
-                record["model"] == model for record in passed
-            ),
+            "passed_configs": sum(record["model"] == model for record in passed),
             "failed_configs": len(model_failures),
             "failure_classes": dict(
                 Counter(record["failure_class"] for record in model_failures)
@@ -169,10 +165,7 @@ def _aggregate(records: list[dict[str, object]], device: str) -> dict[str, objec
                 default=None,
             ),
             "activation_error_over_signal": max(
-                (
-                    record["activation_error_over_signal"] or 0.0
-                    for record in passed
-                ),
+                (record["activation_error_over_signal"] or 0.0 for record in passed),
                 default=None,
             ),
             "down_rank_max_abs_error": max(
@@ -180,10 +173,7 @@ def _aggregate(records: list[dict[str, object]], device: str) -> dict[str, objec
                 default=None,
             ),
             "down_rank_error_over_signal": max(
-                (
-                    record["down_rank_error_over_signal"] or 0.0
-                    for record in passed
-                ),
+                (record["down_rank_error_over_signal"] or 0.0 for record in passed),
                 default=None,
             ),
             "routed_scaling_max_abs_error": max(
@@ -224,8 +214,9 @@ def _write_markdown(payload: dict[str, object], path: Path) -> None:
             f"| {row['model']} | {row['tokens']} | {row['rank']} | "
             f"{row['selected_schedule']} | {row['selected_block_n']} | "
             f"{row['selected_p50_us']:.3f} | "
-            f"{ratio:.3f} |" if ratio is not None else
-            f"| {row['model']} | {row['tokens']} | {row['rank']} | "
+            f"{ratio:.3f} |"
+            if ratio is not None
+            else f"| {row['model']} | {row['tokens']} | {row['rank']} | "
             f"{row['selected_schedule']} | {row['selected_block_n']} | "
             f"{row['selected_p50_us']:.3f} | n/a |"
         )

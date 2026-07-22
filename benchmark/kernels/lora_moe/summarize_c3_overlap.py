@@ -34,9 +34,7 @@ def _summarize_file(path: Path) -> list[dict[str, object]]:
             continue
         timings = {
             variant: median(
-                row["p50_us"][variant]
-                for row in matched
-                if variant in row["p50_us"]
+                row["p50_us"][variant] for row in matched if variant in row["p50_us"]
             )
             for variant in ("C0", "C1", "C2P", "C2F", "C3")
             if any(variant in row["p50_us"] for row in matched)

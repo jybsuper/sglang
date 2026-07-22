@@ -97,8 +97,7 @@ class C2SemanticContract:
             self.activation == "swiglu"
             and self.lora_target_slices == ("gate", "up")
             and self.resolved_provider_slice_order == ("gate", "up")
-            and self.logical_intermediate_size
-            == self.physical_intermediate_size
+            and self.logical_intermediate_size == self.physical_intermediate_size
         ):
             return "gated_swiglu_v1"
         if (
@@ -155,7 +154,11 @@ def reference_c2_consumer(
 
     gate_rank = gate_lora_b.shape[-1]
     down_rank = down_lora_a.shape[-2]
-    if gate_intermediate.shape != (num_tokens, top_k, contract.num_lora_slices * gate_rank):
+    if gate_intermediate.shape != (
+        num_tokens,
+        top_k,
+        contract.num_lora_slices * gate_rank,
+    ):
         raise ValueError("gate_intermediate does not match packed LoRA slices")
     if down_lora_a.shape[-1] != contract.physical_intermediate_size:
         raise ValueError("down_lora_a physical width does not match provider width")
@@ -194,9 +197,7 @@ def reference_c2_consumer(
         slices: dict[str, torch.Tensor] = {}
         for name in contract.logical_slices:
             start = contract.provider_slice_offset(name)
-            slices[name] = gateup_output[
-                destination, start : start + logical_i
-            ].float()
+            slices[name] = gateup_output[destination, start : start + logical_i].float()
 
         if has_lora:
             for name in contract.lora_target_slices:
@@ -231,9 +232,7 @@ def reference_c2_consumer(
             for start in range(0, logical_i, tile):
                 stop = min(start + tile, logical_i)
                 partial = (
-                    down_lora_a[
-                        adapter, local_expert, :, start:stop
-                    ].float()
+                    down_lora_a[adapter, local_expert, :, start:stop].float()
                     @ activated[start:stop].float()
                 ).to(out_dtype)
                 accumulated = (accumulated.float() + partial.float()).to(out_dtype)
@@ -280,9 +279,7 @@ def reference_weighted_down_delta(
                 @ down_rank_input[token, slot].float()
             )
             output[token] += (
-                delta
-                * topk_weights[token, slot].float()
-                * float(routed_scaling_factor)
+                delta * topk_weights[token, slot].float() * float(routed_scaling_factor)
             )
     return output.to(destination_dtype)
 

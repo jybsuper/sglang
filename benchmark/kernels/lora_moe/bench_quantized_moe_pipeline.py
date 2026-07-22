@@ -69,9 +69,7 @@ def _token_mapping(
 ) -> torch.Tensor:
     if occupancy == "base":
         return torch.full((tokens,), -1, device=device, dtype=torch.int32)
-    mapping = torch.arange(tokens, device=device, dtype=torch.int32).remainder(
-        adapters
-    )
+    mapping = torch.arange(tokens, device=device, dtype=torch.int32).remainder(adapters)
     if occupancy == "mixed":
         mapping[::3] = -1
     return mapping
@@ -185,9 +183,7 @@ class QuantizedPipelineFixture:
             device=device,
             scale=factor_scale,
         )
-        lora_ranks = torch.full(
-            (adapters,), rank, device=device, dtype=torch.int32
-        )
+        lora_ranks = torch.full((adapters,), rank, device=device, dtype=torch.int32)
         adapter_enabled = torch.ones_like(lora_ranks)
         self.lora_info = LoRAInfo(
             gate_up_lora_a_weights=gate_a,
@@ -280,9 +276,7 @@ class QuantizedPipelineFixture:
             device=self.hidden_work.device,
             dtype=self.base.contract.lora_activation_dtype,
         )
-        self.base.act_with_delta(
-            ws, gateup, None, topk_ids, activation, bridge
-        )
+        self.base.act_with_delta(ws, gateup, None, topk_ids, activation, bridge)
         down = torch.empty(
             self.base.down_out_shape(ws),
             device=self.hidden_work.device,
@@ -331,9 +325,7 @@ def _max_abs(lhs: torch.Tensor, rhs: torch.Tensor) -> float:
 
 
 def _run(args: argparse.Namespace) -> dict[str, object]:
-    output_dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[
-        args.output_dtype
-    ]
+    output_dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[args.output_dtype]
     fixture = QuantizedPipelineFixture(
         provider_name=args.provider,
         tokens=args.tokens,
@@ -461,9 +453,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--provider", choices=("fp8", "nvfp4", "marlin"), required=True
-    )
+    parser.add_argument("--provider", choices=("fp8", "nvfp4", "marlin"), required=True)
     parser.add_argument("--tokens", type=int, default=32)
     parser.add_argument("--experts", type=int, default=8)
     parser.add_argument("--top-k", type=int, default=8)
@@ -475,9 +465,7 @@ def main() -> None:
         "--occupancy", choices=("active", "mixed", "base"), default="active"
     )
     parser.add_argument("--phase", choices=("decode", "prefill"), default="decode")
-    parser.add_argument(
-        "--execution", choices=("eager", "cuda_graph"), default="eager"
-    )
+    parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument("--output-dtype", choices=("bf16", "fp32"), default="bf16")
     parser.add_argument("--warmups", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=20)

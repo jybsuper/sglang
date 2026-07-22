@@ -29,8 +29,8 @@ import torch
 import triton
 
 from benchmark.kernels.lora_moe.bench_c2_cross_model_contracts import (
-    GuardrailCase,
     MODEL_KEYS,
+    GuardrailCase,
     _build_fixture,
     _invoke,
     _model_dims,
@@ -123,9 +123,7 @@ def _provider_check(fixture, provider: GroupedC2Boundary) -> dict[str, object]:
         block_size_n=fixture.case.logical_i,
     )
     act_error = (fixture.act_out.float() - reference.activation_output.float()).abs()
-    down_error = (
-        fixture.down_rank.float() - reference.down_rank_input.float()
-    ).abs()
+    down_error = (fixture.down_rank.float() - reference.down_rank_input.float()).abs()
     act_signal = float(reference.activation_output.float().abs().max().item())
     down_signal = float(reference.down_rank_input.float().abs().max().item())
     act_max = float(act_error.max().item())
@@ -141,9 +139,9 @@ def _provider_check(fixture, provider: GroupedC2Boundary) -> dict[str, object]:
         "down_rank_signal_max_abs": down_signal,
         "physical_padding_zero": bool(
             fixture.case.logical_i == fixture.case.physical_i
-            or (
-                fixture.act_out[:, fixture.case.logical_i :] == 0
-            ).logical_or(fixture.act_out[:, fixture.case.logical_i :] == -123).all()
+            or (fixture.act_out[:, fixture.case.logical_i :] == 0)
+            .logical_or(fixture.act_out[:, fixture.case.logical_i :] == -123)
+            .all()
         ),
         "oracle_down_rounding": "one_full_logical_I_grouped_output",
     }
@@ -248,7 +246,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 if args.skip_check
                                 else _strict_check(fixture, schedule, block_n)
                             )
-                            invoke = lambda schedule=schedule, block_n=block_n: _invoke(
+                            invoke = lambda fixture=fixture, schedule=schedule, block_n=block_n: _invoke(
                                 fixture, schedule, block_n
                             )
                             for execution in executions:
@@ -333,8 +331,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 )
                                 replay_check = (
                                     _provider_check(fixture, provider)
-                                    if execution == "cuda_graph"
-                                    and not args.skip_check
+                                    if execution == "cuda_graph" and not args.skip_check
                                     else None
                                 )
                                 row = {

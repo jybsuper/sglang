@@ -147,9 +147,7 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
             dtype=torch.int32,
             device=self.device,
         )
-        token_lora_mapping = torch.tensor(
-            [0, 1], dtype=torch.int32, device=self.device
-        )
+        token_lora_mapping = torch.tensor([0, 1], dtype=torch.int32, device=self.device)
         expected = torch.tensor(
             [[0, 15, -1, -1], [16, 31, -1, -1]],
             dtype=torch.int32,

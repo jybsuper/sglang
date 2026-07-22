@@ -33,14 +33,14 @@ from sglang.srt.model_executor.runner_backend.base_cuda_graph_backend import (
 from sglang.srt.model_executor.runner_backend.cuda_graph_dedup_mixin import (
     DedupedCudaGraphMixin,
 )
-from sglang.srt.model_executor.runner_utils.capture_resources import (
-    cuda_graph_capture_resource_scope,
-)
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
     BreakableCUDAGraph,
     BreakableCUDAGraphCapture,
     eager_on_graph,
     enable_breakable_cuda_graph,
+)
+from sglang.srt.model_executor.runner_utils.capture_resources import (
+    cuda_graph_capture_resource_scope,
 )
 from sglang.srt.model_executor.runner_utils.pool import (
     get_or_create_global_graph_memory_pool,

@@ -18,8 +18,8 @@ from benchmark.kernels.lora_moe.bench_moe_pipeline import (
     _exit_context_normally,
     _experimental_trtllm_environment,
     _indexed_a_override,
-    _matched_latency_summary,
     _make_routing,
+    _matched_latency_summary,
     _parse_b_config,
     _pipeline_two_stream_metadata,
     _resolve_baseline_pipelines,
@@ -29,8 +29,8 @@ from benchmark.kernels.lora_moe.bench_moe_pipeline import (
     _run_length_encode_token_mapping,
     _smoke_case,
     _strict_delta_atol,
-    _validate_neutral_case,
     _validate_all_base_sentinel,
+    _validate_neutral_case,
     parse_args,
 )
 from benchmark.kernels.lora_moe.matrix import p0_cases
@@ -101,12 +101,8 @@ def test_route_families_are_reproducible_unique_and_seed_isolated():
 
     case = p0_cases("h200")[2]
     device = torch.device("cpu")
-    lattice_a = _make_routing(
-        case, device, pattern="lattice_control", route_seed=1
-    )
-    lattice_b = _make_routing(
-        case, device, pattern="lattice_control", route_seed=999
-    )
+    lattice_a = _make_routing(case, device, pattern="lattice_control", route_seed=1)
+    lattice_b = _make_routing(case, device, pattern="lattice_control", route_seed=999)
     assert lattice_a[3]["pattern"] == "lattice_control"
     assert lattice_a[3]["seed_effective"] is False
     assert lattice_a[3]["resolved_route_hash"] == lattice_b[3]["resolved_route_hash"]
@@ -214,9 +210,7 @@ def test_trtllm_control_records_architecture_and_geometry_constraints():
         _validate_neutral_case(smoke, ("experimental_trtllm",))
     _validate_neutral_case(_smoke_case("h200"), ("legacy_triton",))
     with pytest.raises(NotImplementedError, match="SM100"):
-        _validate_neutral_case(
-            p0_cases("h200")[2], ("experimental_trtllm",)
-        )
+        _validate_neutral_case(p0_cases("h200")[2], ("experimental_trtllm",))
     _validate_neutral_case(p0_cases("gb300")[2], ("experimental_trtllm",))
 
 
@@ -264,8 +258,7 @@ def test_n0_only_neutral_check_does_not_require_active_fixture(monkeypatch):
     monkeypatch.setattr(
         moe_pipeline,
         "_run_checked",
-        lambda _fixture, pipeline: calls.append(("sgl", pipeline))
-        or torch.zeros(1),
+        lambda _fixture, pipeline: calls.append(("sgl", pipeline)) or torch.zeros(1),
     )
     monkeypatch.setattr(
         moe_pipeline,
@@ -275,9 +268,7 @@ def test_n0_only_neutral_check_does_not_require_active_fixture(monkeypatch):
     )
     monkeypatch.setattr(torch.testing, "assert_close", lambda *args, **kwargs: None)
 
-    moe_pipeline._check_neutral_baselines(
-        fixture, ("experimental_trtllm",), "N0"
-    )
+    moe_pipeline._check_neutral_baselines(fixture, ("experimental_trtllm",), "N0")
     assert calls == [("sgl", "N0"), ("experimental_trtllm", "N0")]
 
 
@@ -318,6 +309,7 @@ def test_strict_delta_tolerance_cannot_hide_a_dropped_adapter(monkeypatch):
 
     base = torch.full((4,), 100.0)
     reference = base + torch.tensor([signal, 0.0, 0.0, 0.0])
+
     def assert_close(lhs, rhs, *, rtol, atol):
         tolerance = atol + rtol * rhs.abs()
         if not bool(((lhs - rhs).abs() <= tolerance).all()):

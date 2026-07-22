@@ -23,7 +23,6 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from statistics import median
 from typing import Callable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -221,15 +220,11 @@ def _build_fixture(case: GuardrailCase) -> Fixture:
     value = _random_bf16(
         (destination_rows, slices * case.physical_i), generator, scale=0.1
     )
-    value_a = _random_bf16(
-        (case.tokens, case.top_k, slices * case.rank), generator
-    )
+    value_a = _random_bf16((case.tokens, case.top_k, slices * case.rank), generator)
     value_b = _random_bf16(
         (loras, case.experts, slices * case.physical_i, case.rank), generator
     )
-    down_a = _random_bf16(
-        (loras, case.experts, case.rank, case.physical_i), generator
-    )
+    down_a = _random_bf16((loras, case.experts, case.rank, case.physical_i), generator)
     # Padding contains large values to prove it cannot leak into the explicit
     # logical-width ReLU2 kernel. Gated v1 has no padded provider ABI.
     if case.logical_i < case.physical_i:
@@ -446,19 +441,17 @@ def _strict_check(fixture: Fixture, schedule: str, block_n: int) -> dict[str, ob
                 ).to(torch.bfloat16)
                 slices[name] += delta.float()
         if fixture.case.activation == "swiglu":
-            expected_act = (F.silu(slices["gate"]) * slices["up"]).to(
-                torch.bfloat16
-            )
+            expected_act = (F.silu(slices["gate"]) * slices["up"]).to(torch.bfloat16)
         else:
             expected_act = torch.relu(slices["value"]).square().to(torch.bfloat16)
         actual_act = fixture.act_out[destination, : fixture.case.logical_i]
-        act_errors.append(float((actual_act.float() - expected_act.float()).abs().max()))
+        act_errors.append(
+            float((actual_act.float() - expected_act.float()).abs().max())
+        )
         act_signals.append(float(expected_act.float().abs().max()))
         if fixture.case.logical_i < fixture.case.physical_i:
             assert bool(
-                (
-                    fixture.act_out[destination, fixture.case.logical_i :] == 0
-                ).all()
+                (fixture.act_out[destination, fixture.case.logical_i :] == 0).all()
             )
         if adapter < 0:
             assert bool((down_flat[pair_idx] == 0).all())
@@ -469,14 +462,10 @@ def _strict_check(fixture: Fixture, schedule: str, block_n: int) -> dict[str, ob
         for start in range(0, fixture.case.logical_i, block_n):
             stop = min(start + block_n, fixture.case.logical_i)
             partial = (
-                fixture.down_a[
-                    adapter, local_expert, :, start:stop
-                ].float()
+                fixture.down_a[adapter, local_expert, :, start:stop].float()
                 @ expected_act[start:stop].float()
             ).to(torch.bfloat16)
-            expected_down = (
-                expected_down.float() + partial.float()
-            ).to(torch.bfloat16)
+            expected_down = (expected_down.float() + partial.float()).to(torch.bfloat16)
         actual_down = down_flat[pair_idx]
         down_errors.append(
             float((actual_down.float() - expected_down.float()).abs().max())
@@ -511,14 +500,12 @@ def _strict_check(fixture: Fixture, schedule: str, block_n: int) -> dict[str, ob
         generator.manual_seed(1701)
         down_b = _random_bf16((37, fixture.case.rank), generator)
         unscaled = down_b.float() @ down_flat[selected].float()
-        routed = (
-            unscaled
-            * fixture.topk_weights.reshape(-1)[selected]
-            * 1.75
-        ).to(torch.float32)
-        expected = (
-            unscaled * fixture.topk_weights.reshape(-1)[selected]
-        ).to(torch.float32) * 1.75
+        routed = (unscaled * fixture.topk_weights.reshape(-1)[selected] * 1.75).to(
+            torch.float32
+        )
+        expected = (unscaled * fixture.topk_weights.reshape(-1)[selected]).to(
+            torch.float32
+        ) * 1.75
         scale_error = float((routed - expected).abs().max())
         if scale_error > 2e-6:
             raise AssertionError(f"routed scaling error {scale_error}")
@@ -535,7 +522,9 @@ def _strict_check(fixture: Fixture, schedule: str, block_n: int) -> dict[str, ob
         "activation_error_over_signal": act_error / act_signal if act_signal else None,
         "down_rank_max_abs_error": down_error,
         "down_rank_signal_max_abs": down_signal,
-        "down_rank_error_over_signal": down_error / down_signal if down_signal else None,
+        "down_rank_error_over_signal": (
+            down_error / down_signal if down_signal else None
+        ),
         "routed_scaling": scaling_check,
         "invalid_pairs": int(
             (
@@ -695,7 +684,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "route": {
                     "pattern": "deterministic_lattice_with_invalid_guardrail",
                     "local_expert_offset": fixture.local_expert_offset,
-                    "hash_sha256_int32_row_major": hashlib.sha256(route_bytes).hexdigest(),
+                    "hash_sha256_int32_row_major": hashlib.sha256(
+                        route_bytes
+                    ).hexdigest(),
                     "route_block_m": fixture.route_block_m,
                     "pairs": fixture.topk_ids.numel(),
                     "pairs_post_padded": int(fixture.num_pairs_post_padded.item()),

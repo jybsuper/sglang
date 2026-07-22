@@ -76,6 +76,7 @@ def _make_fp8_weight(weight: torch.Tensor):
 
 def _make_marlin_weight(weight: torch.Tensor):
     from sgl_kernel.scalar_type import scalar_types
+
     from sglang.test.test_marlin_utils import marlin_quantize
 
     references, packed, scales = [], [], []

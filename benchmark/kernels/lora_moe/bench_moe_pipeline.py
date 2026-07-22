@@ -1401,7 +1401,7 @@ class _CuTeStaticGateAOverride:
         finally:
             self._passthrough_depth -= 1
 
-    def __enter__(self) -> "_CuTeStaticGateAOverride":
+    def __enter__(self) -> _CuTeStaticGateAOverride:
         from sglang.srt.lora.sgl_lora.triton_ops import virtual_experts
 
         self._delegated = virtual_experts.merged_experts_fused_moe_lora_add
@@ -2536,9 +2536,11 @@ def _main(args: argparse.Namespace) -> int:
                 "substitution_scope": (
                     "gate_and_down_lora_a_only"
                     if indexed_applied
-                    else "gate_up_lora_a_only_static_route_upper_bound"
-                    if cutedsl_applied
-                    else "none"
+                    else (
+                        "gate_up_lora_a_only_static_route_upper_bound"
+                        if cutedsl_applied
+                        else "none"
+                    )
                 ),
                 "retained_components": (
                     [

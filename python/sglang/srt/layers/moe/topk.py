@@ -235,9 +235,7 @@ class TopKOutputChecker:
         # provider-owned representation without changing ids or weights.  The
         # producer remains feature-gated; consumers must not reject an already
         # constructed carrier merely because they do not read the packed view.
-        return isinstance(
-            topk_output, (StandardTopKOutput, StandardTopKOutputPacked)
-        )
+        return isinstance(topk_output, (StandardTopKOutput, StandardTopKOutputPacked))
 
     @staticmethod
     def format_is_triton_kernels(

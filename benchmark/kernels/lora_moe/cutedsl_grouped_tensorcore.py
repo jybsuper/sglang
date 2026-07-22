@@ -124,7 +124,9 @@ def _load_source() -> ModuleType:
     if _SOURCE is not None:
         return _SOURCE
     if _IMPORT_ERROR is not None:
-        raise RuntimeError("Blackwell CuTe DSL grouped GEMM is unavailable") from _IMPORT_ERROR
+        raise RuntimeError(
+            "Blackwell CuTe DSL grouped GEMM is unavailable"
+        ) from _IMPORT_ERROR
     try:
         import cutlass  # noqa: F401
         import cutlass.cute  # noqa: F401
@@ -350,9 +352,7 @@ class BlackwellGroupedGemmPlan:
         c_tensors: Sequence[torch.Tensor],
         tactic: GroupedTactic = GroupedTactic(),
     ) -> None:
-        if not a_tensors or not (
-            len(a_tensors) == len(b_tensors) == len(c_tensors)
-        ):
+        if not a_tensors or not (len(a_tensors) == len(b_tensors) == len(c_tensors)):
             raise ValueError("A/B/C must be nonempty sequences of equal length")
         self.a_tensors = tuple(a_tensors)
         self.b_tensors = tuple(b_tensors)

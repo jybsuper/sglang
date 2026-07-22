@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Sequence
 
 import torch
 import triton
@@ -88,12 +87,7 @@ def build_compact_grouped_route(
     top_k = topk_ids.shape[1]
     num_pairs = topk_ids.numel()
     experts = topk_ids.reshape(-1).to(torch.int64) - local_expert_offset
-    adapters = (
-        token_lora_mapping[:, None]
-        .expand(-1, top_k)
-        .reshape(-1)
-        .to(torch.int64)
-    )
+    adapters = token_lora_mapping[:, None].expand(-1, top_k).reshape(-1).to(torch.int64)
     valid = (
         (experts >= 0)
         & (experts < num_experts)
@@ -106,9 +100,7 @@ def build_compact_grouped_route(
     groups = adapters[pair_ids] * num_experts + experts[pair_ids]
     sorted_groups, order = torch.sort(groups, stable=True)
     sorted_pair_ids = pair_ids[order].contiguous()
-    active_groups, counts = torch.unique_consecutive(
-        sorted_groups, return_counts=True
-    )
+    active_groups, counts = torch.unique_consecutive(sorted_groups, return_counts=True)
     counts_host = tuple(int(value) for value in counts.cpu().tolist())
     offsets = [0]
     for count in counts_host:
@@ -215,9 +207,9 @@ def _unpack_or_zero_kernel(
     cols = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
     row_mask = rows < num_rows
     col_mask = cols < width
-    packed_rows = tl.load(
-        pair_to_packed_ptr + rows, mask=row_mask, other=-1
-    ).to(tl.int64)
+    packed_rows = tl.load(pair_to_packed_ptr + rows, mask=row_mask, other=-1).to(
+        tl.int64
+    )
     valid = packed_rows >= 0
     values = tl.load(
         packed_ptr
@@ -283,9 +275,9 @@ def _scatter_rows_kernel(
     cols = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
     row_mask = rows < num_rows
     col_mask = cols < width
-    destinations = tl.load(
-        destination_rows_ptr + rows, mask=row_mask, other=0
-    ).to(tl.int64)
+    destinations = tl.load(destination_rows_ptr + rows, mask=row_mask, other=0).to(
+        tl.int64
+    )
     values = tl.load(
         packed_ptr + rows[:, None] * stride_pm + cols[None, :] * stride_pn,
         mask=row_mask[:, None] & col_mask[None, :],
@@ -409,10 +401,7 @@ def _base_only_activation_kernel(
     adapter = tl.load(mapping_ptr + pair // top_k).to(tl.int64)
     destination = tl.load(source_rows_ptr + pair).to(tl.int64)
     valid_pair = (
-        (pair < num_pairs)
-        & (expert >= 0)
-        & (expert < num_experts)
-        & (adapter < 0)
+        (pair < num_pairs) & (expert >= 0) & (expert < num_experts) & (adapter < 0)
     )
     physical_mask = valid_pair & (cols < physical_i)
     logical_mask = physical_mask & (cols < logical_i)
@@ -471,9 +460,7 @@ def _packed_down_finalize_kernel(
             other=0.0,
         ).to(tl.float32)
         delta = tl.load(
-            packed_delta_ptr
-            + tl.maximum(packed, 0) * stride_dm
-            + cols * stride_dn,
+            packed_delta_ptr + tl.maximum(packed, 0) * stride_dm + cols * stride_dn,
             mask=col_mask & (packed >= 0),
             other=0.0,
         ).to(tl.float32)
@@ -652,9 +639,7 @@ class GroupedC2Boundary:
                     ]
                 )
                 gate_cs.append(
-                    self.packed_delta[
-                        start:end, inter_start : inter_start + physical_i
-                    ]
+                    self.packed_delta[start:end, inter_start : inter_start + physical_i]
                 )
             down_as.append(self.packed_act[start:end])
             down_bs.append(self.down_a[group, : self.rank, :physical_i])
@@ -736,9 +721,7 @@ class GroupedC2Boundary:
             self.act_out,
             width=self.physical_i,
         )
-        unpack_or_zero(
-            self.packed_down, self.route.pair_to_packed, self.down_rank
-        )
+        unpack_or_zero(self.packed_down, self.route.pair_to_packed, self.down_rank)
 
     def metadata(self) -> dict[str, object]:
         return {
@@ -793,17 +776,13 @@ class GroupedDownFinalizeBoundary:
         self.prepack()
 
     def prepack(self) -> None:
-        gather_rows(
-            self.rank_input, self.route.sorted_pair_ids, self.packed_rank
-        )
+        gather_rows(self.rank_input, self.route.sorted_pair_ids, self.packed_rank)
 
     def invoke_compute_only(self) -> None:
         self.plan()
 
     def invoke_boundary(self) -> None:
-        gather_rows(
-            self.rank_input, self.route.sorted_pair_ids, self.packed_rank
-        )
+        gather_rows(self.rank_input, self.route.sorted_pair_ids, self.packed_rank)
         self.plan()
         _packed_down_finalize_kernel[
             (

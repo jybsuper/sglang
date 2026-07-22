@@ -62,7 +62,10 @@ def test_partial_swiglu_slice_targets_need_no_zero_factors(target: tuple[str, ..
     if not target:
         assert args[1].shape[-1] == 0
         assert args[2].shape[-2] == 0
-    assert contract.benchmark_kernel_family() == "oracle_only_requires_provider_specialization"
+    assert (
+        contract.benchmark_kernel_family()
+        == "oracle_only_requires_provider_specialization"
+    )
 
 
 def test_relu2_padding_invalid_ids_base_rows_and_destination_dtype():
@@ -90,9 +93,7 @@ def test_relu2_padding_invalid_ids_base_rows_and_destination_dtype():
     assert bool((result.activation_output[[0, 2, 4, 6], 3:] == 0).all())
 
     down_b = 0.1 * torch.randn(2, 2, 4, 2, dtype=torch.bfloat16)
-    weights = torch.tensor(
-        [[0.25, 0.75], [0.5, 0.5], [0.6, 0.4]], dtype=torch.float32
-    )
+    weights = torch.tensor([[0.25, 0.75], [0.5, 0.5], [0.6, 0.4]], dtype=torch.float32)
     delta1 = reference_weighted_down_delta(
         result.down_rank_input,
         down_b,

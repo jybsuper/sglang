@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Callable
 
 import torch
-
 from route_countercandidates import (
     RoutePlan,
     RoutePlanMemo,

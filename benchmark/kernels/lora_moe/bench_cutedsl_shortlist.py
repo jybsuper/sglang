@@ -28,8 +28,8 @@ if str(REPO_ROOT) not in sys.path:
 import torch
 
 from benchmark.kernels.lora_moe.bench_algorithm_families import (
-    FamilyCase,
     _TUNING,
+    FamilyCase,
     _build_fixture,
     _check_site,
     _prepare_site,
@@ -100,9 +100,7 @@ def _prepare():
         output_dtype=torch.bfloat16,
     )
     cute.invoke_boundary()
-    cute_check = _strict_check(
-        cute_output, reference, name="gate_a", atol=5e-2
-    )
+    cute_check = _strict_check(cute_output, reference, name="gate_a", atol=5e-2)
     return case, fixture, triton_invoke, triton_check, cute, cute_check
 
 
@@ -169,10 +167,7 @@ def _route_mutation_audit(fixture, cute: GroupedGemmBoundary) -> dict[str, objec
             (replay_output.float() - mutated_reference.float()).abs().max().item()
         )
         route_reference_change = float(
-            (mutated_reference.float() - original_reference.float())
-            .abs()
-            .max()
-            .item()
+            (mutated_reference.float() - original_reference.float()).abs().max().item()
         )
         replay_change = float(
             (replay_output.float() - original_output.float()).abs().max().item()
@@ -286,9 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(
-            json.dumps(report, indent=2, sort_keys=True) + "\n"
-        )
+        args.json_output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     del fixture
     return 0
 

@@ -393,9 +393,7 @@ def _make_routing(
     else:
         route_generator = torch.Generator(device=device).manual_seed(seed)
         if pattern == "iid":
-            probabilities = torch.ones(
-                case.e_local, dtype=torch.float32, device=device
-            )
+            probabilities = torch.ones(case.e_local, dtype=torch.float32, device=device)
         elif pattern == "skewed":
             rank_probability = torch.arange(
                 1, case.e_local + 1, dtype=torch.float32, device=device
@@ -829,9 +827,7 @@ def _check_operator(
         # much larger BF16 ULP cannot hide or manufacture a LoRA contribution.
         rtol = 3e-2
         atol = min(2e-4, signal / 10.0) if signal else 0.0
-        torch.testing.assert_close(
-            first_delta, reference_delta, rtol=rtol, atol=atol
-        )
+        torch.testing.assert_close(first_delta, reference_delta, rtol=rtol, atol=atol)
         torch.testing.assert_close(second_delta, first_delta, rtol=rtol, atol=atol)
         return {
             "reference": "base_subtracted_lora_delta",

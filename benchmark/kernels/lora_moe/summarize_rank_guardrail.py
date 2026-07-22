@@ -19,7 +19,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable, Sequence
 
-
 DEVICES = {
     "h200": "rank8_16_guardrail_v1_h200",
     "gb300": "rank8_16_guardrail_v1_gb300",
@@ -187,8 +186,7 @@ def _aggregate(root: Path) -> tuple[list[dict], list[dict], dict]:
                 "winner_p50_us": winner["median_p50_us"],
                 "runner_up": runner_up["family"] if runner_up else None,
                 "runner_up_slower_pct": (
-                    (runner_up["median_p50_us"] / winner["median_p50_us"] - 1.0)
-                    * 100.0
+                    (runner_up["median_p50_us"] / winner["median_p50_us"] - 1.0) * 100.0
                     if runner_up
                     else None
                 ),
@@ -307,7 +305,9 @@ def _readme(canonical: list[dict], metadata: dict) -> str:
 
 def _write_hashes(root: Path) -> None:
     output = root / "SHA256SUMS"
-    paths = sorted(path for path in root.rglob("*") if path.is_file() and path != output)
+    paths = sorted(
+        path for path in root.rglob("*") if path.is_file() and path != output
+    )
     output.write_text(
         "\n".join(
             f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}"
@@ -339,9 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         + "\n"
     )
-    (root / "raw_family_rows.json").write_text(
-        json.dumps(family_rows, indent=2) + "\n"
-    )
+    (root / "raw_family_rows.json").write_text(json.dumps(family_rows, indent=2) + "\n")
     _write_csv(root / "winners.csv", winners)
     (root / "README.md").write_text(_readme(canonical, metadata))
     _write_hashes(root)

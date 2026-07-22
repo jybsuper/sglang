@@ -170,7 +170,9 @@ def test_fused_relu2_consumer_matches_logical_provider_contract(
 
     # Errors are measured against the LoRA/activation signal, not hidden by a
     # large base output. The small absolute floor covers BF16 dot order only.
-    act_error = float((act_out.float() - expected.activation_output.float()).abs().max())
+    act_error = float(
+        (act_out.float() - expected.activation_output.float()).abs().max()
+    )
     act_signal = float(expected.activation_output.float().abs().max())
     down_error = float(
         (down_intermediate.float() - expected.down_rank_input.float()).abs().max()

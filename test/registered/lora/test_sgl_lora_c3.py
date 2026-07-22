@@ -97,9 +97,7 @@ def test_c3_static_base_row_contract_graph_replay_and_event_lifetime(
             fixture.reset_hidden()
             batch.run()
             torch.cuda.synchronize()
-            torch.testing.assert_close(
-                fixture.last_output, eager, rtol=0.0, atol=3e-3
-            )
+            torch.testing.assert_close(fixture.last_output, eager, rtol=0.0, atol=3e-3)
         assert len(batch.capture_resources) == 1
 
 

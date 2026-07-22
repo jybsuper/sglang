@@ -91,15 +91,11 @@ def _fused_value_b_relu2_down_a_pair_kernel(
         other=0.0,
     ).to(tl.float32)
     value_a = tl.load(
-        value_intermediate_ptr
-        + pair_idx * stride_vim
-        + offs_value_r * stride_vir,
+        value_intermediate_ptr + pair_idx * stride_vim + offs_value_r * stride_vir,
         mask=has_lora & value_r_mask,
         other=0.0,
     )
-    value_b_base = (
-        value_b_ptr + safe_adapter * stride_vbl + safe_expert * stride_vbe
-    )
+    value_b_base = value_b_ptr + safe_adapter * stride_vbl + safe_expert * stride_vbe
     value_b = tl.load(
         value_b_base
         + offs_n[:, None] * stride_vbn
@@ -124,9 +120,7 @@ def _fused_value_b_relu2_down_a_pair_kernel(
     down_r_mask = offs_down_r < down_rank
     down_a_base = down_a_ptr + safe_adapter * stride_dal + safe_expert * stride_dae
     down_a = tl.load(
-        down_a_base
-        + offs_down_r[:, None] * stride_dar
-        + offs_n[None, :] * stride_dan,
+        down_a_base + offs_down_r[:, None] * stride_dar + offs_n[None, :] * stride_dan,
         mask=has_lora & down_r_mask[:, None] & logical_mask[None, :],
         other=0.0,
     )
@@ -135,9 +129,7 @@ def _fused_value_b_relu2_down_a_pair_kernel(
     )
     partial = partial.to(down_intermediate_ptr.dtype.element_ty)
     tl.atomic_add(
-        down_intermediate_ptr
-        + pair_idx * stride_dim
-        + offs_down_r * stride_dir,
+        down_intermediate_ptr + pair_idx * stride_dim + offs_down_r * stride_dir,
         partial,
         mask=has_lora & down_r_mask,
         sem="relaxed",
@@ -255,9 +247,7 @@ def _fused_value_b_relu2_down_a_aligned_kernel(
     ).to(tl.int64)
     local_expert = base_expert - local_expert_offset
     valid_pair = (
-        pair_in_range
-        & (local_expert >= 0)
-        & (local_expert < num_local_experts)
+        pair_in_range & (local_expert >= 0) & (local_expert < num_local_experts)
     )
     virtual_expert = tl.load(virtual_expert_ids_ptr + pid_m).to(tl.int64)
     valid_virtual_expert = (virtual_expert >= 0) & (
@@ -278,9 +268,7 @@ def _fused_value_b_relu2_down_a_aligned_kernel(
     value_r_mask = offs_value_r < value_rank
 
     value = tl.load(
-        value_ptr
-        + dst_rows[:, None] * stride_vm
-        + offs_n[None, :] * stride_vn,
+        value_ptr + dst_rows[:, None] * stride_vm + offs_n[None, :] * stride_vn,
         mask=valid_pair[:, None] & logical_mask[None, :],
         other=0.0,
     ).to(tl.float32)
@@ -296,11 +284,7 @@ def _fused_value_b_relu2_down_a_aligned_kernel(
         value_b_base
         + offs_value_r[:, None] * stride_vbr
         + offs_n[None, :] * stride_vbn,
-        mask=(
-            valid_virtual_expert
-            & value_r_mask[:, None]
-            & logical_mask[None, :]
-        ),
+        mask=(valid_virtual_expert & value_r_mask[:, None] & logical_mask[None, :]),
         other=0.0,
     )
     value_delta = tl.dot(value_a, value_b, out_dtype=tl.float32)
@@ -309,9 +293,7 @@ def _fused_value_b_relu2_down_a_aligned_kernel(
     activated = activated * activated
     activated_dst = activated.to(act_out_ptr.dtype.element_ty)
     tl.store(
-        act_out_ptr
-        + dst_rows[:, None] * stride_aom
-        + offs_n[None, :] * stride_aon,
+        act_out_ptr + dst_rows[:, None] * stride_aom + offs_n[None, :] * stride_aon,
         tl.where(logical_mask[None, :], activated_dst, 0.0),
         mask=valid_pair[:, None] & physical_mask[None, :],
     )
@@ -320,14 +302,8 @@ def _fused_value_b_relu2_down_a_aligned_kernel(
     down_r_mask = offs_down_r < down_rank
     down_a_base = down_a_ptr + safe_virtual_expert * stride_dae
     down_a = tl.load(
-        down_a_base
-        + offs_n[:, None] * stride_dan
-        + offs_down_r[None, :] * stride_dar,
-        mask=(
-            valid_virtual_expert
-            & logical_mask[:, None]
-            & down_r_mask[None, :]
-        ),
+        down_a_base + offs_n[:, None] * stride_dan + offs_down_r[None, :] * stride_dar,
+        mask=(valid_virtual_expert & logical_mask[:, None] & down_r_mask[None, :]),
         other=0.0,
     )
     partial = tl.dot(activated_dst, down_a, out_dtype=tl.float32)

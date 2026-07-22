@@ -75,16 +75,16 @@ def _full_cells() -> list[MatrixCell]:
     )
     cells.extend(
         MatrixCell(
-                key=f"qwen-prefill-r64-mixed-{execution}",
-                tokens=128,
-                experts=8,
-                top_k=8,
-                hidden=2048,
-                intermediate=512,
-                rank=64,
-                occupancy="mixed",
-                phase="prefill",
-                execution=execution,
+            key=f"qwen-prefill-r64-mixed-{execution}",
+            tokens=128,
+            experts=8,
+            top_k=8,
+            hidden=2048,
+            intermediate=512,
+            rank=64,
+            occupancy="mixed",
+            phase="prefill",
+            execution=execution,
         )
         for execution in ("eager", "cuda_graph")
     )
@@ -161,9 +161,7 @@ def main() -> int:
         default="all",
     )
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument(
-        "--suite", choices=("full", "representative"), default="full"
-    )
+    parser.add_argument("--suite", choices=("full", "representative"), default="full")
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=10)
     args = parser.parse_args()
@@ -186,9 +184,7 @@ def main() -> int:
     for provider in providers:
         provider_dir = output_dir / provider
         provider_dir.mkdir(parents=True, exist_ok=True)
-        cells = (
-            _full_cells() if args.suite == "full" else _representative_cells()
-        )
+        cells = _full_cells() if args.suite == "full" else _representative_cells()
         for cell in cells:
             result_path = provider_dir / f"{cell.key}.json"
             stdout_path = provider_dir / f"{cell.key}.stdout.log"

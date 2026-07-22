@@ -114,9 +114,7 @@ def _invoke(fixture: PipelineFixture, variant: str, **schedule) -> None:
         raise ValueError(f"unknown C3 benchmark variant {variant!r}")
 
 
-def _checked_output(
-    fixture: PipelineFixture, variant: str, **schedule
-) -> torch.Tensor:
+def _checked_output(fixture: PipelineFixture, variant: str, **schedule) -> torch.Tensor:
     fixture.reset_hidden()
     _invoke(fixture, variant, **schedule)
     torch.cuda.synchronize()
@@ -168,9 +166,7 @@ def _check_independent_delta(
     checks[f"{prefix}_delta_rtol"] = 2e-2
     checks[f"{prefix}_delta_atol"] = atol
     checks[f"{prefix}_measured_c0_nondeterminism"] = oracle_nondeterminism
-    checks[f"{prefix}_measured_candidate_nondeterminism"] = (
-        candidate_nondeterminism
-    )
+    checks[f"{prefix}_measured_candidate_nondeterminism"] = candidate_nondeterminism
     checks[f"{prefix}_zero_candidate_rejection_margin"] = signal / atol
     try:
         torch.testing.assert_close(
@@ -200,15 +196,9 @@ def _correctness(fixture: PipelineFixture, **schedule) -> dict[str, object]:
     )
     checks: dict[str, object] = {
         "oracle": "independent_production_C0_minus_matched_DeepGEMM_N0",
-        "token_lora_mapping_rows": int(
-            fixture.lora_info.token_lora_mapping.numel()
-        ),
-        "active_rows": int(
-            (fixture.lora_info.token_lora_mapping >= 0).sum().item()
-        ),
-        "base_only_rows": int(
-            (fixture.lora_info.token_lora_mapping < 0).sum().item()
-        ),
+        "token_lora_mapping_rows": int(fixture.lora_info.token_lora_mapping.numel()),
+        "active_rows": int((fixture.lora_info.token_lora_mapping >= 0).sum().item()),
+        "base_only_rows": int((fixture.lora_info.token_lora_mapping < 0).sum().item()),
         "c0_repeat_delta_max_abs_error": oracle_nondeterminism,
         "correctness_tolerance_policy": (
             "max(1pct_signal,2^-11,2x_sum_of_measured_C0_and_candidate_"
@@ -222,9 +212,7 @@ def _correctness(fixture: PipelineFixture, **schedule) -> dict[str, object]:
         candidate_repeat = _checked_output(fixture, variant, **schedule)
         candidate_nondeterminism = _max_abs_diff(candidate, candidate_repeat)
         candidate_repeats[variant] = (candidate, candidate_repeat)
-        checks[f"c0_{variant.lower()}_max_abs"] = _max_abs_diff(
-            reference, candidate
-        )
+        checks[f"c0_{variant.lower()}_max_abs"] = _max_abs_diff(reference, candidate)
         _check_independent_delta(
             checks,
             f"c0_{variant.lower()}",
@@ -305,9 +293,7 @@ def _prepare_batch(
             torch.cuda.synchronize()
             assert fixture.last_output is not None and eager is not None
             replay_errors.append(_max_abs_diff(eager, fixture.last_output))
-            torch.testing.assert_close(
-                eager, fixture.last_output, rtol=0.0, atol=3e-3
-            )
+            torch.testing.assert_close(eager, fixture.last_output, rtol=0.0, atol=3e-3)
         if len(batch.capture_resources) != capture_resource_count:
             raise AssertionError(
                 "CUDA graph replay unexpectedly changed graph-scoped resources"
@@ -417,9 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--counterbalance-repeats must be positive")
     variants = VARIANTS if args.variant == "all" else (args.variant,)
     executions = (
-        ("eager", "cuda_graph")
-        if args.execution == "both"
-        else (args.execution,)
+        ("eager", "cuda_graph") if args.execution == "both" else (args.execution,)
     )
     if args.mode == "nsys" and (len(variants) != 1 or len(executions) != 1):
         raise ValueError("Nsight mode requires one variant and one execution")
@@ -492,8 +476,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **schedule,
             )
             label = (
-                f"sgl_lora_moe::C3_overlap::{case.case_id}::{variant}::"
-                f"{execution}"
+                f"sgl_lora_moe::C3_overlap::{case.case_id}::{variant}::" f"{execution}"
             )
             with cuda_profile_range(label):
                 for _ in range(args.profile_iterations):
@@ -572,7 +555,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
-            args.json_output.write_text(json.dumps(result, indent=2, default=str) + "\n")
+            args.json_output.write_text(
+                json.dumps(result, indent=2, default=str) + "\n"
+            )
         else:
             print(json.dumps(result, indent=2, default=str))
     return 0

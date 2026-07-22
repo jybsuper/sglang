@@ -45,9 +45,7 @@ class TestMoeLoraE2EAnalysis(unittest.TestCase):
         self.assertEqual(summary["cells"]["base_bs1"]["repetitions"], 3)
         delta = compare(summary, summary)
         self.assertEqual(
-            delta["lora_bs1"]["output_throughput"][
-                "sgl_minus_control_percent"
-            ],
+            delta["lora_bs1"]["output_throughput"]["sgl_minus_control_percent"],
             0.0,
         )
 
