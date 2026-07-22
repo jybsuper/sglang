@@ -1,0 +1,1861 @@
+{
+  "schema_version": 1,
+  "scope": "benchmark_only_bf16_moe_lora_algorithm_family_matrix",
+  "environment": {
+    "device_name": "NVIDIA GB300",
+    "compute_capability": "10.3",
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "cuda_visible_devices": "3"
+  },
+  "kernel_tuning": {
+    "indexed_bn": 32,
+    "indexed_bk": 128,
+    "indexed_warps": 4,
+    "aligned_bn": 64,
+    "aligned_bk": 64,
+    "aligned_warps": 4,
+    "segmented_bn": 64,
+    "segmented_bk": 64,
+    "segmented_warps": 4,
+    "pair_consumer_bn": 64,
+    "aligned_consumer_bn": 64,
+    "segmented_consumer_bn": 64,
+    "consumer_warps": 4,
+    "direct_finalize_bh": 64,
+    "reduce_finalize_bh": 128,
+    "one_shot_bi": 64,
+    "one_shot_bh": 32
+  },
+  "measurement_order": "forward",
+  "contract": {
+    "route_domain": "canonical_token_topk_pairs",
+    "virtual_group": "adapter_times_E_local_plus_local_expert",
+    "route_build_charged_in": "O0",
+    "route_prebuilt_in": "K0",
+    "clears_casts_pack_scatter_consumers_charged": true,
+    "production_dispatch_changed": false
+  },
+  "runs": [
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_a",
+      "family": "indexed",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {},
+      "timing": {
+        "p20_us": 13.036800175905228,
+        "p50_us": 13.824000023305416,
+        "p80_us": 18.04800033569336,
+        "min_us": 12.512000277638435,
+        "max_us": 20.864000543951988,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_a",
+      "family": "segmented",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "route_representation": "compact_segment_block_descriptors"
+      },
+      "timing": {
+        "p20_us": 12.15359978377819,
+        "p50_us": 13.151999562978745,
+        "p80_us": 16.24319963157177,
+        "min_us": 11.487999930977821,
+        "max_us": 18.303999677300453,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_a",
+      "family": "aligned",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "route_representation": "padded_aligned_virtual_expert",
+        "split_k": 4
+      },
+      "timing": {
+        "p20_us": 11.987199820578098,
+        "p50_us": 12.927999719977379,
+        "p80_us": 16.518400236964226,
+        "min_us": 11.359999887645245,
+        "max_us": 18.912000581622124,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "indexed",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.04052734375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "current_pair_owned_fused_C2P"
+      },
+      "timing": {
+        "p20_us": 10.08640043437481,
+        "p50_us": 10.816000401973724,
+        "p80_us": 12.966400012373924,
+        "min_us": 9.600000455975533,
+        "max_us": 14.399999752640724,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.04052734375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "segmented",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.04052734375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "compact_segment_block_fused_C2P"
+      },
+      "timing": {
+        "p20_us": 9.292799979448318,
+        "p50_us": 9.312000125646591,
+        "p80_us": 11.865600012242794,
+        "min_us": 9.279999881982803,
+        "max_us": 13.567999936640263,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.04052734375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "segmented",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.04052734375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "compact_segment_block_fused_C2P"
+      },
+      "timing": {
+        "p20_us": 10.169599950313568,
+        "p50_us": 11.071999557316303,
+        "p80_us": 12.185599654912949,
+        "min_us": 9.568000212311745,
+        "max_us": 12.927999719977379,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.04052734375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "aligned",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.04052734375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "current_padded_aligned_fused_C2P"
+      },
+      "timing": {
+        "p20_us": 10.604799911379814,
+        "p50_us": 10.816000401973724,
+        "p80_us": 13.446400314569473,
+        "min_us": 10.463999584317207,
+        "max_us": 15.200000256299973,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.04052734375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_a",
+      "family": "indexed",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {},
+      "timing": {
+        "p20_us": 10.022399760782719,
+        "p50_us": 10.27199998497963,
+        "p80_us": 12.921600043773651,
+        "min_us": 9.855999611318111,
+        "max_us": 14.688000082969666,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_a",
+      "family": "segmented",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "route_representation": "compact_segment_block_descriptors"
+      },
+      "timing": {
+        "p20_us": 9.785600006580353,
+        "p50_us": 10.495999827980995,
+        "p80_us": 12.934399954974651,
+        "min_us": 9.312000125646591,
+        "max_us": 14.560000039637089,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_a",
+      "family": "aligned",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_max_abs": 0.0,
+        "error_over_signal": 0.0,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "route_representation": "padded_aligned_virtual_expert",
+        "split_k": 4
+      },
+      "timing": {
+        "p20_us": 10.047999583184719,
+        "p50_us": 10.33599954098463,
+        "p80_us": 12.927999719977379,
+        "min_us": 9.855999611318111,
+        "max_us": 14.655999839305878,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "indexed",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.2351741790771484e-08,
+        "mean_abs_error": 1.7640928717810311e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.7960862562042807e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "token_owned_direct_fused_down_B_finalize"
+      },
+      "timing": {
+        "p20_us": 9.77919977158308,
+        "p50_us": 10.33599954098463,
+        "p80_us": 12.735999934375286,
+        "min_us": 9.40799992531538,
+        "max_us": 14.336000196635723,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 2.2351741790771484e-08,
+          "mean_abs_error": 1.7640928717810311e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.7960862562042807e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "indexed",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.2351741790771484e-08,
+        "mean_abs_error": 1.7640928717810311e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.7960862562042807e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "token_owned_direct_fused_down_B_finalize"
+      },
+      "timing": {
+        "p20_us": 9.689600020647049,
+        "p50_us": 9.920000098645687,
+        "p80_us": 12.780800089240074,
+        "min_us": 9.535999968647957,
+        "max_us": 14.688000082969666,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 2.2351741790771484e-08,
+          "mean_abs_error": 1.7640928717810311e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.7960862562042807e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "segmented",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "segmented_down_B_materialize_then_finalize"
+      },
+      "timing": {
+        "p20_us": 11.17440015077591,
+        "p50_us": 11.42400037497282,
+        "p80_us": 14.4384004175663,
+        "min_us": 11.008000001311302,
+        "max_us": 16.448000445961952,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "segmented",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "segmented_down_B_materialize_then_finalize"
+      },
+      "timing": {
+        "p20_us": 10.89280005544424,
+        "p50_us": 11.680000461637974,
+        "p80_us": 14.444799721240997,
+        "min_us": 10.367999784648418,
+        "max_us": 16.287999227643013,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "aligned",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "current_aligned_down_B_materialize_then_finalize"
+      },
+      "timing": {
+        "p20_us": 12.665599770843983,
+        "p50_us": 15.00799972563982,
+        "p80_us": 22.11199961602688,
+        "min_us": 11.103999800980091,
+        "max_us": 26.847999542951584,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "aligned",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "current_aligned_down_B_materialize_then_finalize"
+      },
+      "timing": {
+        "p20_us": 10.784000158309937,
+        "p50_us": 11.168000288307667,
+        "p80_us": 14.796800538897514,
+        "min_us": 10.528000071644783,
+        "max_us": 17.216000705957413,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "one_shot_bf16",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "one_shot_down_A_B_then_finalize",
+        "intermediate_rank_materialized": false,
+        "rank_accumulation": "bf16_boundary"
+      },
+      "timing": {
+        "p20_us": 10.969599895179272,
+        "p50_us": 11.487999930977821,
+        "p80_us": 14.867199957370758,
+        "min_us": 10.623999871313572,
+        "max_us": 17.11999997496605,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "one_shot_bf16",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "one_shot_down_A_B_then_finalize",
+        "intermediate_rank_materialized": false,
+        "rank_accumulation": "bf16_boundary"
+      },
+      "timing": {
+        "p20_us": 14.841600134968758,
+        "p50_us": 17.664000391960144,
+        "p80_us": 21.58080004155636,
+        "min_us": 12.959999963641167,
+        "max_us": 24.191999807953835,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "one_shot_fp32",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "one_shot_down_A_B_then_finalize",
+        "intermediate_rank_materialized": false,
+        "rank_accumulation": "fp32"
+      },
+      "timing": {
+        "p20_us": 11.615999788045883,
+        "p50_us": 12.575999833643436,
+        "p80_us": 15.07200039923191,
+        "min_us": 10.975999757647514,
+        "max_us": 16.736000776290894,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "one_shot_fp32",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.5230696703838476e-09,
+        "reference_max_abs": 0.12444692850112915,
+        "error_over_signal": 1.1973908374695203e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      },
+      "bmm_admission": {
+        "eligible": false,
+        "reason": "nonuniform_M_g"
+      },
+      "implementation": {
+        "consumer": "one_shot_down_A_B_then_finalize",
+        "intermediate_rank_materialized": false,
+        "rank_accumulation": "fp32"
+      },
+      "timing": {
+        "p20_us": 10.97599994391203,
+        "p50_us": 11.168000288307667,
+        "p80_us": 14.374399557709694,
+        "min_us": 10.847999714314938,
+        "max_us": 16.51199907064438,
+        "num_samples": 3,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.5230696703838476e-09,
+          "reference_max_abs": 0.12444692850112915,
+          "error_over_signal": 1.1973908374695203e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 135528448,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    }
+  ],
+  "disqualifications": [
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_a",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "indexed",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "UNSUPPORTED:current_pair_consumer_bf16_destination",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "aligned",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "UNSUPPORTED:current_aligned_consumer_bf16_destination",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_a",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 8,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "mixed",
+        "route_pattern": "iid",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "fp32",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "BMM_DISQUALIFIED:nonuniform_M_g",
+      "route_metrics": {
+        "active_groups": 0,
+        "min_m_g": 0,
+        "max_m_g": 0,
+        "mean_m_g": 0.0,
+        "cv_m_g": null,
+        "equal_m_g": false
+      }
+    }
+  ],
+  "winners": [
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "down_a",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "indexed",
+      "p50_us": 10.27199998497963,
+      "runner_up_pct": 0.6230486380313982
+    },
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "indexed",
+      "p50_us": 10.33599954098463,
+      "runner_up_pct": 10.526324325712434
+    },
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "down_finalize",
+      "accumulation": "fp32",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "indexed",
+      "p50_us": 9.920000098645687,
+      "runner_up_pct": 12.580646948101947
+    },
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "gate_a",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "aligned",
+      "p50_us": 12.927999719977379,
+      "runner_up_pct": 1.732672090448939
+    },
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "segmented",
+      "p50_us": 9.312000125646591,
+      "runner_up_pct": 16.151205498643616
+    },
+    {
+      "tokens": 1,
+      "rank": 8,
+      "site": "gate_consumer",
+      "accumulation": "fp32",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "segmented",
+      "p50_us": 11.071999557316303,
+      "runner_up_pct": null
+    }
+  ]
+}
