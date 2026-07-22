@@ -38,6 +38,9 @@ from sglang.kernels.ops.moe.virtual_experts import (
     _fused_virtual_topk_ids,
     fused_sanitize_expert_ids,
 )
+from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import (
+    _fused_virtual_topk_ids as _sgl_fused_virtual_topk_ids,
+)
 
 
 class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
@@ -129,6 +132,42 @@ class TestFusedVirtualTopkIdsPreservesSentinels(CustomTestCase):
         self.assertEqual(virtual_ids[0, 0].item(), 3)
         self.assertEqual(virtual_ids[0, 1].item(), 5)
         self.assertFalse(bool(mask[0].item()))
+
+    def test_fused_shared_expert_ids_are_not_virtualized(self):
+        """IDs at/above routed E have no routed LoRA factor.
+
+        In particular, the first fused shared-expert ID must not alias expert
+        zero in the next adapter slot. Exercise both the legacy and sgl_lora
+        virtual-expert implementations because both remain selectable during
+        migration.
+        """
+        num_experts = 16
+        topk_ids = torch.tensor(
+            [[0, 15, 16, 17], [0, 15, 16, 31]],
+            dtype=torch.int32,
+            device=self.device,
+        )
+        token_lora_mapping = torch.tensor(
+            [0, 1], dtype=torch.int32, device=self.device
+        )
+        expected = torch.tensor(
+            [[0, 15, -1, -1], [16, 31, -1, -1]],
+            dtype=torch.int32,
+            device=self.device,
+        )
+
+        for implementation in (
+            _fused_virtual_topk_ids,
+            _sgl_fused_virtual_topk_ids,
+        ):
+            virtual_ids, _, _ = implementation(
+                topk_ids,
+                token_lora_mapping,
+                num_experts,
+                shared_outer=False,
+                max_loras=2,
+            )
+            torch.testing.assert_close(virtual_ids, expected, rtol=0, atol=0)
 
 
 class _AlignBlockSizeSentinelBucketBase(CustomTestCase):
