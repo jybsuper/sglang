@@ -524,8 +524,11 @@ def segmented_gate_b_consumer(
         down_rank.stride(1),
         BLOCK_M=plan.block_m,
         BLOCK_N=block_n,
-        BLOCK_GATE_R=triton.next_power_of_2(gate_rank_size),
-        BLOCK_DOWN_R=triton.next_power_of_2(down_rank_size),
+        # Triton tensor-core dots require K >= 16.  Keep rank 8 as a logical
+        # shape, but execute it in a masked physical-16 tile; the inactive
+        # lanes load zero and therefore do not require padded factor storage.
+        BLOCK_GATE_R=max(16, triton.next_power_of_2(gate_rank_size)),
+        BLOCK_DOWN_R=max(16, triton.next_power_of_2(down_rank_size)),
         ROUND_GATE_DELTA_TO_BF16=round_gate_delta_to_bf16,
         ROUND_DOWN_PARTIAL_TO_BF16=round_down_partial_to_bf16,
         num_warps=num_warps,

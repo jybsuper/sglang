@@ -294,7 +294,10 @@ def _invoke_flat(
         FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
         BLOCK_SIZE_M=block_m,
         BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_R=triton.next_power_of_2(rank),
+        # Logical rank 8 executes in a masked physical-16 dot tile.  Loads
+        # outside the logical rank are already masked, so no padded storage or
+        # zero materialization is needed.
+        BLOCK_SIZE_R=max(16, triton.next_power_of_2(rank)),
         GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
         GATED_A_HALF=n // 2 if gated_midpoint else 0,
         num_warps=config.get("num_warps", 4),
@@ -349,7 +352,7 @@ def _invoke_two_slice(
         FUSE_SUM_ALL_REDUCE=fuse_sum_all_reduce,
         BLOCK_SIZE_M=block_m,
         BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_R=triton.next_power_of_2(rank),
+        BLOCK_SIZE_R=max(16, triton.next_power_of_2(rank)),
         GROUP_SIZE_M=config.get("GROUP_SIZE_M", 1),
         num_warps=config.get("num_warps", 4),
         num_stages=1,

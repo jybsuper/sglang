@@ -11,7 +11,7 @@ from sglang.test.ci.ci_register import register_cuda_ci
 register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
 
 
-@pytest.mark.parametrize("rank", [16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64])
 @pytest.mark.parametrize("num_output_slices", [1, 2])
 def test_direct_expand_uses_the_requested_input_slice(
     rank: int,
@@ -89,7 +89,7 @@ def test_direct_expand_uses_the_requested_input_slice(
     torch.testing.assert_close(output, expected, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.parametrize("rank", [16, 64])
+@pytest.mark.parametrize("rank", [8, 16, 64])
 def test_direct_expand_matches_production_down_projection(rank: int):
     """Cover routed weighting plus top-k collapse used by the Phase-1a runner."""
     torch.manual_seed(29)
