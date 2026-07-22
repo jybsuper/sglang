@@ -33,6 +33,9 @@ from sglang.srt.model_executor.runner_backend.base_cuda_graph_backend import (
 from sglang.srt.model_executor.runner_backend.cuda_graph_dedup_mixin import (
     DedupedCudaGraphMixin,
 )
+from sglang.srt.model_executor.runner_utils.capture_resources import (
+    cuda_graph_capture_resource_scope,
+)
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
     BreakableCUDAGraph,
     BreakableCUDAGraphCapture,
@@ -69,6 +72,7 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
         self._graphs: Dict[Any, BreakableCUDAGraph] = {}
         self._outputs: Dict[Any, Any] = {}
         self._capture_inputs: Dict[Any, Any] = {}
+        self._capture_resources: Dict[Any, list[Any]] = {}
         self._pool = None
         self._device_module = cuda_graph_runner.device_module
         self._tp_group = cuda_graph_runner.model_runner.tp_group
@@ -126,20 +130,22 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
         size = shape_key.size
         if self._shared_output_buffer is None:
             self._shared_output_buffer = self._alloc_full_buffer(warmup_out, size)
-        with BreakableCUDAGraphCapture(
-            cuda_graph=graph,
-            pool=self._pool,
-            stream=self._capture_stream,
-        ):
-            out = captured_fn()
-            out_rows = self._output_rows(out, size)
-            self._copy_output_to_buffer(out, self._shared_output_buffer, out_rows)
+        with cuda_graph_capture_resource_scope() as resources:
+            with BreakableCUDAGraphCapture(
+                cuda_graph=graph,
+                pool=self._pool,
+                stream=self._capture_stream,
+            ):
+                out = captured_fn()
+                out_rows = self._output_rows(out, size)
+                self._copy_output_to_buffer(out, self._shared_output_buffer, out_rows)
 
         stored = self._slice_output(self._shared_output_buffer, out_rows)
         self._graphs[shape_key] = graph
         self._outputs[shape_key] = stored
         # CUDA graphs retain tensor addresses, not Python tensor lifetimes.
         self._capture_inputs[shape_key] = capture_inputs
+        self._capture_resources[shape_key] = resources
 
     def _output_rows(self, output: Any, cap: int) -> int:
         """Leading-dim row count actually produced by the body, clamped to ``cap``.
@@ -252,5 +258,6 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
         self._graphs.clear()
         self._outputs.clear()
         self._capture_inputs.clear()
+        self._capture_resources.clear()
         self._pool = None
         self._shared_output_buffer = None

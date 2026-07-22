@@ -59,6 +59,7 @@ class PreparedBatch:
     run: Callable[[], None]
     launches_per_batch: int
     graph: Any | None = None
+    capture_resources: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -99,11 +100,16 @@ def make_batch(
         return PreparedBatch(eager_batch, inner_iterations)
 
     torch = _load_torch()
+    from sglang.srt.model_executor.runner_utils.capture_resources import (
+        cuda_graph_capture_resource_scope,
+    )
+
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
-        for _ in range(inner_iterations):
-            fn()
-    return PreparedBatch(graph.replay, inner_iterations, graph)
+    with cuda_graph_capture_resource_scope() as resources:
+        with torch.cuda.graph(graph):
+            for _ in range(inner_iterations):
+                fn()
+    return PreparedBatch(graph.replay, inner_iterations, graph, tuple(resources))
 
 
 def _linear_quantile(sorted_values: Sequence[float], q: float) -> float:
