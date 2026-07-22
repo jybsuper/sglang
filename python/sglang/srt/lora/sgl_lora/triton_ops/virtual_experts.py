@@ -1008,16 +1008,9 @@ def _merged_experts_fused_moe_lora_add_impl(
         )
 
         if stage == "shrink":
-            # Pre-warm the routing-B cache on this (side) stream so the later "expand" stage
-            # launches no routing kernels — they overlap finalize together with the shrink.
-            if routing_cache is not None:
-                _get_routing(
-                    topk_ids,
-                    token_lora_mapping,
-                    num_experts_b,
-                    experts_shared_outer_loras_b,
-                    b_stage_config["BLOCK_SIZE_M"],
-                )
+            # Routing allocations belong on the caller's main stream.  A
+            # split-stage caller that needs the B schedule must invoke
+            # stage="routing" before it forks work to a side stream.
             return intermediate
 
     assert intermediate is not None, "stage='expand' requires intermediate_buffer"

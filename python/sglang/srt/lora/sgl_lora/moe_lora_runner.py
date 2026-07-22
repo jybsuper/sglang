@@ -102,6 +102,13 @@ def run_sgl_lora_moe(
 
     overlap = two_stream_enabled
     token_lora_mapping = lora_info.token_lora_mapping
+    if token_lora_mapping.shape[0] != num_tokens:
+        raise RuntimeError(
+            "sgl_lora token/adapter assignment does not match the MoE token "
+            f"domain: mapping has {token_lora_mapping.shape[0]} rows but the "
+            f"runner received {num_tokens}. Gather/remap assignments before "
+            "MoE-DP execution."
+        )
     fused_lora_routing_cache: dict = {}
 
     gate_up_delta = hidden_states.new_empty((num_tokens, top_k, 2 * inter))
@@ -194,13 +201,21 @@ def run_sgl_lora_moe(
     )
     dispose_tensor(down_out)
 
+    # Base finalize applies routed_scaling_factor after its weighted top-k
+    # reduction. Apply the same factor to the down-LoRA contribution exactly
+    # once; otherwise non-unit models scale only the base branch.
+    down_topk_weights = topk_weights
+    routed_scale = runner_config.routed_scaling_factor
+    if routed_scale is not None and routed_scale != 1.0:
+        down_topk_weights = topk_weights * float(routed_scale)
+
     merged_experts_fused_moe_lora_add(
         output=output,
         hidden_states=activation_lora_input.view(-1, inter),
         lora_a=lora_info.down_lora_a_weights,
         lora_b=lora_info.down_lora_b_weights,
         topk_ids=topk_ids,
-        topk_weights=topk_weights,
+        topk_weights=down_topk_weights,
         token_lora_mapping=token_lora_mapping,
         mul_routed_weight=True,
         experts_shared_outer_loras_a=False,
