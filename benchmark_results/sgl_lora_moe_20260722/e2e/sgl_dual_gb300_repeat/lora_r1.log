@@ -1,0 +1,82 @@
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+TensorRT-LLM MHA only supports page_size of 16, 32 or 64, changing page_size from None to 64.
+max_running_requests_per_dp=4096
+dp_size=1
+skip_max_running_requests_threshold=4096
+skip_token_capacity_threshold=751424
+======== Warmup Begin ========
+Warmup with batch_size=[16, 1, 32]
+#Input tokens: 16384
+#Output tokens: 256
+batch size: 16
+input_len: 1024
+output_len: 16
+latency: 1.27 s
+input throughput: 13894.87 tok/s
+output throughput: 2968.71 tok/s
+last_ttft: 1.18 s
+last generation throughput: 1.23 tok/s
+#Input tokens: 1024
+#Output tokens: 16
+batch size: 1
+input_len: 1024
+output_len: 16
+latency: 0.74 s
+input throughput: 1471.07 tok/s
+output throughput: 360.30 tok/s
+last_ttft: 0.70 s
+last generation throughput: 1.23 tok/s
+#Input tokens: 32768
+#Output tokens: 512
+batch size: 32
+input_len: 1024
+output_len: 16
+latency: 0.34 s
+input throughput: 144245.22 tok/s
+output throughput: 4692.21 tok/s
+last_ttft: 0.23 s
+last generation throughput: 1.23 tok/s
+======== Warmup End   ========
+
+#Input tokens: 128
+#Output tokens: 32
+batch size: 1
+input_len: 128
+output_len: 32
+latency: 0.65 s
+input throughput: 227.88 tok/s
+output throughput: 352.34 tok/s
+last_ttft: 0.56 s
+last generation throughput: 1.23 tok/s
+#Input tokens: 2048
+#Output tokens: 512
+batch size: 16
+input_len: 128
+output_len: 32
+latency: 0.52 s
+input throughput: 5933.01 tok/s
+output throughput: 2966.37 tok/s
+last_ttft: 0.35 s
+last generation throughput: 1.23 tok/s
+#Input tokens: 4096
+#Output tokens: 1024
+batch size: 32
+input_len: 128
+output_len: 32
+latency: 0.28 s
+input throughput: 47145.32 tok/s
+output throughput: 5180.89 tok/s
+last_ttft: 0.09 s
+last generation throughput: 1.23 tok/s
+
+Results are saved to /mirror/artifacts/e2e_model/sgl_dual_gb300_repeat/lora_r1.jsonl
+
+Input lens: [128]. Output lens: [32].
+|   batch size |   input len |   latency (s) |   input throughput (tok/s) |   output throughput (tok/s) | acc length   |   ITL (ms) |   input cost ($/1M) |   output cost ($/1M) | cache hit rate   |
+|--------------|-------------|---------------|----------------------------|-----------------------------|--------------|------------|---------------------|----------------------|------------------|
+|            1 |         128 |          0.65 |                     227.88 |                      352.34 | n/a          |       2.84 |                6.97 |                 3.15 | n/a              |
+|           16 |         128 |          0.52 |                    5933.01 |                     2966.37 | n/a          |       5.39 |                0.27 |                 0.37 | n/a              |
+|           32 |         128 |          0.28 |                   47145.3  |                     5180.89 | n/a          |       6.18 |                0.03 |                 0.21 | n/a              |
+
