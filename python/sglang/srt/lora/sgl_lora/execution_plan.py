@@ -117,6 +117,7 @@ def build_moe_lora_execution_plan(
     has_base_rows: bool,
     two_stream_requested: bool,
     fused_supported: bool = True,
+    base_lora_expert_domains_match: bool = True,
     provider_key: str = "deepgemm_bf16",
 ) -> MoeLoraExecutionPlan:
     """Return one immutable production plan for a resolved forward shape."""
@@ -145,6 +146,16 @@ def build_moe_lora_execution_plan(
         finalize_num_warps=finalizer_warps,
         provider_key=provider_key,
     )
+
+    if not base_lora_expert_domains_match:
+        return MoeLoraExecutionPlan(
+            path=MoeLoraExecutionPath.C0_SERIAL,
+            reason=(
+                "physical base-expert IDs include shared slots while routed LoRA "
+                "factors exclude them; mapped C2/C3 consumers are not implemented"
+            ),
+            **common,
+        )
 
     if not fused_supported:
         return MoeLoraExecutionPlan(

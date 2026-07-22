@@ -52,8 +52,10 @@ def _get_pdl_launch_metadata() -> tuple[bool, dict]:
 def _fused_virtual_topk_ids_kernel(
     topk_ids_ptr,
     token_lora_mapping_ptr,
+    expert_id_map_ptr,
     virtual_topk_ids_ptr,
     token_lora_mask_ptr,
+    expert_id_map_size,
     num_experts_for_weight: tl.constexpr,
     M,
     top_k: tl.constexpr,
@@ -61,6 +63,7 @@ def _fused_virtual_topk_ids_kernel(
     local_expert_offset: tl.constexpr,
     local_num_experts: tl.constexpr,
     EP_LOCAL: tl.constexpr,
+    USE_EXPERT_ID_MAP: tl.constexpr,
     ENABLE_PDL: tl.constexpr = False,
 ):
     """
@@ -92,8 +95,15 @@ def _fused_virtual_topk_ids_kernel(
     mask_val = lora_id >= 0
     safe_lora = tl.maximum(lora_id, 0)
 
-    base = tl.load(topk_ids_ptr + offs, mask=valid, other=0)
-    if EP_LOCAL:
+    raw_base = tl.load(topk_ids_ptr + offs, mask=valid, other=0)
+    base = raw_base
+    if USE_EXPERT_ID_MAP:
+        map_valid = valid & (raw_base >= 0) & (raw_base < expert_id_map_size)
+        mapped = tl.load(expert_id_map_ptr + raw_base, mask=map_valid, other=-1)
+        # Preserve negative producer sentinels. Non-negative IDs outside the
+        # provider domain and physical shared slots become the canonical -1.
+        base = tl.where(raw_base < 0, raw_base, mapped)
+    elif EP_LOCAL:
         # EP: drop experts this rank does not own to the -1 sentinel (handled just
         # below); owned experts keep their GLOBAL id so the global contiguous weight
         # buffer indexes with a single stride and the merged-weight reshape stays a
@@ -135,6 +145,7 @@ def _fused_virtual_topk_ids(
     max_loras: int,
     local_expert_offset: int = 0,
     local_num_experts: int | None = None,
+    expert_id_map: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """
     Returns virtual topk_ids, token_lora_mask, and virtual_num_experts.
@@ -147,16 +158,35 @@ def _fused_virtual_topk_ids(
     M, top_k = topk_ids.shape
     device = topk_ids.device
 
+    if expert_id_map is not None:
+        if expert_id_map.device != topk_ids.device:
+            raise ValueError("expert_id_map must be on the same device as topk_ids")
+        if expert_id_map.dtype != torch.int32 or expert_id_map.ndim != 1:
+            raise TypeError("expert_id_map must be a one-dimensional int32 tensor")
+        if not expert_id_map.is_contiguous():
+            raise ValueError("expert_id_map must be contiguous")
+
     if shared_outer:
         num_experts_for_weight = 1
         # For shared_outer, we need topk_ids to be zeros
         zero_topk = torch.zeros_like(topk_ids)
         input_topk = zero_topk
         ep_local = False
+        use_expert_id_map = False
     else:
         num_experts_for_weight = num_experts
         input_topk = topk_ids
-        ep_local = local_num_experts is not None and local_num_experts < num_experts
+        use_expert_id_map = expert_id_map is not None
+        ep_local = (
+            not use_expert_id_map
+            and local_num_experts is not None
+            and local_num_experts < num_experts
+        )
+
+    if expert_id_map is None:
+        # Triton requires a valid pointer even when the constexpr branch is
+        # disabled. Reuse an existing device tensor; it is never dereferenced.
+        expert_id_map = topk_ids.reshape(-1)
 
     virtual_topk_ids = torch.empty_like(topk_ids)
     token_lora_mask = torch.empty(M, dtype=torch.bool, device=device)
@@ -168,8 +198,10 @@ def _fused_virtual_topk_ids(
     _fused_virtual_topk_ids_kernel[grid](
         input_topk,
         token_lora_mapping,
+        expert_id_map,
         virtual_topk_ids,
         token_lora_mask,
+        expert_id_map.numel() if use_expert_id_map else 0,
         num_experts_for_weight,
         M,
         top_k,
@@ -177,6 +209,7 @@ def _fused_virtual_topk_ids(
         local_expert_offset,
         local_num_experts if local_num_experts is not None else 0,
         ep_local,
+        use_expert_id_map,
         ENABLE_PDL=enable_pdl,
         **pdl_kwargs,
     )
@@ -749,6 +782,7 @@ def _merged_experts_fused_moe_lora_add_impl(
     num_output_slices: int = 1,
     local_expert_offset: int = 0,
     local_num_experts: int | None = None,
+    expert_id_map: torch.Tensor | None = None,
     stage: str = "all",
     intermediate_buffer: torch.Tensor | None = None,
 ) -> "torch.Tensor | None":
@@ -777,7 +811,11 @@ def _merged_experts_fused_moe_lora_add_impl(
     # Global per-expert dim of the LoRA weights. lora_a may be shared-outer (expert
     # dim 1) while lora_b is per-expert, so take the max for the true global count.
     per_expert_dim = max(lora_a.shape[1], lora_b.shape[1])
-    ep_local = local_num_experts is not None and local_num_experts < per_expert_dim
+    ep_local = (
+        expert_id_map is None
+        and local_num_experts is not None
+        and local_num_experts < per_expert_dim
+    )
     input_top_k = 1 if hidden_states.shape[0] == topk_ids.numel() else topk_ids.shape[1]
 
     def _merge_lora_expert_weight(t: torch.Tensor) -> torch.Tensor:
@@ -896,7 +934,12 @@ def _merged_experts_fused_moe_lora_add_impl(
         block_size: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # Check routing_cache for cross-call reuse (gate_up and down share routing)
-        cache_key = (num_experts, shared_outer, block_size)
+        cache_key = (
+            num_experts,
+            shared_outer,
+            block_size,
+            None if expert_id_map is None else expert_id_map.data_ptr(),
+        )
         if routing_cache is not None:
             cached = routing_cache.get(cache_key)
             if cached is not None:
@@ -911,6 +954,7 @@ def _merged_experts_fused_moe_lora_add_impl(
                 max_loras,
                 local_expert_offset,
                 local_num_experts,
+                expert_id_map,
             )
         )
         sorted_token_ids, expert_ids, num_tokens_post_padded = _align_block_size(
@@ -1051,9 +1095,7 @@ def _merged_experts_fused_moe_lora_add_impl(
             num_tokens_post_padded,
             input_top_k,
             a_stage_config,
-            signal_expand_pdl=(
-                stage == "all" and use_direct_expand_add and enable_pdl
-            ),
+            signal_expand_pdl=(stage == "all" and use_direct_expand_add and enable_pdl),
         )
 
         if stage == "shrink":
@@ -1135,6 +1177,7 @@ def merged_experts_fused_moe_lora_add(
     num_output_slices: int = 1,
     local_expert_offset: int = 0,
     local_num_experts: int | None = None,
+    expert_id_map: torch.Tensor | None = None,
     stage: str = "all",
     intermediate_buffer: torch.Tensor | None = None,
 ) -> "torch.Tensor | None":
@@ -1157,6 +1200,7 @@ def merged_experts_fused_moe_lora_add(
         num_output_slices=num_output_slices,
         local_expert_offset=local_expert_offset,
         local_num_experts=local_num_experts,
+        expert_id_map=expert_id_map,
         stage=stage,
         intermediate_buffer=intermediate_buffer,
     )

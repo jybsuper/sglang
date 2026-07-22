@@ -1,0 +1,95 @@
+/tmp/sglang-shared-expert/python/sglang/srt/environ.py:1123: UserWarning: Environment variable SGL_LORA_BENCH_REVISION is deprecated, please use SGLANG_LORA_BENCH_REVISION
+  warnings.warn(
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /tmp/sglang-shared-expert/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=16,N=32,device_name=NVIDIA_H200.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:   0%|          | 1/16384 [00:01<6:58:10,  1.53s/it]DeepGEMM warmup:   0%|          | 65/16384 [00:03<10:45, 25.28it/s] DeepGEMM warmup:   1%|          | 129/16384 [00:04<08:10, 33.15it/s]DeepGEMM warmup:   2%|▏         | 257/16384 [00:06<05:02, 53.32it/s]DeepGEMM warmup:   2%|▏         | 321/16384 [00:07<05:25, 49.30it/s]DeepGEMM warmup:   2%|▏         | 385/16384 [00:09<05:42, 46.67it/s]DeepGEMM warmup:   3%|▎         | 513/16384 [00:10<04:29, 58.97it/s]DeepGEMM warmup:   4%|▍         | 641/16384 [00:12<03:55, 66.73it/s]DeepGEMM warmup:   6%|▋         | 1025/16384 [00:13<02:03, 124.48it/s]DeepGEMM warmup:   7%|▋         | 1153/16384 [00:15<02:17, 111.03it/s]DeepGEMM warmup:   9%|▉         | 1537/16384 [00:16<01:39, 149.33it/s]DeepGEMM warmup:  16%|█▌        | 2561/16384 [00:18<00:45, 301.66it/s]DeepGEMM warmup:  57%|█████▋    | 9341/16384 [00:18<00:03, 2111.53it/s]DeepGEMM warmup:  99%|█████████▉| 16296/16384 [00:18<00:00, 4599.46it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:18<00:00, 876.04it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:   0%|          | 1/16384 [00:01<6:43:57,  1.48s/it]DeepGEMM warmup:   1%|          | 129/16384 [00:02<05:20, 50.71it/s]DeepGEMM warmup:   2%|▏         | 257/16384 [00:04<04:02, 66.59it/s]DeepGEMM warmup:   2%|▏         | 321/16384 [00:06<04:42, 56.82it/s]DeepGEMM warmup:   3%|▎         | 513/16384 [00:07<03:12, 82.26it/s]DeepGEMM warmup:   4%|▍         | 641/16384 [00:09<03:09, 82.90it/s]DeepGEMM warmup:   5%|▍         | 769/16384 [00:10<03:06, 83.76it/s]DeepGEMM warmup:   5%|▌         | 833/16384 [00:12<03:41, 70.34it/s]DeepGEMM warmup:   6%|▋         | 1025/16384 [00:13<02:55, 87.66it/s]DeepGEMM warmup:   7%|▋         | 1089/16384 [00:15<03:27, 73.63it/s]DeepGEMM warmup:  13%|█▎        | 2113/16384 [00:16<00:55, 256.19it/s]DeepGEMM warmup:  58%|█████▊    | 9436/16384 [00:16<00:03, 2288.52it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:16<00:00, 972.89it/s]
+{
+  "case": {
+    "active_adapters": 1,
+    "case_id": "shared-smoke-r32",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 2,
+    "hidden_size": 128,
+    "include_base_rows": true,
+    "intermediate_size": 128,
+    "lora_capacity": 2,
+    "num_routed_experts": 8,
+    "num_shared_experts": 1,
+    "phase": "decode",
+    "rank": 32,
+    "routed_topk": 2,
+    "tokens": 4
+  },
+  "contract": {
+    "cuda_graph_replay": false,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 8,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": true,
+    "physical_experts": 8,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 2,
+    "shared_execution": "serial_or_in_provider",
+    "shared_expert_form": "conventional_separate",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 0
+  },
+  "correctness": {
+    "cosine": 0.9999906420707703,
+    "finite": true,
+    "max_abs": 4.76837158203125e-07,
+    "mean_abs": 5.786932888440788e-08,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "shared-smoke-r32",
+      "device": "h200",
+      "execution": "eager",
+      "inner_iterations": 1,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_experts_20260722/smoke_matrix/separate_serial-eager.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 5,
+      "variant": "separate_serial",
+      "warmup": 3
+    },
+    "cuda_runtime": "12.9",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_uuid": "3d30efc8-11ed-24d6-8599-83ea5c5cd521",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T12:59:54.858547+00:00",
+    "torch": "2.11.0+cu129"
+  },
+  "execution": "eager",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 809.8239898681641,
+    "min_us": 762.112021446228,
+    "num_samples": 5,
+    "p20_us": 773.2479810714722,
+    "p50_us": 802.3040294647217,
+    "p80_us": 805.0367832183838
+  },
+  "variant": "separate_serial"
+}

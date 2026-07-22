@@ -1,0 +1,93 @@
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /tmp/sglang-shared-expert/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=2048,N=64,device_name=NVIDIA_H200.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  26%|██▋       | 4310/16384 [00:00<00:00, 43095.62it/s]DeepGEMM warmup:  53%|█████▎    | 8620/16384 [00:00<00:00, 42437.08it/s]DeepGEMM warmup:  79%|███████▊  | 12865/16384 [00:00<00:00, 42233.96it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 42271.32it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  32%|███▏      | 5171/16384 [00:00<00:00, 51704.75it/s]DeepGEMM warmup:  63%|██████▎   | 10342/16384 [00:00<00:00, 45625.20it/s]DeepGEMM warmup:  91%|█████████▏| 14951/16384 [00:00<00:00, 44072.55it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 44762.44it/s]
+{
+  "case": {
+    "active_adapters": 4,
+    "case_id": "qwen35-decode-t32-r64-mixed",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": true,
+    "intermediate_size": 512,
+    "lora_capacity": 8,
+    "num_routed_experts": 256,
+    "num_shared_experts": 1,
+    "phase": "decode",
+    "rank": 64,
+    "routed_topk": 8,
+    "tokens": 32
+  },
+  "contract": {
+    "cuda_graph_replay": true,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": true,
+    "physical_experts": 257,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "serial_or_in_provider",
+    "shared_expert_form": "fused_global_slots",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 1
+  },
+  "correctness": {
+    "cosine": 0.9999873638153076,
+    "finite": true,
+    "max_abs": 2.288818359375e-05,
+    "mean_abs": 1.499059521847812e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-decode-t32-r64-mixed",
+      "device": "h200",
+      "execution": "cuda_graph",
+      "inner_iterations": 1,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_experts_20260722/repeat_reverse/qwen35-decode-t32-r64-mixed__fused_global__cuda_graph__repeat2.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "fused_global",
+      "warmup": 20
+    },
+    "cuda_runtime": "12.9",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_uuid": "3d30efc8-11ed-24d6-8599-83ea5c5cd521",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:26:07.893731+00:00",
+    "torch": "2.11.0+cu129"
+  },
+  "execution": "cuda_graph",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 474.9760031700134,
+    "min_us": 465.66399931907654,
+    "num_samples": 100,
+    "p20_us": 467.9232060909271,
+    "p50_us": 469.5039987564087,
+    "p80_us": 470.9440052509308
+  },
+  "variant": "fused_global"
+}

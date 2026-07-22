@@ -125,6 +125,10 @@ def test_eager_and_fallback_policy_stay_in_measured_envelope():
     assert quantized.provider_key == "deepgemm_fp8_w8a8"
     assert "provider-neutral serial topology" in quantized.reason
 
+    shared = _plan(base_lora_expert_domains_match=False)
+    assert shared.path is PLAN.MoeLoraExecutionPath.C0_SERIAL
+    assert "physical base-expert IDs include shared slots" in shared.reason
+
 
 def test_rank_tiers_and_mixed_schedule_are_explicit_plan_fields():
     r16 = _plan(num_tokens=1, rank=16)

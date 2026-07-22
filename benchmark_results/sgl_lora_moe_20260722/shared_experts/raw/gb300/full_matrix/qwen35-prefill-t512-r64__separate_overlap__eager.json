@@ -1,0 +1,86 @@
+{
+  "case": {
+    "active_adapters": 4,
+    "case_id": "qwen35-prefill-t512-r64",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": false,
+    "intermediate_size": 512,
+    "lora_capacity": 8,
+    "num_routed_experts": 256,
+    "num_shared_experts": 1,
+    "phase": "prefill",
+    "rank": 64,
+    "routed_topk": 8,
+    "tokens": 512
+  },
+  "contract": {
+    "cuda_graph_replay": false,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": false,
+    "physical_experts": 256,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "overlap",
+    "shared_expert_form": "conventional_separate",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 0
+  },
+  "correctness": {
+    "cosine": 0.9999849200248718,
+    "finite": true,
+    "max_abs": 2.288818359375e-05,
+    "mean_abs": 1.8785135580401402e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-prefill-t512-r64",
+      "device": "gb300",
+      "execution": "eager",
+      "inner_iterations": 1,
+      "json_output": "/mirror/artifacts/sgl_lora_shared_experts_20260722/full_matrix/qwen35-prefill-t512-r64__separate_overlap__eager.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "separate_overlap",
+      "warmup": 20
+    },
+    "cuda_runtime": "13.0",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "gpu_uuid": "8c2ff252-6f67-a242-ae2d-2870a06aa2b8",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:17:39.492092+00:00",
+    "torch": "2.11.0+cu130"
+  },
+  "execution": "eager",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 1297.4079847335815,
+    "min_us": 1072.160005569458,
+    "num_samples": 100,
+    "p20_us": 1105.0367593765259,
+    "p50_us": 1121.9200491905212,
+    "p80_us": 1142.2208070755005
+  },
+  "variant": "separate_overlap"
+}

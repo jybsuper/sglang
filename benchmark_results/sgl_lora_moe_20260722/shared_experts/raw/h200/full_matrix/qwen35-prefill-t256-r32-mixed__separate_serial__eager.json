@@ -1,0 +1,86 @@
+{
+  "case": {
+    "active_adapters": 3,
+    "case_id": "qwen35-prefill-t256-r32-mixed",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": true,
+    "intermediate_size": 512,
+    "lora_capacity": 8,
+    "num_routed_experts": 256,
+    "num_shared_experts": 1,
+    "phase": "prefill",
+    "rank": 32,
+    "routed_topk": 8,
+    "tokens": 256
+  },
+  "contract": {
+    "cuda_graph_replay": false,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": true,
+    "physical_experts": 256,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "serial_or_in_provider",
+    "shared_expert_form": "conventional_separate",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 0
+  },
+  "correctness": {
+    "cosine": 0.9999871253967285,
+    "finite": true,
+    "max_abs": 2.288818359375e-05,
+    "mean_abs": 1.649829073357978e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-prefill-t256-r32-mixed",
+      "device": "h200",
+      "execution": "eager",
+      "inner_iterations": 1,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_experts_20260722/full_matrix/qwen35-prefill-t256-r32-mixed__separate_serial__eager.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "separate_serial",
+      "warmup": 20
+    },
+    "cuda_runtime": "12.9",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_uuid": "3d30efc8-11ed-24d6-8599-83ea5c5cd521",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:15:34.113457+00:00",
+    "torch": "2.11.0+cu129"
+  },
+  "execution": "eager",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 930.9120178222656,
+    "min_us": 762.8160119056702,
+    "num_samples": 100,
+    "p20_us": 782.1951746940613,
+    "p50_us": 800.7679879665375,
+    "p80_us": 812.6976013183594
+  },
+  "variant": "separate_serial"
+}

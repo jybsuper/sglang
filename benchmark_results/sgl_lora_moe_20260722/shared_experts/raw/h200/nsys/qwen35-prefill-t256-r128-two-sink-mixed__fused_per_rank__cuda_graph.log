@@ -1,0 +1,94 @@
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /tmp/sglang-shared-expert/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=2048,N=128,device_name=NVIDIA_H200.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:   0%|          | 1/16384 [00:00<1:10:31,  3.87it/s]DeepGEMM warmup:  31%|███▏      | 5129/16384 [00:00<00:00, 18262.43it/s]DeepGEMM warmup:  56%|█████▋    | 9247/16384 [00:00<00:00, 25988.67it/s]DeepGEMM warmup:  82%|████████▏ | 13365/16384 [00:00<00:00, 30926.03it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 25936.23it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  31%|███       | 5106/16384 [00:00<00:00, 51049.70it/s]DeepGEMM warmup:  62%|██████▏   | 10211/16384 [00:00<00:00, 44584.59it/s]DeepGEMM warmup:  90%|████████▉ | 14723/16384 [00:00<00:00, 42972.38it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 43650.26it/s]
+Capture range started in the application.
+Capture range ended in the application.
+Generating '/tmp/nsys-root/nsys-report-1c9b.qdstrm'
+[1/1] [0%                          ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-repProcessing events...
+[1/1] [0%                          ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [5%                          ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [7%                          ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [=16%                        ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [==19%                       ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [==20%                       ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [====27%                     ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [====28%                     ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [======33%                   ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [=======================96%  ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [========================98% ] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [========================100%] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [========================100%] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep[1/1] [========================100%] qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep
+{
+  "case": {
+    "active_adapters": 4,
+    "case_id": "qwen35-prefill-t256-r128-two-sink-mixed",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": true,
+    "intermediate_size": 512,
+    "lora_capacity": 8,
+    "num_routed_experts": 256,
+    "num_shared_experts": 2,
+    "phase": "prefill",
+    "rank": 128,
+    "routed_topk": 8,
+    "tokens": 256
+  },
+  "contract": {
+    "cuda_graph_replay": true,
+    "ep_proxy": true,
+    "ep_proxy_is_not_d0": true,
+    "expert_id_map": true,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": true,
+    "physical_experts": 264,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "serial_or_in_provider",
+    "shared_expert_form": "fused_per_rank_interleaved_slots",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 2
+  },
+  "correctness": {
+    "cosine": 0.9999898672103882,
+    "finite": true,
+    "max_abs": 3.0517578125e-05,
+    "mean_abs": 1.969163349713199e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-prefill-t256-r128-two-sink-mixed",
+      "device": "h200",
+      "execution": "cuda_graph",
+      "inner_iterations": 1,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_experts_20260722/nsys/qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.json",
+      "list_cases": false,
+      "mode": "nsys",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "fused_per_rank",
+      "warmup": 20
+    },
+    "cuda_runtime": "12.9",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_uuid": "3d30efc8-11ed-24d6-8599-83ea5c5cd521",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:31:25.301791+00:00",
+    "torch": "2.11.0+cu129"
+  },
+  "execution": "cuda_graph",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": null,
+  "variant": "fused_per_rank"
+}
+Generated:
+	/workspace/artifacts/sgl_lora_shared_experts_20260722/nsys/qwen35-prefill-t256-r128-two-sink-mixed__fused_per_rank__cuda_graph.nsys-rep
+Processing 465 events:
+[1%                                                                            ][2%                                                                            ][3%                                                                            ][=4%                                                                           ][=5%                                                                           ][==6%                                                                          ][===7%                                                                         ][====8%                                                                        ][=====9%                                                                       ][====10%                                                                       ][=====11%                                                                      ][======12%                                                                     ][=======13%                                                                    ][=======14%                                                                    ][========15%                                                                   ][=========16%                                                                  ][==========17%                                                                 ][===========18%                                                                ][===========19%                                                                ][============20%                                                               ][=============21%                                                              ][==============22%                                                             ][==============23%                                                             ][===============24%                                                            ][================25%                                                           ][=================26%                                                          ][==================27%                                                         ][==================28%                                                         ][===================29%                                                        ][====================30%                                                       ][=====================31%                                                      ][=====================32%                                                      ][======================33%                                                     ][=======================34%                                                    ][========================35%                                                   ][=========================36%                                                  ][=========================37%                                                  ][==========================38%                                                 ][===========================39%                                                ][============================40%                                               ][============================41%                                               ][=============================42%                                              ][==============================43%                                             ][===============================44%                                            ][================================45%                                           ][================================46%                                           ][=================================47%                                          ][==================================48%                                         ][===================================49%                                        ][====================================50%                                       ][====================================51%                                       ][=====================================52%                                      ][======================================53%                                     ][=======================================54%                                    ][=======================================55%                                    ][========================================56%                                   ][=========================================57%                                  ][==========================================58%                                 ][===========================================59%                                ][===========================================60%                                ][============================================61%                               ][=============================================62%                              ][==============================================63%                             ][==============================================64%                             ][===============================================65%                            ][================================================66%                           ][=================================================67%                          ][==================================================68%                         ][==================================================69%                         ][===================================================70%                        ][====================================================71%                       ][=====================================================72%                      ][=====================================================73%                      ][======================================================74%                     ][=======================================================75%                    ][========================================================76%                   ][=========================================================77%                  ][=========================================================78%                  ][==========================================================79%                 ][===========================================================80%                ][============================================================81%               ][============================================================82%               ][=============================================================83%              ][==============================================================84%             ][===============================================================85%            ][================================================================86%           ][================================================================87%           ][=================================================================88%          ][==================================================================89%         ][===================================================================90%        ][===================================================================91%        ][====================================================================92%       ][=====================================================================93%      ][======================================================================94%     ][=======================================================================95%    ][=======================================================================96%    ][========================================================================97%   ][=========================================================================98%  ][==========================================================================99% ][==========================================================================100%]
