@@ -1,0 +1,350 @@
+{
+  "schema": "sgl_lora_shared_outer_lab_v1",
+  "environment": {
+    "timestamp_utc": "2026-07-22T12:22:24.295159+00:00",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu129",
+    "cuda_runtime": "12.9",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "git_revision": "4ffaee0b413fae1098054a0c98eeae02ab537c02",
+    "git_dirty": true,
+    "pdl_policy": "architecture_auto",
+    "cli": {
+      "list_cases": false,
+      "all_cases": false,
+      "case_id": "qwen397-t32-r64-l4",
+      "site": "all",
+      "variant": "candidate-set",
+      "scope": "K0",
+      "device": "h200",
+      "cache_state": "hot",
+      "execution": "cuda_graph",
+      "mode": "time",
+      "warmup": 20,
+      "samples": 200,
+      "profile_iterations": 1,
+      "gate_config": "bm16-bn32-bk64-w4",
+      "down_config": "bm16-bn128-br64-w8",
+      "skip_check": false,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_outer_20260722/h200_confirm/qwen397-t32-r64-l4.json"
+    }
+  },
+  "methodology": {
+    "production": "current shared-outer virtual-expert stage",
+    "repeated_pair": "PyTorch executable algebra control",
+    "factorized": "PyTorch executable algebra control, not a candidate kernel",
+    "selection_status": "diagnostic_only; no production dispatch change",
+    "timing": "CUDA event, prebuilt routing for production"
+  },
+  "runs": [
+    {
+      "case": {
+        "case_id": "qwen397-t32-r64-l4",
+        "model": "qwen3.5-397b-a17b",
+        "tokens": 32,
+        "hidden_size": 4096,
+        "num_experts": 512,
+        "top_k": 10,
+        "rank": 64,
+        "active_adapters": 4,
+        "include_base": false,
+        "lora_capacity": 8,
+        "phase": "decode",
+        "active_tokens": 32,
+        "spans": [
+          {
+            "start": 0,
+            "stop": 8,
+            "adapter_id": 0
+          },
+          {
+            "start": 8,
+            "stop": 16,
+            "adapter_id": 1
+          },
+          {
+            "start": 16,
+            "stop": 24,
+            "adapter_id": 2
+          },
+          {
+            "start": 24,
+            "stop": 32,
+            "adapter_id": 3
+          }
+        ],
+        "arithmetic_work": {
+          "gate_a_repeated_pair_multiplies": 167772160,
+          "gate_a_deduplicated_multiplies": 16777216,
+          "gate_a_gemm_reduction_ratio": 10.0,
+          "down_b_repeated_pair_multiplies": 83886080,
+          "down_b_weighted_rank_reduce_multiplies": 8409088,
+          "down_b_gemm_reduction_ratio": 10.0
+        },
+        "factor_shapes": {
+          "gate_up_a": [
+            8,
+            1,
+            128,
+            4096
+          ],
+          "down_b": [
+            8,
+            1,
+            4096,
+            64
+          ]
+        }
+      },
+      "device_label": "h200",
+      "results": [
+        {
+          "site": "gate-a",
+          "variant": "production",
+          "scope": "K0",
+          "contract": "pair_major_[T,K,2R]",
+          "implementation_role": "current_virtual_expert_control",
+          "production_policy_changed": false,
+          "candidate_config": null,
+          "tile_plan": null,
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 0.0015932992100715637,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "current_production_route_prebuilt",
+          "routing": [
+            {
+              "num_experts_for_factor": 1,
+              "shared_outer": true,
+              "block_m": 16,
+              "allocated_pair_slots": 448,
+              "allocated_expert_blocks": 28,
+              "post_padding_pair_slots": 320
+            },
+            {
+              "num_experts_for_factor": 512,
+              "shared_outer": false,
+              "block_m": 16,
+              "allocated_pair_slots": 5120,
+              "allocated_expert_blocks": 320,
+              "post_padding_pair_slots": 5120
+            }
+          ],
+          "timing": {
+            "p20_us": 18.271999433636665,
+            "p50_us": 18.432000651955605,
+            "p80_us": 18.719999119639397,
+            "min_us": 17.75999926030636,
+            "max_us": 23.391999304294586,
+            "num_samples": 200,
+            "launches_per_batch": 1
+          }
+        },
+        {
+          "site": "gate-a",
+          "variant": "triton-token-materialized",
+          "scope": "K0",
+          "contract": "token_compute_then_separately_charged_pair_materialize_[T,K,2R]",
+          "implementation_role": "benchmark_only_triton_candidate",
+          "production_policy_changed": false,
+          "candidate_config": {
+            "key": "bm16-bn32-bk64-w4",
+            "block_m": 16,
+            "block_n": 32,
+            "block_k": 64,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "tile_plan": {
+            "num_tiles": 16,
+            "block_m": 16,
+            "block_n": 32,
+            "planner_timing": "excluded_from_K0",
+            "status": "benchmark_metadata_not_runtime_ABI"
+          },
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 0.00044621527194976807,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "static_adapter_spans_no_synthetic_route_sort",
+          "timing": {
+            "p20_us": 17.152000218629837,
+            "p50_us": 17.27999933063984,
+            "p80_us": 17.38240011036396,
+            "min_us": 16.607999801635742,
+            "max_us": 25.95200017094612,
+            "num_samples": 200,
+            "launches_per_batch": 1
+          }
+        },
+        {
+          "site": "gate-a",
+          "variant": "triton-token",
+          "scope": "K0",
+          "contract": "token_owned_[T,2R]_requires_gate_b_consumer_change",
+          "implementation_role": "benchmark_only_triton_candidate",
+          "production_policy_changed": false,
+          "candidate_config": {
+            "key": "bm16-bn32-bk64-w4",
+            "block_m": 16,
+            "block_n": 32,
+            "block_k": 64,
+            "num_warps": 4,
+            "num_stages": 3
+          },
+          "tile_plan": {
+            "num_tiles": 16,
+            "block_m": 16,
+            "block_n": 32,
+            "planner_timing": "excluded_from_K0",
+            "status": "benchmark_metadata_not_runtime_ABI"
+          },
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 0.00044621527194976807,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "static_adapter_spans_no_synthetic_route_sort",
+          "timing": {
+            "p20_us": 15.936000272631645,
+            "p50_us": 16.063999384641647,
+            "p80_us": 16.287999227643013,
+            "min_us": 15.552000142633915,
+            "max_us": 30.592000111937523,
+            "num_samples": 200,
+            "launches_per_batch": 1
+          }
+        },
+        {
+          "site": "down-b",
+          "variant": "production",
+          "scope": "K0",
+          "contract": "token_output_[T,H]",
+          "implementation_role": "current_virtual_expert_generic_b_control",
+          "production_policy_changed": false,
+          "candidate_config": null,
+          "tile_plan": null,
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 0.0016731470823287964,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "current_production_route_prebuilt",
+          "routing": [
+            {
+              "num_experts_for_factor": 512,
+              "shared_outer": false,
+              "block_m": 16,
+              "allocated_pair_slots": 5120,
+              "allocated_expert_blocks": 320,
+              "post_padding_pair_slots": 5120
+            },
+            {
+              "num_experts_for_factor": 1,
+              "shared_outer": true,
+              "block_m": 64,
+              "allocated_pair_slots": 832,
+              "allocated_expert_blocks": 13,
+              "post_padding_pair_slots": 512
+            }
+          ],
+          "timing": {
+            "p20_us": 12.703999876976013,
+            "p50_us": 12.896000407636166,
+            "p80_us": 13.024000450968742,
+            "min_us": 12.35199999064207,
+            "max_us": 18.751999363303185,
+            "num_samples": 200,
+            "launches_per_batch": 1
+          }
+        },
+        {
+          "site": "down-b",
+          "variant": "triton-weighted-rank-reduce",
+          "scope": "K0",
+          "contract": "token_output_[T,H]",
+          "implementation_role": "benchmark_only_triton_candidate",
+          "production_policy_changed": false,
+          "candidate_config": {
+            "key": "bm16-bn128-br64-w8",
+            "block_m": 16,
+            "block_n": 128,
+            "block_r": 64,
+            "num_warps": 8,
+            "num_stages": 3
+          },
+          "tile_plan": {
+            "num_tiles": 128,
+            "block_m": 16,
+            "block_n": 128,
+            "planner_timing": "excluded_from_K0",
+            "status": "benchmark_metadata_not_runtime_ABI"
+          },
+          "correctness": {
+            "reference": "FP32 repeated-pair algebra oracle",
+            "max_abs": 0.0002526193857192993,
+            "rtol": 0.04,
+            "atol": 0.03
+          },
+          "cache": {
+            "state": "hot",
+            "method": "none_hot_working_set",
+            "flush_bytes": 0,
+            "detected_l2_bytes": 62914560,
+            "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+          },
+          "route_inclusion": "static_adapter_spans_no_synthetic_route_sort",
+          "timing": {
+            "p20_us": 10.432000271975994,
+            "p50_us": 10.591999627649784,
+            "p80_us": 10.822400264441967,
+            "min_us": 10.111999697983265,
+            "max_us": 17.311999574303627,
+            "num_samples": 200,
+            "launches_per_batch": 1
+          }
+        }
+      ]
+    }
+  ]
+}
