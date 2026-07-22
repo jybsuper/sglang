@@ -83,6 +83,58 @@ def test_marlin_atomic_outputs_do_not_accumulate_recycled_buffer_contents():
         )
 
 
+def test_marlin_uses_distinct_lock_workspace_per_invocation():
+    major, _minor = torch.cuda.get_device_capability()
+    if major < 9:
+        pytest.skip("Marlin provider requires SM90+")
+
+    with _single_rank_runtime():
+        fixture = QuantizedPipelineFixture(
+            provider_name="marlin",
+            tokens=8,
+            experts=4,
+            top_k=2,
+            hidden=2048,
+            intermediate=512,
+            rank=16,
+            adapters=2,
+            occupancy="mixed",
+            phase="decode",
+            graph_mode=False,
+            output_dtype=torch.float32,
+            seed=20260724,
+        )
+        topk_ids = fixture.topk_output.topk_ids
+        topk_weights = fixture.topk_output.topk_weights
+        ws = fixture.base.prepare(
+            fixture.hidden_work,
+            topk_ids,
+            fixture.top_k,
+            topk_weights=topk_weights,
+            packed_topk_ids=fixture.packed_topk_ids,
+        )
+        out = torch.empty(
+            fixture.base.gateup_out_shape(ws),
+            device=fixture.hidden_work.device,
+            dtype=fixture.base.contract.gate_up_output_dtype,
+        )
+
+        original_make_workspace = fixture.base._make_workspace
+        workspaces = []
+
+        def record_workspace(*args, **kwargs):
+            workspace = original_make_workspace(*args, **kwargs)
+            workspaces.append(workspace)
+            return workspace
+
+        fixture.base._make_workspace = record_workspace
+        fixture.base.gateup(ws, out)
+        fixture.base.gateup(ws, out)
+
+        assert len(workspaces) == 2
+        assert workspaces[0].data_ptr() != workspaces[1].data_ptr()
+
+
 @pytest.mark.parametrize("provider", ("fp8", "marlin", "nvfp4"))
 def test_quantized_provider_runs_complete_production_plan_eager_and_graph(provider):
     major, _minor = torch.cuda.get_device_capability()

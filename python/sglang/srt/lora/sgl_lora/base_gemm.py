@@ -968,16 +968,6 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
         self._align = moe_align_block_size
         self._make_workspace = marlin_make_workspace
         self._act_kernel = silu_mul_delta_masked
-        self._workspace: torch.Tensor | None = (
-            self._make_workspace(quant_info.w13_weight.device, max_blocks_per_sm=4)
-            if quant_info.w13_weight.device.type == "cuda"
-            else None
-        )
-
-    def _get_workspace(self, device: torch.device) -> torch.Tensor:
-        if self._workspace is None or self._workspace.device != device:
-            self._workspace = self._make_workspace(device, max_blocks_per_sm=4)
-        return self._workspace
 
     def admit_workspace(
         self,
@@ -1093,6 +1083,10 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
         # shared W13/W2 cache before every invocation; preserve that contract
         # even when this provider is called with a recycled runner buffer.
         out.zero_()
+        # Marlin uses this buffer as inter-block reduction locks.  Allocate it
+        # per invocation, matching the stock runner, so independently captured
+        # graph families and concurrent streams never alias lock state.
+        workspace = self._make_workspace(activation.device, max_blocks_per_sm=4)
         self._gemm(
             activation,
             out,
@@ -1103,7 +1097,7 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
             qzeros,
             g_idx,
             sort_indices,
-            self._get_workspace(activation.device),
+            workspace,
             ws.sorted_token_ids,
             ws.expert_ids,
             ws.num_tokens_post_padded,
