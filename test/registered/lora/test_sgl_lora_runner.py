@@ -13,11 +13,20 @@ register_cuda_ci(est_time=5, stage="base-b", runner_config="1-gpu-small")
 
 
 class _FakeBaseGemm:
-    def __init__(self, *, num_tokens: int, top_k: int, hidden: int, inter: int):
+    def __init__(
+        self,
+        *,
+        num_tokens: int,
+        top_k: int,
+        hidden: int,
+        inter: int,
+        routed_scaling_factor=None,
+    ):
         self.num_tokens = num_tokens
         self.top_k = top_k
         self.hidden = hidden
         self.inter = inter
+        self.routed_scaling_factor = routed_scaling_factor
         self.calls = []
 
     def prepare(self, hidden_states, topk_ids, top_k):
@@ -69,7 +78,7 @@ class _FakeBaseGemm:
     ):
         self.calls.append("finalize")
         assert torch.all(down_out == 1.5)
-        assert routed_scaling_factor is None
+        assert routed_scaling_factor == self.routed_scaling_factor
         output.fill_(2.0)
 
 
@@ -84,6 +93,8 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
     num_tokens, top_k = 2, 2
     num_experts, hidden, inter, rank = 3, 32, 48, 16
     calls = []
+
+    routed_scaling_factor = 1.75
 
     def fake_merged_experts_fused_moe_lora_add(**kwargs):
         calls.append(kwargs)
@@ -106,6 +117,12 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
                 inter,
             )
             assert torch.all(kwargs["hidden_states"] == 0.5)
+            torch.testing.assert_close(
+                kwargs["topk_weights"],
+                topk_weights * routed_scaling_factor,
+                rtol=0,
+                atol=0,
+            )
             kwargs["output"].add_(1.0)
 
     monkeypatch.setattr(
@@ -160,8 +177,16 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
         intermediate_size=inter,
         hidden_size=hidden,
     )
-    runner_config = SimpleNamespace(top_k=top_k, routed_scaling_factor=None)
-    base = _FakeBaseGemm(num_tokens=num_tokens, top_k=top_k, hidden=hidden, inter=inter)
+    runner_config = SimpleNamespace(
+        top_k=top_k, routed_scaling_factor=routed_scaling_factor
+    )
+    base = _FakeBaseGemm(
+        num_tokens=num_tokens,
+        top_k=top_k,
+        hidden=hidden,
+        inter=inter,
+        routed_scaling_factor=routed_scaling_factor,
+    )
 
     result = run_sgl_lora_moe(
         dispatch_output,
@@ -182,6 +207,17 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
         rtol=0,
         atol=0,
     )
+
+    lora_info.token_lora_mapping = token_lora_mapping[:1]
+    with pytest.raises(RuntimeError, match="token/adapter assignment"):
+        run_sgl_lora_moe(
+            dispatch_output,
+            quant_info,
+            runner_config,
+            lora_info,
+            base,
+            two_stream_enabled=False,
+        )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,87 @@ Dispatch routes per batch:
 
 from __future__ import annotations
 
+import torch
+
 from sglang.srt.lora.sgl_lora.quant_info import SglLoraBf16QuantInfo
+
+
+def _phase1a_contract_violations(base_layer) -> list[str]:
+    """Return the unsupported semantics that would otherwise be silent.
+
+    This is deliberately one attach-time boundary rather than scattered
+    forward-path assertions.  Later provider implementations can consume and
+    retire individual entries as their contracts expand.
+    """
+    from sglang.srt.layers.quantization.unquant import UnquantizedFusedMoEMethod
+
+    cfg = base_layer.moe_runner_config
+    quant_method = base_layer.quant_method
+    violations = []
+
+    if not isinstance(quant_method, UnquantizedFusedMoEMethod):
+        violations.append(
+            "quant_method must be UnquantizedFusedMoEMethod "
+            f"(got {type(quant_method).__name__})"
+        )
+    else:
+        if quant_method.use_triton_kernels:
+            violations.append("transposed Triton-kernel weights are unsupported")
+        if quant_method.use_flashinfer_trtllm_moe:
+            violations.append("BlockMajorK TRT-LLM weights are unsupported")
+        if quant_method.with_bias:
+            violations.append("expert bias is unsupported")
+
+    w13 = base_layer.w13_weight
+    w2 = base_layer.w2_weight
+    if w13.dtype != torch.bfloat16 or w2.dtype != torch.bfloat16:
+        violations.append(
+            f"base weights must be BF16 (got w13={w13.dtype}, w2={w2.dtype})"
+        )
+    if w13.ndim != 3 or w2.ndim != 3:
+        violations.append(
+            f"base weights must use canonical 3-D [E,N,K] layout "
+            f"(got w13={tuple(w13.shape)}, w2={tuple(w2.shape)})"
+        )
+    elif (
+        w13.shape[0] != w2.shape[0]
+        or w13.shape[1] % 2
+        or w13.shape[2] != w2.shape[1]
+        or w13.shape[1] // 2 != w2.shape[2]
+    ):
+        violations.append(
+            f"base weight shapes must be w13=[E,2I,H], w2=[E,H,I] "
+            f"(got w13={tuple(w13.shape)}, w2={tuple(w2.shape)})"
+        )
+
+    if cfg.activation != "silu" or not cfg.is_gated:
+        violations.append(
+            f"activation must be gated SiLU (got {cfg.activation!r}, "
+            f"is_gated={cfg.is_gated})"
+        )
+    special_activation = {
+        "gemm1_alpha": cfg.gemm1_alpha,
+        "gemm1_clamp_limit": cfg.gemm1_clamp_limit,
+        "swiglu_limit": cfg.swiglu_limit,
+    }
+    enabled_special = {k: v for k, v in special_activation.items() if v is not None}
+    if enabled_special:
+        violations.append(
+            f"special gated-activation parameters are unsupported ({enabled_special})"
+        )
+    if cfg.apply_router_weight_on_input:
+        violations.append("apply_router_weight_on_input=True is unsupported")
+    if cfg.no_combine:
+        violations.append("no_combine=True is unsupported")
+    if cfg.num_fused_shared_experts:
+        violations.append(
+            f"fused shared experts are unsupported "
+            f"(got {cfg.num_fused_shared_experts})"
+        )
+    if cfg.use_tp_all_gather_activation:
+        violations.append("TP all-gather activation input is unsupported")
+
+    return violations
 
 
 def init_sgl_lora_moe(layer, base_layer) -> None:
@@ -22,6 +102,13 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
     Phase 1a supports BF16 ``UnquantizedFusedMoEMethod`` only.
     """
     from sglang.srt.lora.sgl_lora.base_gemm import resolve_base_gemm
+
+    violations = _phase1a_contract_violations(base_layer)
+    if violations:
+        raise NotImplementedError(
+            "sgl_lora Phase-1a cannot preserve this MoE layer's semantics: "
+            + "; ".join(violations)
+        )
 
     w13 = base_layer.w13_weight
     w2 = base_layer.w2_weight
