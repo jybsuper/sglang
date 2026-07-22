@@ -10,6 +10,12 @@ from unittest.mock import patch
 from sglang.srt.arg_groups.overrides import _moe_runner_fusion_disable
 from sglang.srt.layers.moe.utils import MoeRunnerBackend
 from sglang.srt.lora.layers import FusedMoEWithLoRA
+from sglang.srt.lora.sgl_lora.lora_layer import _use_stock_base_path
+from sglang.srt.model_executor.runner_utils.capture_mode import (
+    capture_lora_variant,
+    get_capture_lora_variant,
+    should_record_lora_graph_variants,
+)
 from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
 
@@ -17,6 +23,60 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestSglLoraExecutionSelection(unittest.TestCase):
+    def test_decode_graph_variants_are_scoped_to_sgl_lora(self):
+        ordinary_decode = SimpleNamespace(is_none=lambda: True)
+        speculative = SimpleNamespace(is_none=lambda: False)
+
+        self.assertTrue(
+            should_record_lora_graph_variants(
+                SimpleNamespace(enable_lora=True, lora_execution_engine="sgl_lora"),
+                ordinary_decode,
+            )
+        )
+        self.assertFalse(
+            should_record_lora_graph_variants(
+                SimpleNamespace(enable_lora=True, lora_execution_engine="legacy"),
+                ordinary_decode,
+            )
+        )
+        self.assertFalse(
+            should_record_lora_graph_variants(
+                SimpleNamespace(enable_lora=True, lora_execution_engine="sgl_lora"),
+                speculative,
+            )
+        )
+
+    def test_capture_variant_restores_and_selects_fixed_topology(self):
+        self.assertIsNone(get_capture_lora_variant())
+        with capture_lora_variant("lora"):
+            self.assertEqual(get_capture_lora_variant(), "lora")
+            self.assertFalse(
+                _use_stock_base_path(
+                    has_active_lora=False,
+                    capture_mode=True,
+                    capture_variant=get_capture_lora_variant(),
+                )
+            )
+            with capture_lora_variant("nolora"):
+                self.assertEqual(get_capture_lora_variant(), "nolora")
+                self.assertTrue(
+                    _use_stock_base_path(
+                        has_active_lora=False,
+                        capture_mode=True,
+                        capture_variant=get_capture_lora_variant(),
+                    )
+                )
+            self.assertEqual(get_capture_lora_variant(), "lora")
+        self.assertIsNone(get_capture_lora_variant())
+
+        self.assertFalse(
+            _use_stock_base_path(
+                has_active_lora=True,
+                capture_mode=False,
+                capture_variant=None,
+            )
+        )
+
     def test_resolution_matrix(self):
         cases = (
             ("auto", "auto", "legacy", "auto", False),
