@@ -85,6 +85,9 @@ P0_CELLS: tuple[tuple[str, int, int, int, int, int, str, str], ...] = (
     ("default-mixed-full", 32, 7, 1, 8, 128, "decode", "cold"),
     ("default-lora-full", 32, 8, 0, 8, 128, "decode", "cold"),
     ("decode-large", 256, 1, 0, 1, 32, "decode", "cold"),
+    ("prefill-small", 128, 3, 0, 8, 64, "prefill", "cold"),
+    ("prefill-threshold", 256, 3, 0, 8, 64, "prefill", "cold"),
+    ("prefill-threshold-plus", 257, 3, 0, 8, 64, "prefill", "cold"),
     ("prefill", 2048, 3, 0, 8, 64, "prefill", "cold"),
     ("routing-hot", 256, 8, 0, 8, 128, "decode", "hot"),
 )
