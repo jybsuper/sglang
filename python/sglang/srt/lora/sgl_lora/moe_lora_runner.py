@@ -73,6 +73,7 @@ def run_sgl_lora_moe(
     base: MoeLoraBaseGemm,
     *,
     two_stream_enabled: bool,
+    output_dtype: torch.dtype | None = None,
 ) -> StandardCombineInput:
     from sglang.srt.distributed import get_tp_group
     from sglang.srt.distributed.device_communicators.pynccl_allocator import (
@@ -92,7 +93,33 @@ def run_sgl_lora_moe(
     assert TopKOutputChecker.format_is_standard(topk_output)
     topk_ids = topk_output.topk_ids
     topk_weights = topk_output.topk_weights
+    packed_topk_ids = getattr(topk_output, "packed_topk_ids", None)
     top_k = runner_config.top_k
+
+    output_dtype = hidden_states.dtype if output_dtype is None else output_dtype
+    base.validate_runtime_inputs(hidden_states, output_dtype=output_dtype)
+
+    # Quantized base weights never change the LoRA arithmetic contract.  Keep
+    # every delta and down-A source in BF16, including when the final consumer
+    # asks for FP32 (for example a DSA-style accumulation destination).
+    for weight_name in (
+        "gate_up_lora_a_weights",
+        "gate_up_lora_b_weights",
+        "down_lora_a_weights",
+        "down_lora_b_weights",
+    ):
+        weight_or_weights = getattr(lora_info, weight_name)
+        weights = (
+            weight_or_weights
+            if isinstance(weight_or_weights, (tuple, list))
+            else (weight_or_weights,)
+        )
+        for weight in weights:
+            if weight.dtype != base.contract.lora_delta_dtype:
+                raise TypeError(
+                    f"sgl_lora requires {base.contract.lora_delta_dtype} "
+                    f"{weight_name}, got {weight.dtype}"
+                )
 
     num_tokens = hidden_states.shape[0]
     inter = quant_info.intermediate_size
@@ -109,7 +136,9 @@ def run_sgl_lora_moe(
         top_k=top_k,
         rank=lora_info.max_lora_rank,
         max_loras=lora_info.gate_up_lora_a_weights.shape[0],
-        dtype=hidden_states.dtype,
+        # The estimator uses this as the largest caller-visible element size;
+        # passing FP32 here accounts for caller-selected FP32 destinations.
+        dtype=output_dtype,
         device=hidden_states.device,
         capture=get_is_capture_mode() or inside_cuda_capture,
         memory_query_safe=not inside_cuda_capture,
@@ -126,9 +155,15 @@ def run_sgl_lora_moe(
         )
     fused_lora_routing_cache: dict = {}
 
-    gate_up_delta = hidden_states.new_empty((num_tokens, top_k, 2 * inter))
-    gate_up_lora_intermediate = hidden_states.new_empty(
-        (num_tokens, top_k, lora_info.gate_up_lora_a_weights.shape[2])
+    gate_up_delta = torch.empty(
+        (num_tokens, top_k, 2 * inter),
+        dtype=base.contract.lora_delta_dtype,
+        device=hidden_states.device,
+    )
+    gate_up_lora_intermediate = torch.empty(
+        (num_tokens, top_k, lora_info.gate_up_lora_a_weights.shape[2]),
+        dtype=base.contract.lora_delta_dtype,
+        device=hidden_states.device,
     )
 
     def _run_gate_up_lora(stage: str = "all") -> None:
@@ -181,16 +216,35 @@ def run_sgl_lora_moe(
         _run_gate_up_lora()
 
     # ---- base pipeline (main stream) ----
-    ws = base.prepare(hidden_states, topk_ids, top_k)
+    ws = base.prepare(
+        hidden_states,
+        topk_ids,
+        top_k,
+        topk_weights=topk_weights,
+        packed_topk_ids=packed_topk_ids,
+    )
 
-    gateup_out = hidden_states.new_empty(base.gateup_out_shape(ws))
+    gateup_out = torch.empty(
+        base.gateup_out_shape(ws),
+        dtype=base.contract.gate_up_output_dtype,
+        device=hidden_states.device,
+    )
     base.gateup(ws, gateup_out)
     # The permuted hidden is dead after S2 — free it before the S3/S4 buffers
     # (memory parity with the stock deep_gemm runner's dispose_tensor calls).
-    dispose_tensor(ws.hidden_permuted)
+    if ws.hidden_permuted_owned:
+        dispose_tensor(ws.hidden_permuted)
 
-    act_out = hidden_states.new_empty(base.act_out_shape(ws))
-    activation_lora_input = hidden_states.new_empty((num_tokens, top_k, inter))
+    act_out = torch.empty(
+        base.act_out_shape(ws),
+        dtype=base.contract.lora_activation_dtype,
+        device=hidden_states.device,
+    )
+    activation_lora_input = torch.empty(
+        (num_tokens, top_k, inter),
+        dtype=base.contract.lora_activation_dtype,
+        device=hidden_states.device,
+    )
 
     if lora_event is not None:
         torch.cuda.current_stream().wait_event(lora_event)
@@ -201,14 +255,18 @@ def run_sgl_lora_moe(
     dispose_tensor(gate_up_delta)
     dispose_tensor(gate_up_lora_intermediate)
 
-    down_out = hidden_states.new_empty(base.down_out_shape(ws))
+    down_out = torch.empty(
+        base.down_out_shape(ws),
+        dtype=torch.bfloat16,
+        device=hidden_states.device,
+    )
     base.down(ws, act_out, down_out)
     dispose_tensor(act_out)
 
     with use_symmetric_memory(get_tp_group(), disabled=not is_allocation_symmetric()):
         output = torch.empty(
             (num_tokens, quant_info.hidden_size),
-            dtype=hidden_states.dtype,
+            dtype=output_dtype,
             device=hidden_states.device,
         )
     base.finalize(
