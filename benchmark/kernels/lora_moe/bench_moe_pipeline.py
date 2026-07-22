@@ -6,7 +6,8 @@ base weights, inputs, and routing:
 
 * ``N0``: stock BF16 DeepGEMM through ``MoeRunner(DEEP_GEMM)``;
 * ``C0``: the serial ``run_sgl_lora_moe`` pipeline;
-* ``C1``: the same SGL LoRA pipeline with two-stream execution enabled.
+* ``C1``: the same SGL LoRA pipeline under either the production-auto or a
+  benchmark-forced two-stream decision.
 
 ``C0`` and ``C1`` contain active LoRA work and are therefore compared with one
 another for correctness. ``N0`` is the matched base-only latency reference, not
@@ -22,6 +23,9 @@ Examples::
     python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
       --case-id p0-qwen3.5-35b-a3b-cap1-h200 --pipeline C1 \
       --a-provider indexed --execution cuda_graph
+    python benchmark/kernels/lora_moe/bench_moe_pipeline.py \
+      --case-id p0-qwen3.5-35b-a3b-prefill-h200 --pipeline all \
+      --c1-overlap-policy force --execution cuda_graph
 
 For a trace, choose exactly one pipeline and wrap this script with Nsight using
 the CUDA-profiler capture range, as in ``bench_local.py``.
@@ -62,6 +66,7 @@ from benchmark.kernels.lora_moe.profiling import (
 )
 
 PIPELINES = ("N0", "C0", "C1")
+C1_OVERLAP_POLICIES = ("production_auto", "force")
 
 _INDEXED_AUTO_CONFIG_KEYS = {
     "h200": {
@@ -257,6 +262,19 @@ def _resolve_indexed_a_configs(
     )
 
 
+def _resolve_c1_overlap(policy: str, num_tokens: int) -> bool:
+    """Resolve C1 once so warmup, capture, replay, and metadata agree."""
+    if policy == "force":
+        return True
+    if policy == "production_auto":
+        from sglang.srt.lora.sgl_lora.moe_lora_runner import (
+            resolve_lora_two_stream_auto,
+        )
+
+        return resolve_lora_two_stream_auto(requested=True, num_tokens=num_tokens)
+    raise ValueError(f"unknown C1 overlap policy {policy!r}")
+
+
 def _make_routing(
     case: MoeLoraBenchCase, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -299,6 +317,8 @@ def _random_bf16(
 @dataclass(slots=True)
 class PipelineFixture:
     case: MoeLoraBenchCase
+    c1_overlap_policy: str
+    c1_two_stream_enabled: bool
     hidden_seed: torch.Tensor
     hidden_work: torch.Tensor
     topk_output: object
@@ -347,13 +367,54 @@ class PipelineFixture:
                 self.runner_config,
                 self.lora_info,
                 self.sgl_base,
-                enable_two_stream=pipeline == "C1",
+                two_stream_enabled=(pipeline == "C1" and self.c1_two_stream_enabled),
             )
         self.last_output = result.hidden_states
 
 
+def _pipeline_two_stream_metadata(
+    fixture: PipelineFixture, pipeline: str
+) -> dict[str, object]:
+    from sglang.srt.lora.sgl_lora.moe_lora_runner import (
+        LORA_TWO_STREAM_AUTO_MAX_TOKENS,
+        resolve_lora_two_stream_auto,
+    )
+
+    requested = pipeline == "C1"
+    production_auto_enabled = resolve_lora_two_stream_auto(
+        requested=requested,
+        num_tokens=fixture.case.t_local,
+    )
+    effective = requested and fixture.c1_two_stream_enabled
+    forced = requested and fixture.c1_overlap_policy == "force"
+    fallback_reason = None
+    if requested and not effective:
+        fallback_reason = "production_auto_token_threshold"
+    return {
+        "requested": requested,
+        "policy": fixture.c1_overlap_policy if requested else "serial",
+        "production_auto_max_tokens": LORA_TWO_STREAM_AUTO_MAX_TOKENS,
+        "production_auto_enabled": production_auto_enabled,
+        "effective": effective,
+        "benchmark_force_requested": forced,
+        "benchmark_force_changed_decision": forced and not production_auto_enabled,
+        "fallback_reason": fallback_reason,
+        "decision_scope": "fixed_shape_before_eager_or_cuda_graph_capture",
+        "overlap_scope": (
+            "gate_up_lora_a_b_vs_base_prepare_gateup;down_lora_serial"
+            if effective
+            else None
+        ),
+        "production_default_unchanged": True,
+    }
+
+
 def _build_fixture(
-    case: MoeLoraBenchCase, *, need_lora: bool, need_indexed_a: bool = False
+    case: MoeLoraBenchCase,
+    *,
+    need_lora: bool,
+    need_indexed_a: bool = False,
+    c1_overlap_policy: str = "production_auto",
 ) -> PipelineFixture:
     from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
     from sglang.srt.layers.moe.moe_runner.deep_gemm import DeepGemmMoeQuantInfo
@@ -486,6 +547,8 @@ def _build_fixture(
 
     return PipelineFixture(
         case=case,
+        c1_overlap_policy=c1_overlap_policy,
+        c1_two_stream_enabled=_resolve_c1_overlap(c1_overlap_policy, case.t_local),
         hidden_seed=hidden_seed,
         hidden_work=hidden_seed.clone(),
         topk_output=topk_output,
@@ -724,6 +787,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--case-id")
     parser.add_argument("--pipeline", choices=(*PIPELINES, "all"), default="all")
     parser.add_argument(
+        "--c1-overlap-policy",
+        choices=C1_OVERLAP_POLICIES,
+        default="production_auto",
+        help=(
+            "C1 execution decision; force is a benchmark-only override of the "
+            "production token threshold"
+        ),
+    )
+    parser.add_argument(
         "--a-provider",
         choices=("production", "indexed"),
         default="production",
@@ -763,6 +835,8 @@ def _benchmark_pipeline(
     from sglang.srt.model_executor.runner_utils.capture_mode import model_capture_mode
 
     effective_a_provider = "not_applicable" if pipeline == "N0" else a_provider
+    two_stream = _pipeline_two_stream_metadata(fixture, pipeline)
+    two_stream_effective = bool(two_stream["effective"])
 
     # Compile/JIT and initialize all lazy resources before timing or capture.
     fixture.reset_hidden()
@@ -791,7 +865,11 @@ def _benchmark_pipeline(
         "description": {
             "N0": "matched_base_only_deepgemm",
             "C0": f"sgl_lora_serial_{a_provider}_a",
-            "C1": f"sgl_lora_two_stream_requested_{a_provider}_a",
+            "C1": (
+                f"sgl_lora_c1_{fixture.c1_overlap_policy}_"
+                f"{'two_stream' if two_stream_effective else 'serial'}_"
+                f"{a_provider}_a"
+            ),
         }[pipeline],
         "a_provider": effective_a_provider,
         "retained_components": (
@@ -803,15 +881,20 @@ def _benchmark_pipeline(
                 "production_deepgemm_base",
             ]
         ),
-        "two_stream_requested": pipeline == "C1",
-        "two_stream_overlap_effective": pipeline == "C1" and case.t_local <= 256,
+        "two_stream_requested": two_stream["requested"],
+        "two_stream_overlap_effective": two_stream_effective,
+        "two_stream_policy": two_stream,
         "c1_route_prewarm": (
             "production_a_and_b_routes_including_conservative_unused_a_overhead"
-            if pipeline == "C1" and a_provider == "indexed" and case.t_local <= 256
+            if two_stream_effective and a_provider == "indexed"
             else (
-                "not_run_two_stream_threshold_fallback"
-                if pipeline == "C1" and case.t_local > 256
-                else "production" if pipeline == "C1" else None
+                "production"
+                if two_stream_effective
+                else (
+                    "not_run_resolved_serial_production_auto_threshold"
+                    if pipeline == "C1"
+                    else None
+                )
             )
         ),
         "logical_invocations_per_batch": 1,
@@ -850,6 +933,7 @@ def _benchmark_pipeline(
         fixture.reset_hidden()
         label = (
             f"sgl_lora_moe::M0::{pipeline}::{case.case_id}::A={effective_a_provider}::"
+            f"C1_POLICY={two_stream['policy']}::overlap={two_stream_effective}::"
             f"{run_config.execution}::pdl=auto"
         )
         with cuda_profile_range(label):
@@ -912,13 +996,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         stack.enter_context(_single_rank_runtime())
         need_lora = any(pipeline != "N0" for pipeline in pipelines)
         indexed_applied = args.a_provider == "indexed" and need_lora
-        effective_indexed_c1 = (
-            indexed_applied and "C1" in pipelines and case.t_local <= 256
-        )
         fixture = _build_fixture(
             case,
             need_lora=need_lora,
             need_indexed_a=indexed_applied,
+            c1_overlap_policy=args.c1_overlap_policy,
+        )
+        c1_two_stream = _pipeline_two_stream_metadata(fixture, "C1")
+        effective_indexed_c1 = (
+            indexed_applied and "C1" in pipelines and bool(c1_two_stream["effective"])
         )
 
         # Establish the active-adapter production result before installing the
@@ -956,9 +1042,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             "case": _case_summary(case),
             "scope": "M0",
             "comparison": (
-                "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A"
+                "matched DeepGEMM N0 versus SGL LoRA C0/C1 with indexed A; "
+                f"C1 policy={args.c1_overlap_policy}"
                 if indexed_applied
-                else "matched DeepGEMM N0 versus SGL LoRA C0/C1"
+                else "matched DeepGEMM N0 versus SGL LoRA C0/C1; "
+                f"C1 policy={args.c1_overlap_policy}"
+            ),
+            "execution_policy": {
+                **c1_two_stream,
+                "pipeline": "C1",
+                "benchmarked": "C1" in pipelines,
+            },
+            "phase_semantics": (
+                "synthetic_fixed_local_token_shape; phase is metadata and is not "
+                "passed to the M0 runner"
             ),
             "a_provider": {
                 "name": args.a_provider,
@@ -983,8 +1080,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "not_applicable"
                     if "C1" not in pipelines
                     else (
-                        "not_run_two_stream_threshold_fallback"
-                        if case.t_local > 256
+                        "not_run_resolved_serial_production_auto_threshold"
+                        if not fixture.c1_two_stream_enabled
                         else (
                             "conservative unused production A route prewarm retained"
                             if effective_indexed_c1
