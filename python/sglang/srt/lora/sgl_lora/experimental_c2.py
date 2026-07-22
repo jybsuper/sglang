@@ -60,6 +60,7 @@ def run_sgl_lora_moe_c2_experimental(
     block_size_n: int = 32,
     num_warps: int = 4,
     down_finalize: Callable[..., None] | None = None,
+    has_base_rows: bool = True,
 ) -> StandardCombineInput:
     """Run the serial BF16 C2-consumer partial without changing dispatch.
 
@@ -71,6 +72,10 @@ def run_sgl_lora_moe_c2_experimental(
     C2 finalizer candidate.  When supplied, it replaces both base finalize and
     the decomposed down-B expand; this runner retains ownership of ``down_out``
     and disposes it after the callback returns.
+
+    ``has_base_rows`` is a static execution-plan property.  The planner may
+    set it false for an all-active capture to omit the base-only activation
+    fill; it must not be derived by scanning a device tensor during replay.
     """
     from sglang.srt.distributed import get_tp_group
     from sglang.srt.distributed.device_communicators.pynccl_allocator import (
@@ -186,7 +191,7 @@ def run_sgl_lora_moe_c2_experimental(
             virtual_expert_ids,
             num_pairs_post_padded,
             route_block_size_m=route_key[2],
-            token_lora_mapping=token_lora_mapping,
+            token_lora_mapping=(token_lora_mapping if has_base_rows else None),
             block_size_n=block_size_n,
             num_warps=num_warps,
         )
