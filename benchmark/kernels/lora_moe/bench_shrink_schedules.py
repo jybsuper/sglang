@@ -646,6 +646,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--scope", choices=("K0", "O0"), default="K0")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
+    parser.add_argument(
+        "--pdl",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="programmatic PDL policy; off provides the required isolated control",
+    )
     parser.add_argument("--cache-state", choices=("hot", "cold"), default="hot")
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--samples", type=int, default=100)
@@ -670,8 +676,7 @@ def _has_overrides(args: argparse.Namespace) -> bool:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
+def _main(args: argparse.Namespace) -> int:
     if args.list_configs:
         _list_configs()
         return 0
@@ -762,7 +767,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else "A routing is prebuilt outside the measured shrink"
         ),
         "reference": "chunked PyTorch FP32 route-pair oracle",
-        "pdl_policy": "architecture_auto",
+        "pdl_policy": args.pdl,
         "cache_control": cache_control.metadata(),
         "results": results,
     }
@@ -770,6 +775,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
         args.json_output.write_text(json.dumps(report, indent=2, default=str) + "\n")
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import lora_pdl_policy
+
+    policy = {"auto": None, "on": True, "off": False}[args.pdl]
+    with lora_pdl_policy(policy):
+        return _main(args)
 
 
 if __name__ == "__main__":

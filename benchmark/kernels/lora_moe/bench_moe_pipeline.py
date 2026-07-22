@@ -1089,12 +1089,11 @@ def _build_fixture(
         from sglang.srt.lora.sgl_lora.quant_info import SglLoraBf16QuantInfo
 
         shapes = case.factor_shapes
+
         def make_factor(shape: tuple[int, ...]) -> torch.Tensor:
             if zero_lora_factors:
                 return torch.zeros(shape, dtype=torch.bfloat16, device=device)
-            return _random_bf16(
-                shape, generator=generator, device=device, scale=0.02
-            )
+            return _random_bf16(shape, generator=generator, device=device, scale=0.02)
 
         gate_a = make_factor(shapes.gate_up_a)
         gate_b = make_factor(shapes.gate_up_b)
@@ -1559,9 +1558,7 @@ def _check_neutral_baselines(
         )
         for baseline in neutral_baselines
     )
-    reference_c0 = (
-        _run_checked(fixture, "C0") if need_active_reference else None
-    )
+    reference_c0 = _run_checked(fixture, "C0") if need_active_reference else None
     results: dict[str, object] = {}
     for baseline in neutral_baselines:
         pipelines = _resolve_baseline_pipelines(
@@ -1835,6 +1832,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=("time", "nsys", "ncu"), default="time")
     parser.add_argument("--execution", choices=("eager", "cuda_graph"), default="eager")
     parser.add_argument(
+        "--pdl",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="programmatic PDL policy for the SGL virtual-expert chain",
+    )
+    parser.add_argument(
         "--cache-state",
         choices=("hot", "cold"),
         default="hot",
@@ -2043,6 +2046,7 @@ def _benchmark_pipeline(
             result["graph_correctness"]["active_delta"] = active_delta_checks
 
     if run_config.mode == "time":
+
         def prepare_sample() -> None:
             fixture.reset_hidden()
             if cache_control is not None:
@@ -2118,8 +2122,7 @@ def _matched_latency_summary(
     return summary
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
+def _main(args: argparse.Namespace) -> int:
     if args.list_cases:
         device = args.device if args.device != "auto" else "h200"
         _list_cases(device)
@@ -2128,9 +2131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("This benchmark requires CUDA")
     if args.host_load_workers < 0:
         raise ValueError("--host-load-workers must be non-negative")
-    if args.host_load_workers and (
-        args.mode != "time" or args.execution != "eager"
-    ):
+    if args.host_load_workers and (args.mode != "time" or args.execution != "eager"):
         raise ValueError("--host-load-workers is an eager timing diagnostic only")
     if args.cache_state == "cold" and args.mode != "time":
         raise ValueError("cold M0 profiling is not supported; profile the timed winner")
@@ -2322,6 +2323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "environment": _environment(args),
             "case": _case_summary(case),
             "routing": fixture.route_metadata,
+            "pdl_policy": args.pdl,
             "all_base_sgl_c0_sentinel": {
                 "requested": args.all_base_sgl_c0_sentinel,
                 "normal_pipeline_resolution_unchanged": True,
@@ -2541,7 +2543,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.json_output.write_text(
                 json.dumps(result, indent=2, default=str) + "\n"
             )
-    return 0
+        return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import lora_pdl_policy
+
+    policy = {"auto": None, "on": True, "off": False}[args.pdl]
+    with lora_pdl_policy(policy):
+        return _main(args)
 
 
 if __name__ == "__main__":
