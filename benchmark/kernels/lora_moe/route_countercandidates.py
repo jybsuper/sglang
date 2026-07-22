@@ -223,7 +223,7 @@ def build_current_sgl_plan(
 
 @lru_cache(maxsize=None)
 def _merged_align_module(dtype: torch.dtype):
-    from sglang.jit_kernel.utils import load_jit, make_cpp_args
+    from sglang.kernels.jit.utils import load_jit, make_cpp_args
 
     args = make_cpp_args(dtype)
     return load_jit(

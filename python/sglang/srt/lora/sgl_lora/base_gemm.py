@@ -780,6 +780,7 @@ class CuteDslNvFp4BaseGemm(_MaskedBaseGemm):
 
         from flashinfer import scaled_fp4_grouped_quantize
         from flashinfer.cute_dsl.blockscaled_gemm import grouped_gemm_nt_masked
+
         from sglang.srt.layers.moe.flashinfer_cutedsl_moe import get_cute_dtype
 
         self._quantize = scaled_fp4_grouped_quantize
@@ -945,8 +946,8 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
                 "dispatch local expert IDs before entering the provider"
             )
 
-        from sglang.jit_kernel.moe_wna16_marlin import moe_wna16_marlin_gemm
         from sglang.kernels.ops.moe.ep_moe_kernels import post_reorder_deepgemm
+        from sglang.kernels.ops.moe.moe_wna16_marlin import moe_wna16_marlin_gemm
         from sglang.srt.layers.moe.fused_moe_triton.fused_marlin_moe import (
             get_scalar_type,
         )
