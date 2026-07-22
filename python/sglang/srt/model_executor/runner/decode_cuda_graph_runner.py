@@ -84,8 +84,9 @@ from sglang.srt.model_executor.runner_utils.buffers import (
     DecodeInputBuffers,
 )
 from sglang.srt.model_executor.runner_utils.capture_mode import (
-    _set_capture_lora_variant,
+    capture_lora_variant,
     model_capture_mode,
+    should_record_lora_graph_variants,
 )
 from sglang.srt.model_executor.runner_utils.deepep_adapter import (
     DeepEPCudaGraphRunnerAdapter,
@@ -223,6 +224,9 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             self.ngram_embedding_n = hf_config.ngram_embedding_n
             self.ngram_embedding_k = hf_config.ngram_embedding_k
         self.speculative_algorithm = model_runner.server_args.speculative_algorithm
+        self.record_nolora_graph = should_record_lora_graph_variants(
+            model_runner.server_args, model_runner.spec_algorithm
+        )
         self.enable_profile_cuda_graph = (
             model_runner.server_args.enable_profile_cuda_graph
         )
@@ -901,14 +905,14 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
                 )
 
             for variant_label, _variant_has_lora in lora_variants:
-                _set_capture_lora_variant(variant_label)
-                with torch_compile_decoration.patch_model(
-                    self.model_runner.model,
-                    bs in self.compile_bs,
-                    num_tokens=bs * self.captured_req_width,
-                    tp_group=self.model_runner.tp_group,
-                ) as forward:
-                    self.capture_one_shape(bs, forward, stream_idx, variant_label)
+                with capture_lora_variant(variant_label):
+                    with torch_compile_decoration.patch_model(
+                        self.model_runner.model,
+                        bs in self.compile_bs,
+                        num_tokens=bs * self.captured_req_width,
+                        tp_group=self.model_runner.tp_group,
+                    ) as forward:
+                        self.capture_one_shape(bs, forward, stream_idx, variant_label)
 
     def capture_one_shape(
         self,
@@ -1238,12 +1242,13 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             self.load_batch(forward_batch, pp_proxy_tensors)
             if envs.SGLANG_LOG_DECODE_GRAPH_KEY.get():
                 logger.info(
-                    "Decode graph replay: worker=%s key_size=%s (%s) mode=%s raw_bs=%d%s",
+                    "Decode graph replay: worker=%s key_size=%s (%s) mode=%s raw_bs=%d variant=%s%s",
                     "draft" if self.model_runner.is_draft_worker else "target",
                     self._replay_graph_key.size,
                     "num_tokens" if self.ragged_verify_mode else "bs",
                     forward_batch.forward_mode.name,
                     forward_batch.batch_size,
+                    self._replay_graph_key.variant_label,
                     (
                         f" slots={self._ragged_capture_slots(self._replay_graph_key.size)}"
                         if self.ragged_verify_mode

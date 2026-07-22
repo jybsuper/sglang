@@ -18,6 +18,13 @@ import torch
 from sglang.srt.lora.sgl_lora.quant_info import SglLoraBf16QuantInfo
 
 
+def _use_stock_base_path(
+    *, has_active_lora: bool, capture_mode: bool, capture_variant: str | None
+) -> bool:
+    """Select the graph topology without reading mutable adapter metadata."""
+    return not has_active_lora and (not capture_mode or capture_variant == "nolora")
+
+
 def _phase1a_contract_violations(base_layer) -> list[str]:
     """Return the unsupported semantics that would otherwise be silent.
 
@@ -150,12 +157,20 @@ def dispatch_sgl_lora_moe(dispatch_output, wrapper, lora_info):
         run_sgl_lora_moe,
     )
     from sglang.srt.model_executor.runner_utils.capture_mode import (
+        get_capture_lora_variant,
         get_is_capture_mode,
     )
 
     base_layer = wrapper.base_layer
 
-    if not get_is_capture_mode() and not lora_info.has_active_lora:
+    capture_mode = get_is_capture_mode()
+    capture_variant = get_capture_lora_variant() if capture_mode else None
+    use_stock_base = _use_stock_base_path(
+        has_active_lora=lora_info.has_active_lora,
+        capture_mode=capture_mode,
+        capture_variant=capture_variant,
+    )
+    if use_stock_base:
         # Byte-identical stock base path for no-adapter batches.
         from sglang.srt.layers.moe.moe_runner.triton import (
             fused_experts_none_to_triton,

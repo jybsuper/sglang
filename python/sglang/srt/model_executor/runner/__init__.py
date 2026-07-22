@@ -46,10 +46,12 @@ from sglang.srt.model_executor.runner_utils import (  # noqa: F401
     PrefillInputBuffers,
     _grouped_foreach_copy_,
     _set_capture_lora_variant,
+    capture_lora_variant,
     compile_in_capture_mode,
     get_capture_lora_variant,
     get_global_graph_memory_pool,
     get_is_capture_mode,
     model_capture_mode,
     set_global_graph_memory_pool,
+    should_record_lora_graph_variants,
 )

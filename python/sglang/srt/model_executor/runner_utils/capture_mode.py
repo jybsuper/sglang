@@ -64,6 +64,31 @@ def _set_capture_lora_variant(variant: Optional[str]) -> None:
 
 
 @contextmanager
+def capture_lora_variant(variant: Optional[str]):
+    """Select one LoRA graph topology and restore the previous selection."""
+    previous = get_capture_lora_variant()
+    _set_capture_lora_variant(variant)
+    try:
+        yield
+    finally:
+        _set_capture_lora_variant(previous)
+
+
+def should_record_lora_graph_variants(server_args, spec_algorithm) -> bool:
+    """Whether decode should capture distinct LoRA-on and LoRA-off graphs.
+
+    The first implementation is intentionally scoped to the opt-in ``sgl_lora``
+    execution engine and ordinary decode.  Speculative draft/verify runners own
+    different assignment domains and continue to force this feature off.
+    """
+    return bool(
+        getattr(server_args, "enable_lora", False)
+        and getattr(server_args, "lora_execution_engine", "legacy") == "sgl_lora"
+        and spec_algorithm.is_none()
+    )
+
+
+@contextmanager
 def model_capture_mode():
     global is_capture_mode
     from sglang.srt.runtime_context import get_flags
