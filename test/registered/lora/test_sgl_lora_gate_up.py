@@ -3,12 +3,56 @@ import sys
 import pytest
 import torch
 
+import sglang.srt.lora.sgl_lora.triton_ops.virtual_experts as virtual_experts
 from sglang.srt.lora.sgl_lora.triton_ops.virtual_experts import (
     merged_experts_fused_moe_lora_add,
 )
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=15, stage="base-b", runner_config="1-gpu-small")
+
+
+def test_large_align_cuda_failure_is_not_silently_hidden(monkeypatch):
+    expected = RuntimeError("native CUDA align failed")
+
+    monkeypatch.setattr(virtual_experts, "is_hip", lambda: False)
+
+    def fail_native(*_args):
+        raise expected
+
+    monkeypatch.setattr(virtual_experts, "_align_block_size_jit", fail_native)
+    monkeypatch.setattr(
+        virtual_experts,
+        "_align_block_size_torch",
+        lambda *_args: pytest.fail("CUDA errors must not select the ROCm fallback"),
+    )
+
+    with pytest.raises(RuntimeError, match="native CUDA align failed") as error:
+        virtual_experts._align_block_size_large(
+            torch.empty((0,), dtype=torch.int32, device="cuda"), 16, 1024
+        )
+    assert error.value is expected
+
+
+def test_large_align_rocm_selects_explicit_torch_fallback(monkeypatch):
+    sentinel = object()
+
+    monkeypatch.setattr(virtual_experts, "is_hip", lambda: True)
+    monkeypatch.setattr(
+        virtual_experts,
+        "_align_block_size_jit",
+        lambda *_args: pytest.fail("ROCm must not enter the CUDA JIT path"),
+    )
+    monkeypatch.setattr(
+        virtual_experts, "_align_block_size_torch", lambda *_args: sentinel
+    )
+
+    assert (
+        virtual_experts._align_block_size_large(
+            torch.empty((0,), dtype=torch.int32, device="cuda"), 16, 1024
+        )
+        is sentinel
+    )
 
 
 @pytest.mark.parametrize("rank", [8, 16, 64, 128, 192, 256])
@@ -40,9 +84,7 @@ def test_gate_up_a_rank_tiling_matches_reference(rank: int):
         dtype=torch.bfloat16,
         device=device,
     )
-    topk_ids = torch.tensor(
-        [[0, 1], [2, 0], [1, 2]], dtype=torch.int32, device=device
-    )
+    topk_ids = torch.tensor([[0, 1], [2, 0], [1, 2]], dtype=torch.int32, device=device)
     token_lora_mapping = torch.tensor([0, 1, -1], dtype=torch.int32, device=device)
     intermediate = torch.zeros(
         num_tokens, top_k, 2 * rank, dtype=torch.bfloat16, device=device

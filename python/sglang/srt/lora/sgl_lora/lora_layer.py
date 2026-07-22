@@ -102,6 +102,7 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
     Phase 1a supports BF16 ``UnquantizedFusedMoEMethod`` only.
     """
     from sglang.srt.lora.sgl_lora.base_gemm import resolve_base_gemm
+    from sglang.srt.lora.sgl_lora.workspace import MoeLoraWorkspacePlanner
 
     violations = _phase1a_contract_violations(base_layer)
     if violations:
@@ -124,7 +125,16 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
         intermediate_size=two_inter // 2,
         hidden_size=hidden,
     )
-    layer._sgl_lora_base_gemm = resolve_base_gemm(layer._quant_info, cfg)
+    # Every MoE layer executes sequentially through one backend.  Sharing the
+    # planner makes one admission decision per device/shape instead of issuing
+    # a host memory query at every decoder layer.
+    workspace_planner = getattr(layer.lora_backend, "_sgl_lora_workspace_planner", None)
+    if workspace_planner is None:
+        workspace_planner = MoeLoraWorkspacePlanner()
+        layer.lora_backend._sgl_lora_workspace_planner = workspace_planner
+    layer._sgl_lora_base_gemm = resolve_base_gemm(
+        layer._quant_info, cfg, workspace_planner
+    )
 
     # The no-active eager path runs the stock base-only Triton strategy with
     # the same standard-layout weight tensors and zero extra weight memory.

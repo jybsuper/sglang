@@ -23,6 +23,10 @@ from sglang.srt.lora.sgl_lora.quant_info import (
     SglLoraBf16QuantInfo,
     SglLoraQuantInfo,
 )
+from sglang.srt.lora.sgl_lora.workspace import (
+    MoeLoraWorkspacePlanner,
+    estimate_bf16_moe_lora_workspace,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
@@ -45,6 +49,20 @@ class BaseGemmWorkspace(msgspec.Struct, kw_only=True):
 
 class MoeLoraBaseGemm:
     """Interface. One instance per (layer, quant type), bound to quant_info."""
+
+    def admit_workspace(
+        self,
+        *,
+        num_tokens: int,
+        top_k: int,
+        rank: int,
+        max_loras: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        capture: bool,
+        memory_query_safe: bool,
+    ) -> None:
+        raise NotImplementedError
 
     def prepare(
         self, hidden_states: torch.Tensor, topk_ids: torch.Tensor, top_k: int
@@ -101,9 +119,15 @@ class DeepGemmBf16BaseGemm(MoeLoraBaseGemm):
     replaced by the LoRA-aware S3 kernel.
     """
 
-    def __init__(self, quant_info: SglLoraBf16QuantInfo, config: MoeRunnerConfig):
+    def __init__(
+        self,
+        quant_info: SglLoraBf16QuantInfo,
+        config: MoeRunnerConfig,
+        workspace_planner: MoeLoraWorkspacePlanner | None = None,
+    ):
         self.quant_info = quant_info
         self.config = config
+        self.workspace_planner = workspace_planner or MoeLoraWorkspacePlanner()
         # gpt-oss-class layouts arrive here via constexpr flags (design §3).
         self.gate_first = True
         self.interleaved = False
@@ -121,6 +145,44 @@ class DeepGemmBf16BaseGemm(MoeLoraBaseGemm):
         self._preprocess = moe_ep_deepgemm_preprocess
         self._post_reorder = post_reorder_deepgemm
         self._act_kernel = silu_mul_delta_masked
+
+    def admit_workspace(
+        self,
+        *,
+        num_tokens: int,
+        top_k: int,
+        rank: int,
+        max_loras: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        capture: bool,
+        memory_query_safe: bool,
+    ) -> None:
+        estimate = estimate_bf16_moe_lora_workspace(
+            num_tokens=num_tokens,
+            top_k=top_k,
+            hidden_size=self.quant_info.hidden_size,
+            intermediate_size=self.quant_info.intermediate_size,
+            rank=rank,
+            num_local_experts=self.quant_info.num_local_experts,
+            max_loras=max_loras,
+            element_size=dtype.itemsize,
+        )
+        self.workspace_planner.admit(
+            estimate=estimate,
+            device=device,
+            capture=capture,
+            geometry_key=(
+                self.quant_info.num_local_experts,
+                self.quant_info.hidden_size,
+                self.quant_info.intermediate_size,
+                rank,
+                top_k,
+                max_loras,
+                dtype,
+            ),
+            memory_query_safe=memory_query_safe,
+        )
 
     def prepare(
         self, hidden_states: torch.Tensor, topk_ids: torch.Tensor, top_k: int
@@ -217,10 +279,12 @@ class DeepGemmBf16BaseGemm(MoeLoraBaseGemm):
 
 
 def resolve_base_gemm(
-    quant_info: SglLoraQuantInfo, config: MoeRunnerConfig
+    quant_info: SglLoraQuantInfo,
+    config: MoeRunnerConfig,
+    workspace_planner: MoeLoraWorkspacePlanner | None = None,
 ) -> MoeLoraBaseGemm:
     if isinstance(quant_info, SglLoraBf16QuantInfo):
-        return DeepGemmBf16BaseGemm(quant_info, config)
+        return DeepGemmBf16BaseGemm(quant_info, config, workspace_planner)
     raise NotImplementedError(
         f"sgl_lora has no base-GEMM provider for {type(quant_info).__name__}."
     )

@@ -14,6 +14,7 @@ import triton.language as tl
 
 from sglang.jit_kernel.moe_align import moe_align_block_size as jit_moe_align_block_size
 from sglang.jit_kernel.utils import is_arch_support_pdl
+from sglang.srt.utils import is_hip
 
 
 def _get_pdl_launch_metadata() -> tuple[bool, dict]:
@@ -685,13 +686,16 @@ def _align_block_size_large(
     block_size: int,
     num_experts: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Dispatch to the CUDA JIT kernel when available, otherwise fall back to
-    the pure-PyTorch torch.compile path (needed on AMD/ROCm or when the JIT
-    module fails to load)."""
-    try:
-        return _align_block_size_jit(topk_ids, block_size, num_experts)
-    except Exception:
+    """Use the native CUDA implementation or the explicit ROCm fallback.
+
+    A CUDA/JIT failure is actionable and must reach the caller.  Catching every
+    exception here used to turn compilation, launch, and data-contract bugs into
+    an unexpectedly slow ``torch.compile`` path, making serving failures both
+    delayed and difficult to diagnose.
+    """
+    if is_hip():
         return _align_block_size_torch(topk_ids, block_size, num_experts)
+    return _align_block_size_jit(topk_ids, block_size, num_experts)
 
 
 def _merged_experts_fused_moe_lora_add_impl(
