@@ -26,6 +26,11 @@ Serial (non-overlap) batches run the same pipeline with the gate_up LoRA
 inline on the main stream before S1 — numerically equivalent (modulo the
 pre-existing shrink split-K bf16-atomic nondeterminism).
 
+``two_stream_enabled`` is an already-resolved execution decision. Production
+dispatch applies the current ``num_tokens <= 256`` auto policy before entering
+this runner; benchmark callers may therefore compare another resolved policy
+without changing the production default or copying the pipeline.
+
 Invariants carried over from the trtllm path (review-confirmed load-bearing):
   * NO device allocation inside the side-stream context — the stage="routing"
     pre-warm seeds both the A(shrink)- and B(expand)-stage routing-cache keys
@@ -52,6 +57,16 @@ if TYPE_CHECKING:
 # Keep events recorded during cuda-graph capture alive until graph teardown.
 _LORA_EVENTS_KEEPALIVE: list = []
 
+# Production auto-policy boundary. Keep policy selection outside the runner so
+# the execution function obeys one explicit decision under eager execution and
+# CUDA graph capture alike.
+LORA_TWO_STREAM_AUTO_MAX_TOKENS = 256
+
+
+def resolve_lora_two_stream_auto(*, requested: bool, num_tokens: int) -> bool:
+    """Resolve the production two-stream request for one fixed-shape forward."""
+    return requested and num_tokens <= LORA_TWO_STREAM_AUTO_MAX_TOKENS
+
 
 def run_sgl_lora_moe(
     dispatch_output: StandardDispatchOutput,
@@ -60,7 +75,7 @@ def run_sgl_lora_moe(
     lora_info,
     base: MoeLoraBaseGemm,
     *,
-    enable_two_stream: bool,
+    two_stream_enabled: bool,
 ) -> StandardCombineInput:
     from sglang.srt.distributed import get_tp_group
     from sglang.srt.distributed.device_communicators.pynccl_allocator import (
@@ -85,7 +100,7 @@ def run_sgl_lora_moe(
     num_tokens = hidden_states.shape[0]
     inter = quant_info.intermediate_size
 
-    overlap = enable_two_stream and num_tokens <= 256
+    overlap = two_stream_enabled
     token_lora_mapping = lora_info.token_lora_mapping
     fused_lora_routing_cache: dict = {}
 

@@ -49,6 +49,7 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
 def dispatch_sgl_lora_moe(dispatch_output, wrapper, lora_info):
     """Route one MoE-LoRA forward (see module docstring for the policy)."""
     from sglang.srt.lora.sgl_lora.moe_lora_runner import (
+        resolve_lora_two_stream_auto,
         run_sgl_lora_moe,
     )
     from sglang.srt.model_executor.runner_utils.capture_mode import (
@@ -75,5 +76,8 @@ def dispatch_sgl_lora_moe(dispatch_output, wrapper, lora_info):
         base_layer.moe_runner_config,
         lora_info,
         wrapper._sgl_lora_base_gemm,
-        enable_two_stream=wrapper._sgl_lora_two_stream,
+        two_stream_enabled=resolve_lora_two_stream_auto(
+            requested=wrapper._sgl_lora_two_stream,
+            num_tokens=dispatch_output.hidden_states.shape[0],
+        ),
     )

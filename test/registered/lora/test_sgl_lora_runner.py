@@ -169,7 +169,7 @@ def test_runner_wires_gate_up_and_production_down_options(monkeypatch):
         runner_config,
         lora_info,
         base,
-        enable_two_stream=False,
+        two_stream_enabled=False,
     )
 
     assert base.calls == ["prepare", "gateup", "act", "down", "finalize"]

@@ -1,4 +1,6 @@
+import importlib.util
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -8,9 +10,23 @@ import benchmark.kernels.lora_moe.bench_moe_pipeline as moe_pipeline
 from benchmark.kernels.lora_moe.bench_moe_pipeline import (
     _capture_production_c0_reference,
     _indexed_a_override,
+    _pipeline_two_stream_metadata,
+    _resolve_c1_overlap,
     _resolve_indexed_a_configs,
     parse_args,
 )
+
+
+def _load_moe_runner_module():
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "python/sglang/srt/lora/sgl_lora/moe_lora_runner.py"
+    )
+    spec = importlib.util.spec_from_file_location("_test_moe_lora_runner", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_indexed_a_cli_defaults_to_production_and_auto_configs():
@@ -18,6 +34,51 @@ def test_indexed_a_cli_defaults_to_production_and_auto_configs():
     assert args.a_provider == "production"
     assert args.indexed_gate_config == "auto"
     assert args.indexed_down_config == "auto"
+    assert args.c1_overlap_policy == "production_auto"
+
+    forced = parse_args(["--c1-overlap-policy", "force"])
+    assert forced.c1_overlap_policy == "force"
+
+
+def test_production_two_stream_auto_policy_boundary():
+    runner = _load_moe_runner_module()
+    assert runner.LORA_TWO_STREAM_AUTO_MAX_TOKENS == 256
+    assert runner.resolve_lora_two_stream_auto(requested=True, num_tokens=256)
+    assert not runner.resolve_lora_two_stream_auto(requested=True, num_tokens=257)
+    assert not runner.resolve_lora_two_stream_auto(requested=False, num_tokens=1)
+
+
+def test_c1_force_policy_and_metadata_record_the_resolved_execution(monkeypatch):
+    runner = _load_moe_runner_module()
+    monkeypatch.setitem(
+        sys.modules,
+        "sglang.srt.lora.sgl_lora.moe_lora_runner",
+        runner,
+    )
+    case = SimpleNamespace(t_local=257)
+    auto_fixture = SimpleNamespace(
+        case=case,
+        c1_overlap_policy="production_auto",
+        c1_two_stream_enabled=_resolve_c1_overlap("production_auto", 257),
+    )
+    forced_fixture = SimpleNamespace(
+        case=case,
+        c1_overlap_policy="force",
+        c1_two_stream_enabled=_resolve_c1_overlap("force", 257),
+    )
+
+    auto = _pipeline_two_stream_metadata(auto_fixture, "C1")
+    forced = _pipeline_two_stream_metadata(forced_fixture, "C1")
+
+    assert not auto["effective"]
+    assert auto["fallback_reason"] == "production_auto_token_threshold"
+    assert not auto["benchmark_force_requested"]
+    assert forced["effective"]
+    assert forced["benchmark_force_requested"]
+    assert forced["benchmark_force_changed_decision"]
+    assert forced["production_auto_enabled"] is False
+    assert forced["production_default_unchanged"] is True
+    assert forced["overlap_scope"].endswith("down_lora_serial")
 
 
 @pytest.mark.parametrize(
