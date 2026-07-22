@@ -1,0 +1,86 @@
+{
+  "case": {
+    "active_adapters": 1,
+    "case_id": "qwen35-decode-t1-r32",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": false,
+    "intermediate_size": 512,
+    "lora_capacity": 1,
+    "num_routed_experts": 256,
+    "num_shared_experts": 1,
+    "phase": "decode",
+    "rank": 32,
+    "routed_topk": 8,
+    "tokens": 1
+  },
+  "contract": {
+    "cuda_graph_replay": true,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": false,
+    "physical_experts": 256,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "serial_or_in_provider",
+    "shared_expert_form": "conventional_separate",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 0
+  },
+  "correctness": {
+    "cosine": 0.9999867677688599,
+    "finite": true,
+    "max_abs": 1.52587890625e-05,
+    "mean_abs": 1.853749381552916e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-decode-t1-r32",
+      "device": "h200",
+      "execution": "cuda_graph",
+      "inner_iterations": 1,
+      "json_output": "/workspace/artifacts/sgl_lora_shared_experts_20260722/repeat_reverse/qwen35-decode-t1-r32__separate_serial__cuda_graph__repeat2.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "separate_serial",
+      "warmup": 20
+    },
+    "cuda_runtime": "12.9",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA H200",
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_uuid": "3d30efc8-11ed-24d6-8599-83ea5c5cd521",
+    "hostname": "sglang-29157-v0514-h200-exact",
+    "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:27:12.542903+00:00",
+    "torch": "2.11.0+cu129"
+  },
+  "execution": "cuda_graph",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 118.97599697113037,
+    "min_us": 113.66400122642517,
+    "num_samples": 100,
+    "p20_us": 114.23999816179276,
+    "p50_us": 114.52800035476685,
+    "p80_us": 115.03999680280685
+  },
+  "variant": "separate_serial"
+}

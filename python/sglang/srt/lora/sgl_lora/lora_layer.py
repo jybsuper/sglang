@@ -58,11 +58,6 @@ def _phase1a_contract_violations(base_layer) -> list[str]:
         violations.append("apply_router_weight_on_input=True is unsupported")
     if cfg.no_combine:
         violations.append("no_combine=True is unsupported")
-    if cfg.num_fused_shared_experts:
-        violations.append(
-            f"fused shared experts are unsupported "
-            f"(got {cfg.num_fused_shared_experts})"
-        )
     if cfg.use_tp_all_gather_activation:
         violations.append("TP all-gather activation input is unsupported")
 
@@ -319,6 +314,35 @@ def init_sgl_lora_moe(layer, base_layer) -> None:
     layer._sgl_lora_base_gemm = resolve_base_gemm(
         layer._quant_info, cfg, workspace_planner
     )
+    if cfg.num_fused_shared_experts:
+        # Contiguous global/local layouts already place shared slots after the
+        # routed factors and need no lookup. DeepEP/MegaMOE global physical
+        # layouts interleave shared slots per rank, so routed IDs contain gaps.
+        # Build both factor-domain maps once: the memory pool may retain global
+        # factors or pack only this rank's routed factors.
+        from sglang.srt.layers.moe.utils import uses_per_rank_fused_shared_slots
+        from sglang.srt.lora.sgl_lora.shared_experts import (
+            MoeLoraExpertTopology,
+            build_routed_expert_id_map,
+        )
+
+        if uses_per_rank_fused_shared_slots():
+            num_routed = int(base_layer._num_global_routed)
+            ep_size = int(base_layer.moe_ep_size)
+            ep_rank = int(base_layer.moe_ep_rank)
+            device = layer._quant_info.w13_weight.device
+            for factor_domain in ("global", "local"):
+                topology = MoeLoraExpertTopology(
+                    num_routed_experts=num_routed,
+                    num_fused_shared_experts=cfg.num_fused_shared_experts,
+                    ep_size=ep_size,
+                    ep_rank=ep_rank,
+                    id_layout="global_per_rank_shared",
+                    factor_domain=factor_domain,
+                )
+                layer._sgl_lora_base_gemm.lora_expert_id_maps[
+                    topology.num_factor_experts
+                ] = build_routed_expert_id_map(topology, device=device)
     # Kept for canonical BF16 no-adapter dispatch. Quant providers use
     # quant_method.apply so the stock path retains its selected physical
     # backend.
@@ -389,6 +413,9 @@ def dispatch_sgl_lora_moe(
             wrapper._sgl_lora_base_gemm.contract.key == "deepgemm_bf16"
             and lora_info.lora_use_virtual_experts
             and not lora_info.fully_sharded
+        ),
+        base_lora_expert_domains_match=not bool(
+            base_layer.moe_runner_config.num_fused_shared_experts
         ),
         provider_key=wrapper._sgl_lora_base_gemm.contract.key,
     )

@@ -118,6 +118,10 @@ class MoeLoraBaseGemm:
     """Interface. One instance per (layer, quant type), bound to quant_info."""
 
     contract: MoeLoraProviderContract
+    # Static incoming-physical-ID -> routed-factor-ID maps keyed by the factor
+    # expert dimension. Most layouts need no entry; per-rank fused shared
+    # slots bind one map at LoRA attach time and reuse it for every forward.
+    lora_expert_id_maps: dict[int, torch.Tensor]
 
     def admit_workspace(
         self,
@@ -211,6 +215,7 @@ class _MaskedBaseGemm(MoeLoraBaseGemm):
         self.quant_info = quant_info
         self.config = config
         self.workspace_planner = workspace_planner or MoeLoraWorkspacePlanner()
+        self.lora_expert_id_maps = {}
 
         from sglang.kernels.ops.moe.ep_moe_kernels import (
             moe_ep_deepgemm_preprocess,
@@ -935,6 +940,7 @@ class MarlinW4A16BaseGemm(MoeLoraBaseGemm):
         self.quant_info = quant_info
         self.config = config
         self.workspace_planner = workspace_planner or MoeLoraWorkspacePlanner()
+        self.lora_expert_id_maps = {}
         if quant_info.weight_bits != 4:
             raise ValueError(
                 f"sgl_lora Marlin lane is W4A16; got {quant_info.weight_bits} bits"

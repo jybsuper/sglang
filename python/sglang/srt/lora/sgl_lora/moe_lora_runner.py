@@ -153,6 +153,16 @@ def run_sgl_lora_moe(
             "MoE-DP execution."
         )
     fused_lora_routing_cache: dict = {}
+    # Most providers expose contiguous routed IDs followed by shared slots, in
+    # which case the virtual-ID kernel's range check is sufficient. A
+    # DeepEP/MegaMOE provider can instead expose interleaved per-rank shared
+    # slots. Its attach-time map removes those gaps and maps shared slots to
+    # -1 without a separate forward launch.
+    factor_experts = max(
+        lora_info.gate_up_lora_a_weights.shape[1],
+        lora_info.gate_up_lora_b_weights.shape[1],
+    )
+    expert_id_map = getattr(base, "lora_expert_id_maps", {}).get(factor_experts)
 
     gate_up_delta = torch.empty(
         (num_tokens, top_k, 2 * inter),
@@ -184,6 +194,7 @@ def run_sgl_lora_moe(
             num_output_slices=2,
             local_expert_offset=0,
             local_num_experts=quant_info.num_local_experts,
+            expert_id_map=expert_id_map,
             intermediate_buffer=(
                 gate_up_lora_intermediate if stage != "routing" else None
             ),
@@ -304,6 +315,7 @@ def run_sgl_lora_moe(
         num_output_slices=1,
         local_expert_offset=0,
         local_num_experts=quant_info.num_local_experts,
+        expert_id_map=expert_id_map,
     )
 
     return StandardCombineInput(hidden_states=output)

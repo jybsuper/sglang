@@ -1,0 +1,93 @@
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Using default MoE kernel config. Performance might be sub-optimal! Config file not found at /scratch/sglang-shared-expert/python/sglang/srt/layers/moe/moe_runner/triton_utils/configs/triton_3_6_0/E=2048,N=128,device_name=NVIDIA_GB300.json, you can create them with https://github.com/sgl-project/sglang/tree/main/benchmark/kernels/fused_moe_triton
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  29%|██▉       | 4820/16384 [00:00<00:00, 48192.35it/s]DeepGEMM warmup:  59%|█████▉    | 9640/16384 [00:00<00:00, 43463.75it/s]DeepGEMM warmup:  86%|████████▌ | 14017/16384 [00:00<00:00, 42209.60it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 42619.80it/s]
+Entering DeepGEMM JIT Pre-Compile session. It may take a long time (typically 10-20 mins) if you have not run `sglang.compile_deep_gemm`. It is recommended to run `sglang.compile_deep_gemm` with same args as `sglang.launch_server` for pre-compilation to reduce the overhead if you have not run it before. For example: `python3 -m sglang.compile_deep_gemm --model deepseek-ai/DeepSeek-V3 --tp 8 --trust-remote-code`
+DeepGEMM warmup:   0%|          | 0/16384 [00:00<?, ?it/s]DeepGEMM warmup:  31%|███       | 5076/16384 [00:00<00:00, 50746.01it/s]DeepGEMM warmup:  62%|██████▏   | 10151/16384 [00:00<00:00, 44292.19it/s]DeepGEMM warmup:  89%|████████▉ | 14633/16384 [00:00<00:00, 42673.53it/s]DeepGEMM warmup: 100%|██████████| 16384/16384 [00:00<00:00, 43323.36it/s]
+{
+  "case": {
+    "active_adapters": 4,
+    "case_id": "qwen35-prefill-t256-r128-two-sink-mixed",
+    "ep_proxy_rank": 1,
+    "ep_proxy_size": 4,
+    "hidden_size": 2048,
+    "include_base_rows": true,
+    "intermediate_size": 512,
+    "lora_capacity": 8,
+    "num_routed_experts": 256,
+    "num_shared_experts": 2,
+    "phase": "prefill",
+    "rank": 128,
+    "routed_topk": 8,
+    "tokens": 256
+  },
+  "contract": {
+    "cuda_graph_replay": true,
+    "ep_proxy": false,
+    "ep_proxy_is_not_d0": false,
+    "expert_id_map": false,
+    "logical_routed_experts": 256,
+    "lora_target_scope": "routed_experts_only",
+    "mixed_adapter_base_rows": true,
+    "physical_experts": 256,
+    "routed_scaling_factor": 1.7,
+    "routed_topk": 8,
+    "shared_execution": "overlap",
+    "shared_expert_form": "conventional_separate",
+    "shared_scaling": "inverse_routed_scale_in_fused_topk_then_post_scale",
+    "shared_topk": 0
+  },
+  "correctness": {
+    "cosine": 0.9999895691871643,
+    "finite": true,
+    "max_abs": 3.0517578125e-05,
+    "mean_abs": 2.3706465981376823e-06,
+    "oracle": "logical_chunked_pytorch_bmm_fp32_reduction",
+    "oracle_uses_physical_ids": false,
+    "passed": true,
+    "shared_slots_receive_lora": false
+  },
+  "environment": {
+    "cli": {
+      "case_id": "qwen35-prefill-t256-r128-two-sink-mixed",
+      "device": "gb300",
+      "execution": "cuda_graph",
+      "inner_iterations": 1,
+      "json_output": "/mirror/artifacts/sgl_lora_shared_experts_20260722/repeat_reverse/qwen35-prefill-t256-r128-two-sink-mixed__separate_overlap__cuda_graph__repeat2.json",
+      "list_cases": false,
+      "mode": "time",
+      "profile_iterations": 5,
+      "samples": 100,
+      "variant": "separate_overlap",
+      "warmup": 20
+    },
+    "cuda_runtime": "13.0",
+    "git_dirty": true,
+    "git_revision": "8e6dd0447746088f8e00d6b69d5f903283804688+shared-expert-prototype",
+    "gpu": "NVIDIA GB300",
+    "gpu_capability": [
+      10,
+      3
+    ],
+    "gpu_uuid": "8c2ff252-6f67-a242-ae2d-2870a06aa2b8",
+    "hostname": "s15t4nb4",
+    "platform": "Linux-6.14.0-1008-nvidia-64k-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "timestamp_utc": "2026-07-22T13:24:04.103463+00:00",
+    "torch": "2.11.0+cu130"
+  },
+  "execution": "cuda_graph",
+  "schema_version": 1,
+  "scope": "SH/local_M0",
+  "timing": {
+    "launches_per_batch": 1,
+    "max_us": 816.0640001296997,
+    "min_us": 802.3040294647217,
+    "num_samples": 100,
+    "p20_us": 806.8479895591736,
+    "p50_us": 808.4480166435242,
+    "p80_us": 811.0528111457825
+  },
+  "variant": "separate_overlap"
+}
