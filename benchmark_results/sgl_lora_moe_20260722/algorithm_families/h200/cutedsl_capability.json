@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "scope": "benchmark_only_bf16_moe_lora_algorithm_family_matrix",
+  "environment": {
+    "device_name": "NVIDIA H200",
+    "compute_capability": "9.0",
+    "torch": "2.11.0+cu129",
+    "triton": "3.6.0",
+    "cuda_visible_devices": "1"
+  },
+  "contract": {
+    "route_domain": "canonical_token_topk_pairs",
+    "virtual_group": "adapter_times_E_local_plus_local_expert",
+    "route_build_charged_in": "O0",
+    "route_prebuilt_in": "K0",
+    "clears_casts_pack_scatter_consumers_charged": true,
+    "production_dispatch_changed": false
+  },
+  "runs": [],
+  "disqualifications": [
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 16,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_a",
+      "family": "cutedsl",
+      "accumulation": "bf16",
+      "scope": "K0",
+      "status": "disqualified",
+      "reason": "UNSUPPORTED:cutedsl_toolchain:ModuleNotFoundError:No module named 'cutlass'",
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      }
+    }
+  ],
+  "winners": []
+}

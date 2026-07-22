@@ -1,0 +1,2780 @@
+{
+  "schema_version": 1,
+  "scope": "benchmark_only_bf16_moe_lora_algorithm_family_matrix",
+  "environment": {
+    "device_name": "NVIDIA H200",
+    "compute_capability": "9.0",
+    "torch": "2.11.0+cu129",
+    "triton": "3.6.0",
+    "cuda_visible_devices": "2"
+  },
+  "kernel_tuning": {
+    "indexed_bn": 32,
+    "indexed_bk": 128,
+    "indexed_warps": 4,
+    "aligned_bn": 64,
+    "aligned_bk": 64,
+    "aligned_warps": 4,
+    "segmented_bn": 64,
+    "segmented_bk": 64,
+    "segmented_warps": 4,
+    "pair_consumer_bn": 64,
+    "aligned_consumer_bn": 64,
+    "segmented_consumer_bn": 64,
+    "consumer_warps": 4,
+    "direct_finalize_bh": 64,
+    "reduce_finalize_bh": 128,
+    "one_shot_bi": 64,
+    "one_shot_bh": 32
+  },
+  "measurement_order": "forward",
+  "contract": {
+    "route_domain": "canonical_token_topk_pairs",
+    "virtual_group": "adapter_times_E_local_plus_local_expert",
+    "route_build_charged_in": "O0",
+    "route_prebuilt_in": "K0",
+    "clears_casts_pack_scatter_consumers_charged": true,
+    "production_dispatch_changed": false
+  },
+  "runs": [
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.040771484375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0029449462890625,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 323.41119050979614,
+        "p50_us": 328.5119980573654,
+        "p80_us": 334.3743920326233,
+        "min_us": 320.95998525619507,
+        "max_us": 377.4400055408478,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.040771484375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0029449462890625,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 272.03840017318726,
+        "p50_us": 276.12799406051636,
+        "p80_us": 278.1056046485901,
+        "min_us": 271.0399925708771,
+        "max_us": 315.744012594223,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.040771484375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0029449462890625,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 56.223999708890915,
+        "p50_us": 56.2559999525547,
+        "p80_us": 56.358400732278824,
+        "min_us": 56.19199946522713,
+        "max_us": 59.776000678539276,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.040771484375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0029449462890625,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.040771484375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.0029449462890625,
+          "error_over_signal": 0.0,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 59.494399279356,
+        "p50_us": 59.87200140953064,
+        "p80_us": 60.416001081466675,
+        "min_us": 59.13599953055382,
+        "max_us": 60.864001512527466,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.040771484375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.0029449462890625,
+            "error_over_signal": 0.0,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.7704797627970947e-09,
+        "reference_max_abs": 0.1241377517580986,
+        "error_over_signal": 1.200373051937081e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 215.78240394592285,
+        "p50_us": 217.56800264120102,
+        "p80_us": 224.1728037595749,
+        "min_us": 214.11199867725372,
+        "max_us": 266.1440074443817,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.7704797627970947e-09,
+        "reference_max_abs": 0.1241377517580986,
+        "error_over_signal": 1.200373051937081e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 165.0048017501831,
+        "p50_us": 167.87199676036835,
+        "p80_us": 172.79999554157257,
+        "min_us": 162.36799955368042,
+        "max_us": 189.08800184726715,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.7704797627970947e-09,
+        "reference_max_abs": 0.1241377517580986,
+        "error_over_signal": 1.200373051937081e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 33.14559906721115,
+        "p50_us": 33.1839993596077,
+        "p80_us": 33.24799984693527,
+        "min_us": 32.80000016093254,
+        "max_us": 36.320000886917114,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.7704797627970947e-09,
+          "reference_max_abs": 0.1241377517580986,
+          "error_over_signal": 1.200373051937081e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 1,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.4901161193847656e-08,
+        "mean_abs_error": 1.7704797627970947e-09,
+        "reference_max_abs": 0.1241377517580986,
+        "error_over_signal": 1.200373051937081e-07,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 8,
+        "min_m_g": 1,
+        "max_m_g": 1,
+        "mean_m_g": 1.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 42.45759919285774,
+        "p50_us": 43.15200075507164,
+        "p80_us": 43.53279992938042,
+        "min_us": 41.919998824596405,
+        "max_us": 44.51199993491173,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.4901161193847656e-08,
+          "mean_abs_error": 1.7704797627970947e-09,
+          "reference_max_abs": 0.1241377517580986,
+          "error_over_signal": 1.200373051937081e-07,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.052490234375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 9.5367431640625e-07,
+          "mean_abs_error": 2.6199131752946414e-10,
+          "reference_max_abs": 0.00494384765625,
+          "error_over_signal": 0.00019290123456790122,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 323.8784074783325,
+        "p50_us": 326.54400169849396,
+        "p80_us": 333.6832106113434,
+        "min_us": 322.1760094165802,
+        "max_us": 347.84001111984253,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.052490234375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 9.5367431640625e-07,
+          "mean_abs_error": 2.6199131752946414e-10,
+          "reference_max_abs": 0.00494384765625,
+          "error_over_signal": 0.00019290123456790122,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 271.64798974990845,
+        "p50_us": 273.26399087905884,
+        "p80_us": 277.90080308914185,
+        "min_us": 269.53598856925964,
+        "max_us": 336.89600229263306,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.052490234375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 9.5367431640625e-07,
+          "mean_abs_error": 2.6199131752946414e-10,
+          "reference_max_abs": 0.00494384765625,
+          "error_over_signal": 0.00019290123456790122,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 87.87199854850769,
+        "p50_us": 87.90399879217148,
+        "p80_us": 87.96799927949905,
+        "min_us": 87.80799806118011,
+        "max_us": 90.87999910116196,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.052490234375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 9.5367431640625e-07,
+            "mean_abs_error": 2.6199131752946414e-10,
+            "reference_max_abs": 0.00494384765625,
+            "error_over_signal": 0.00019290123456790122,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 0.0,
+          "mean_abs_error": 0.0,
+          "reference_max_abs": 0.052490234375,
+          "error_over_signal": 0.0,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 9.5367431640625e-07,
+          "mean_abs_error": 2.6199131752946414e-10,
+          "reference_max_abs": 0.00494384765625,
+          "error_over_signal": 0.00019290123456790122,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 96.486397087574,
+        "p50_us": 97.05600142478943,
+        "p80_us": 97.47199714183807,
+        "min_us": 95.96800059080124,
+        "max_us": 98.39999675750732,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 0.0,
+            "mean_abs_error": 0.0,
+            "reference_max_abs": 0.052490234375,
+            "error_over_signal": 0.0,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 9.5367431640625e-07,
+            "mean_abs_error": 2.6199131752946414e-10,
+            "reference_max_abs": 0.00494384765625,
+            "error_over_signal": 0.00019290123456790122,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.3262033462524414e-06,
+        "mean_abs_error": 1.979151509345911e-09,
+        "reference_max_abs": 0.18821251392364502,
+        "error_over_signal": 7.046308019616921e-06,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 218.47039461135864,
+        "p50_us": 221.02399915456772,
+        "p80_us": 226.2528032064438,
+        "min_us": 216.8000042438507,
+        "max_us": 275.6800055503845,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.3262033462524414e-06,
+        "mean_abs_error": 1.979151509345911e-09,
+        "reference_max_abs": 0.18821251392364502,
+        "error_over_signal": 7.046308019616921e-06,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 166.27839505672455,
+        "p50_us": 167.08800196647644,
+        "p80_us": 171.68000638484955,
+        "min_us": 164.000004529953,
+        "max_us": 200.76799392700195,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.3262033462524414e-06,
+        "mean_abs_error": 1.979151509345911e-09,
+        "reference_max_abs": 0.18821251392364502,
+        "error_over_signal": 7.046308019616921e-06,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 58.36800113320351,
+        "p50_us": 58.400001376867294,
+        "p80_us": 58.40640142560005,
+        "min_us": 58.33600088953972,
+        "max_us": 61.664000153541565,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.3262033462524414e-06,
+          "mean_abs_error": 1.979151509345911e-09,
+          "reference_max_abs": 0.18821251392364502,
+          "error_over_signal": 7.046308019616921e-06,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 32,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 1.3262033462524414e-06,
+        "mean_abs_error": 1.979151509345911e-09,
+        "reference_max_abs": 0.18821251392364502,
+        "error_over_signal": 7.046308019616921e-06,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 8,
+        "max_m_g": 8,
+        "mean_m_g": 8.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 64.64000046253204,
+        "p50_us": 64.99200314283371,
+        "p80_us": 65.42079895734787,
+        "min_us": 64.25599753856659,
+        "max_us": 66.3679987192154,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 1.3262033462524414e-06,
+          "mean_abs_error": 1.979151509345911e-09,
+          "reference_max_abs": 0.18821251392364502,
+          "error_over_signal": 7.046308019616921e-06,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 7.62939453125e-06,
+          "mean_abs_error": 7.279510327862226e-12,
+          "reference_max_abs": 0.061279296875,
+          "error_over_signal": 0.0001245019920318725,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 8.798650696917321e-10,
+          "reference_max_abs": 0.005218505859375,
+          "error_over_signal": 0.0029239766081871343,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 325.0304043292999,
+        "p50_us": 328.40000092983246,
+        "p80_us": 333.2864046096802,
+        "min_us": 324.5759904384613,
+        "max_us": 357.4399948120117,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 7.62939453125e-06,
+          "mean_abs_error": 7.279510327862226e-12,
+          "reference_max_abs": 0.061279296875,
+          "error_over_signal": 0.0001245019920318725,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 8.798650696917321e-10,
+          "reference_max_abs": 0.005218505859375,
+          "error_over_signal": 0.0029239766081871343,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 274.4191884994507,
+        "p50_us": 276.4799892902374,
+        "p80_us": 282.98879861831665,
+        "min_us": 272.5439965724945,
+        "max_us": 296.9279885292053,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 7.62939453125e-06,
+          "mean_abs_error": 7.279510327862226e-12,
+          "reference_max_abs": 0.061279296875,
+          "error_over_signal": 0.0001245019920318725,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 8.798650696917321e-10,
+          "reference_max_abs": 0.005218505859375,
+          "error_over_signal": 0.0029239766081871343,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 115.05279690027237,
+        "p50_us": 115.7120019197464,
+        "p80_us": 116.14079773426056,
+        "min_us": 114.59200084209442,
+        "max_us": 119.23199892044067,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 7.62939453125e-06,
+            "mean_abs_error": 7.279510327862226e-12,
+            "reference_max_abs": 0.061279296875,
+            "error_over_signal": 0.0001245019920318725,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 1.52587890625e-05,
+            "mean_abs_error": 8.798650696917321e-10,
+            "reference_max_abs": 0.005218505859375,
+            "error_over_signal": 0.0029239766081871343,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 7.62939453125e-06,
+          "mean_abs_error": 7.279510327862226e-12,
+          "reference_max_abs": 0.061279296875,
+          "error_over_signal": 0.0001245019920318725,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 8.798650696917321e-10,
+          "reference_max_abs": 0.005218505859375,
+          "error_over_signal": 0.0029239766081871343,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 117.66400188207626,
+        "p50_us": 118.04799735546112,
+        "p80_us": 118.60480159521103,
+        "min_us": 116.7680025100708,
+        "max_us": 120.03199756145477,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 7.62939453125e-06,
+            "mean_abs_error": 7.279510327862226e-12,
+            "reference_max_abs": 0.061279296875,
+            "error_over_signal": 0.0001245019920318725,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 1.52587890625e-05,
+            "mean_abs_error": 8.798650696917321e-10,
+            "reference_max_abs": 0.005218505859375,
+            "error_over_signal": 0.0029239766081871343,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 9.842216968536377e-06,
+        "mean_abs_error": 2.037200630411462e-09,
+        "reference_max_abs": 0.22897140681743622,
+        "error_over_signal": 4.298448048748631e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 218.01600456237793,
+        "p50_us": 220.89599817991257,
+        "p80_us": 229.4272005558014,
+        "min_us": 216.89599752426147,
+        "max_us": 256.6399872303009,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 9.842216968536377e-06,
+        "mean_abs_error": 2.037200630411462e-09,
+        "reference_max_abs": 0.22897140681743622,
+        "error_over_signal": 4.298448048748631e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 165.38240015506744,
+        "p50_us": 169.10400241613388,
+        "p80_us": 172.51839935779572,
+        "min_us": 164.48000073432922,
+        "max_us": 191.13600254058838,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 9.842216968536377e-06,
+        "mean_abs_error": 2.037200630411462e-09,
+        "reference_max_abs": 0.22897140681743622,
+        "error_over_signal": 4.298448048748631e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 83.64800363779068,
+        "p50_us": 84.1439999639988,
+        "p80_us": 84.37120169401169,
+        "min_us": 83.45600217580795,
+        "max_us": 86.87999844551086,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 9.842216968536377e-06,
+          "mean_abs_error": 2.037200630411462e-09,
+          "reference_max_abs": 0.22897140681743622,
+          "error_over_signal": 4.298448048748631e-05,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 256,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 9.842216968536377e-06,
+        "mean_abs_error": 2.037200630411462e-09,
+        "reference_max_abs": 0.22897140681743622,
+        "error_over_signal": 4.298448048748631e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 64,
+        "max_m_g": 64,
+        "mean_m_g": 64.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 87.49440312385559,
+        "p50_us": 87.72799745202065,
+        "p80_us": 88.39040249586105,
+        "min_us": 86.65599673986435,
+        "max_us": 90.01599997282028,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 9.842216968536377e-06,
+          "mean_abs_error": 2.037200630411462e-09,
+          "reference_max_abs": 0.22897140681743622,
+          "error_over_signal": 4.298448048748631e-05,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 6.103515625e-05,
+          "mean_abs_error": 1.510613856225973e-11,
+          "reference_max_abs": 0.0888671875,
+          "error_over_signal": 0.0006868131868131869,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 4.1594333533012673e-10,
+          "reference_max_abs": 0.00555419921875,
+          "error_over_signal": 0.0027472527472527475,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 459.80159640312195,
+        "p50_us": 460.2559953927994,
+        "p80_us": 461.3375961780548,
+        "min_us": 459.1679871082306,
+        "max_us": 552.7359843254089,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 6.103515625e-05,
+          "mean_abs_error": 1.510613856225973e-11,
+          "reference_max_abs": 0.0888671875,
+          "error_over_signal": 0.0006868131868131869,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 4.1594333533012673e-10,
+          "reference_max_abs": 0.00555419921875,
+          "error_over_signal": 0.0027472527472527475,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 461.31839752197266,
+        "p50_us": 462.41599321365356,
+        "p80_us": 463.430392742157,
+        "min_us": 458.71999859809875,
+        "max_us": 496.3200092315674,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 6.103515625e-05,
+          "mean_abs_error": 1.510613856225973e-11,
+          "reference_max_abs": 0.0888671875,
+          "error_over_signal": 0.0006868131868131869,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 4.1594333533012673e-10,
+          "reference_max_abs": 0.00555419921875,
+          "error_over_signal": 0.0027472527472527475,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 416.04480743408203,
+        "p50_us": 417.9839938879013,
+        "p80_us": 420.3903913497925,
+        "min_us": 413.4080111980438,
+        "max_us": 422.94400930404663,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 6.103515625e-05,
+            "mean_abs_error": 1.510613856225973e-11,
+            "reference_max_abs": 0.0888671875,
+            "error_over_signal": 0.0006868131868131869,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 1.52587890625e-05,
+            "mean_abs_error": 4.1594333533012673e-10,
+            "reference_max_abs": 0.00555419921875,
+            "error_over_signal": 0.0027472527472527475,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "gate_consumer",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "act": {
+          "max_abs_error": 6.103515625e-05,
+          "mean_abs_error": 1.510613856225973e-11,
+          "reference_max_abs": 0.0888671875,
+          "error_over_signal": 0.0006868131868131869,
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "down_rank": {
+          "max_abs_error": 1.52587890625e-05,
+          "mean_abs_error": 4.1594333533012673e-10,
+          "reference_max_abs": 0.00555419921875,
+          "error_over_signal": 0.0027472527472527475,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_consume_scatter"
+      },
+      "timing": {
+        "p20_us": 415.1551902294159,
+        "p50_us": 416.04800522327423,
+        "p80_us": 420.71680426597595,
+        "min_us": 413.9519929885864,
+        "max_us": 423.0400025844574,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "act": {
+            "max_abs_error": 6.103515625e-05,
+            "mean_abs_error": 1.510613856225973e-11,
+            "reference_max_abs": 0.0888671875,
+            "error_over_signal": 0.0006868131868131869,
+            "atol": 0.03,
+            "rtol": 0.03
+          },
+          "down_rank": {
+            "max_abs_error": 1.52587890625e-05,
+            "mean_abs_error": 4.1594333533012673e-10,
+            "reference_max_abs": 0.00555419921875,
+            "error_over_signal": 0.0027472527472527475,
+            "atol": 0.05,
+            "rtol": 0.03
+          }
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.076849341392517e-05,
+        "mean_abs_error": 2.0134014455663873e-09,
+        "reference_max_abs": 0.22219014167785645,
+        "error_over_signal": 9.347171416829322e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 336.08959317207336,
+        "p50_us": 336.8159979581833,
+        "p80_us": 337.74721026420593,
+        "min_us": 334.9759876728058,
+        "max_us": 419.0079867839813,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "eager",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.076849341392517e-05,
+        "mean_abs_error": 2.0134014455663873e-09,
+        "reference_max_abs": 0.22219014167785645,
+        "error_over_signal": 9.347171416829322e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 338.96960616111755,
+        "p50_us": 340.4799997806549,
+        "p80_us": 341.96479320526123,
+        "min_us": 336.95998787879944,
+        "max_us": 382.01600313186646,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": null,
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.076849341392517e-05,
+        "mean_abs_error": 2.0134014455663873e-09,
+        "reference_max_abs": 0.22219014167785645,
+        "error_over_signal": 9.347171416829322e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 317.8943991661072,
+        "p50_us": 318.9920037984848,
+        "p80_us": 322.04800844192505,
+        "min_us": 316.6399896144867,
+        "max_us": 327.455997467041,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 2.076849341392517e-05,
+          "mean_abs_error": 2.0134014455663873e-09,
+          "reference_max_abs": 0.22219014167785645,
+          "error_over_signal": 9.347171416829322e-05,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "hot",
+        "method": "none_hot_working_set",
+        "flush_bytes": 0,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    },
+    {
+      "case": {
+        "tokens": 2048,
+        "rank": 32,
+        "hidden": 2048,
+        "intermediate": 512,
+        "experts": 32,
+        "top_k": 8,
+        "adapters": 4,
+        "adapter_mode": "multi",
+        "route_pattern": "regular",
+        "seed": 19
+      },
+      "site": "down_finalize",
+      "family": "bmm",
+      "accumulation": "bf16",
+      "scope": "O0",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "status": "ok",
+      "error": null,
+      "correctness": {
+        "max_abs_error": 2.076849341392517e-05,
+        "mean_abs_error": 2.0134014455663873e-09,
+        "reference_max_abs": 0.22219014167785645,
+        "error_over_signal": 9.347171416829322e-05,
+        "atol": 0.05,
+        "rtol": 0.03
+      },
+      "route_metrics": {
+        "active_groups": 32,
+        "min_m_g": 512,
+        "max_m_g": 512,
+        "mean_m_g": 512.0,
+        "cv_m_g": 0.0,
+        "equal_m_g": true
+      },
+      "bmm_admission": {
+        "eligible": true,
+        "reason": "all_nonempty_groups_have_equal_M_g"
+      },
+      "implementation": {
+        "consumer": "equal_M_g_bmm_pack_down_B_scatter_finalize"
+      },
+      "timing": {
+        "p20_us": 318.5279905796051,
+        "p50_us": 318.9280033111572,
+        "p80_us": 321.06878757476807,
+        "min_us": 317.56800413131714,
+        "max_us": 323.42401146888733,
+        "num_samples": 20,
+        "launches_per_batch": 1
+      },
+      "graph_correctness": {
+        "replay_completed": true,
+        "independent_oracle": {
+          "max_abs_error": 2.076849341392517e-05,
+          "mean_abs_error": 2.0134014455663873e-09,
+          "reference_max_abs": 0.22219014167785645,
+          "error_over_signal": 9.347171416829322e-05,
+          "atol": 0.05,
+          "rtol": 0.03
+        }
+      },
+      "cache_control": {
+        "state": "cold",
+        "method": "preallocated_int32_read_write_on_current_stream",
+        "flush_bytes": 125829120,
+        "detected_l2_bytes": 62914560,
+        "size_source": "torch.cuda.get_device_properties.L2_cache_size"
+      }
+    }
+  ],
+  "disqualifications": [],
+  "winners": [
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 43.15200075507164,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 33.1839993596077,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 167.87199676036835,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 217.56800264120102,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 59.87200140953064,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 56.2559999525547,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 276.12799406051636,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 1,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 328.5119980573654,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 318.9280033111572,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 318.9920037984848,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 340.4799997806549,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 336.8159979581833,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 416.04800522327423,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 417.9839938879013,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 462.41599321365356,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 2048,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 460.2559953927994,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 87.72799745202065,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 84.1439999639988,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 169.10400241613388,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 220.89599817991257,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 118.04799735546112,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 115.7120019197464,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 276.4799892902374,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 256,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 328.40000092983246,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 64.99200314283371,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 58.400001376867294,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 167.08800196647644,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "down_finalize",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 221.02399915456772,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 97.05600142478943,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "cuda_graph",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 87.90399879217148,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "cold",
+      "winner": "bmm",
+      "p50_us": 273.26399087905884,
+      "runner_up_pct": null
+    },
+    {
+      "tokens": 32,
+      "rank": 32,
+      "site": "gate_consumer",
+      "accumulation": "bf16",
+      "execution": "eager",
+      "cache_state": "hot",
+      "winner": "bmm",
+      "p50_us": 326.54400169849396,
+      "runner_up_pct": null
+    }
+  ]
+}
