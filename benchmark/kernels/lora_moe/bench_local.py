@@ -631,6 +631,16 @@ def _production_config_reference(
 ) -> torch.Tensor | None:
     """Compute a safe reference before installing an experimental B config."""
     direct = _resolve_direct(variant, fixture.case.adapters.rank)
+    # A same-family generic reference used to reproduce the gate/up slice bug:
+    # both runs consumed A[:R] for both output halves.  Rank <= 64 has a safe,
+    # independent production direct path, so use it as the oracle here.
+    if (
+        variant == "generic"
+        and target in ("gate_b", "gate_ab")
+        and fixture.num_slices > 1
+        and fixture.case.adapters.rank <= 64
+    ):
+        direct = True
     fixture.routing_cache.clear()
     fixture.invoke("routing", direct=direct)
     if target.endswith("_b"):
@@ -646,7 +656,7 @@ def _production_config_reference(
 
 
 def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
-    """Compare only the selected B family with a production-config reference."""
+    """Compare the selected operator with its safe production-config oracle."""
     fixture = op.fixture
     if op.target == "routing":
         op.launch()
@@ -663,7 +673,13 @@ def _check_operator(op: PreparedOp, reference: torch.Tensor | None) -> None:
 
     first = run_once()
     second = run_once()
-    rtol = atol = 3e-2 if op.target.endswith("_a") else 6e-2
+    if not op.direct and op.target in ("gate_b", "gate_ab"):
+        # Gate/up random factors produce small deltas.  A 6e-2 absolute bound
+        # can accept an entirely wrong half, so keep a BF16-friendly relative
+        # bound but make the absolute comparison discriminate the two slices.
+        rtol, atol = 3e-2, 2e-4
+    else:
+        rtol = atol = 3e-2 if op.target.endswith("_a") else 6e-2
     assert reference is not None
     torch.testing.assert_close(first, reference, rtol=rtol, atol=atol)
     torch.testing.assert_close(second, first, rtol=rtol, atol=atol)

@@ -413,6 +413,82 @@ from sglang.srt.lora.sgl_lora.triton_ops.expand import (  # noqa: E402
 )
 
 
+def _invoke_generic_moe_lora_expand_add(
+    intermediate: torch.Tensor,
+    weight: torch.Tensor,
+    output: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    sorted_token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    num_tokens_post_padded: torch.Tensor,
+    token_lora_mask: torch.Tensor,
+    config: dict[str, Any],
+    compute_type: Any,
+    mul_routed_weight: bool,
+    fuse_add_to_output: bool,
+    fuse_sum_all_reduce: bool,
+    num_output_slices: int,
+) -> None:
+    """Launch generic LoRA-B over matching equal-width A/B/output slices.
+
+    Gate/up shrink materializes ``[T * top_k, 2R]``, while each half of the
+    stacked B weight reduces only ``R`` columns.  A single generic fused-MoE
+    launch therefore reads the first A half for both output halves.  Narrowed
+    tensor views retain the original row/expert strides, so splitting the
+    launches selects the matching A half without copying or rebuilding routing.
+    """
+    from sglang.kernels.ops.moe.fused_moe_triton_kernels import (
+        invoke_fused_moe_kernel,
+    )
+
+    if num_output_slices == 1:
+        views = ((intermediate, weight, output),)
+    else:
+        slice_rank = weight.shape[-1]
+        slice_width = weight.shape[-2] // num_output_slices
+        views = (
+            (
+                intermediate.narrow(-1, slice_idx * slice_rank, slice_rank),
+                weight.narrow(-2, slice_idx * slice_width, slice_width),
+                output.narrow(-1, slice_idx * slice_width, slice_width),
+            )
+            for slice_idx in range(num_output_slices)
+        )
+
+    for intermediate_slice, weight_slice, output_slice in views:
+        invoke_fused_moe_kernel(
+            intermediate_slice,
+            weight_slice,
+            None,
+            output_slice,
+            None,
+            None,
+            None,
+            topk_weights,
+            topk_ids,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            mul_routed_weight,
+            1,
+            config,
+            compute_type,
+            False,
+            False,
+            False,
+            False,
+            False,
+            None,
+            fuse_add_to_output=fuse_add_to_output,
+            fuse_sum_all_reduce=fuse_sum_all_reduce,
+            lora_preserve_base=True,
+            add_output_mask=token_lora_mask,
+            mask_output=not fuse_add_to_output and not fuse_sum_all_reduce,
+            router_topk=topk_ids.shape[1],
+        )
+
+
 def _align_block_size_jit(
     topk_ids: torch.Tensor,
     block_size: int,
@@ -973,39 +1049,22 @@ def _merged_experts_fused_moe_lora_add_impl(
             num_output_slices=num_output_slices,
         )
     else:
-        from sglang.kernels.ops.moe.fused_moe_triton_kernels import (
-            invoke_fused_moe_kernel,
-        )
-
-        invoke_fused_moe_kernel(
+        _invoke_generic_moe_lora_expand_add(
             intermediate_flat,
             lora_b_virtual,
-            None,
             output,
-            None,
-            None,
-            None,
             topk_weights,
             topk_ids,
             sorted_token_ids,
             expert_ids,
             num_tokens_post_padded,
-            mul_routed_weight,
-            1,
+            token_lora_mask,
             b_stage_config,
             tl.bfloat16 if hidden_states.dtype == torch.bfloat16 else tl.float16,
-            False,
-            False,
-            False,
-            False,
-            False,
-            None,
-            fuse_add_to_output=fuse_add_to_output,
-            fuse_sum_all_reduce=fuse_sum_all_reduce,
-            lora_preserve_base=True,
-            add_output_mask=token_lora_mask,
-            mask_output=not fuse_add_to_output and not fuse_sum_all_reduce,
-            router_topk=topk_ids.shape[1],
+            mul_routed_weight,
+            fuse_add_to_output,
+            fuse_sum_all_reduce,
+            num_output_slices,
         )
 
 

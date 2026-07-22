@@ -178,6 +178,52 @@ def test_reference_and_check_never_launch_the_opposite_b_family(monkeypatch):
     assert calls == [("routing", True), ("shrink", True)] + [("expand", True)] * 3
 
 
+def test_generic_gate_check_uses_direct_oracle_and_tight_tolerance(monkeypatch):
+    calls = []
+    tolerances = []
+
+    class Fixture:
+        case = SimpleNamespace(adapters=SimpleNamespace(rank=64))
+        num_slices = 2
+        routing_cache = {}
+        output, intermediate = torch.tensor([3.0]), torch.tensor([2.0])
+
+        def invoke(self, stage, *, direct):
+            calls.append((stage, direct))
+
+        def reset_output(self):
+            self.output.fill_(3.0)
+
+    monkeypatch.setattr(local.torch.cuda, "synchronize", lambda: None)
+    monkeypatch.setattr(
+        local.torch.testing,
+        "assert_close",
+        lambda *_, **kwargs: tolerances.append((kwargs["rtol"], kwargs["atol"])),
+    )
+    fixture = Fixture()
+    reference = local._production_config_reference(
+        fixture, target="gate_b", variant="generic"
+    )
+    op = local.PreparedOp(
+        fixture,
+        "gate_b",
+        "K0",
+        False,
+        lambda: fixture.invoke("expand", direct=False),
+        None,
+    )
+    local._check_operator(op, reference)
+
+    assert calls == [
+        ("routing", True),
+        ("shrink", True),
+        ("expand", True),
+        ("expand", False),
+        ("expand", False),
+    ]
+    assert tolerances == [(3e-2, 2e-4), (3e-2, 2e-4)]
+
+
 def test_o0_b_clears_prewarm_before_rebuilding_b(monkeypatch):
     seen = []
 
