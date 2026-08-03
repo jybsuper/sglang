@@ -34,6 +34,11 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         # Request/token caps for serving a batch from the static metadata.
         self.prefill_cuda_graph_max_bs: int | None = None
         self.prefill_cuda_graph_max_tokens: int | None = None
+        self.prefill_moe_cg_buffers: dict[str, torch.Tensor] | None = None
+        # Lazily constructed by the SGL MoE-LoRA engine. All MoE layers run
+        # sequentially, so one workspace safely bounds scratch retention and
+        # avoids one graph-buffer set per layer.
+        self.sgl_lora_workspace = None
 
     def run_lora_a_embedding(
         self,
@@ -178,6 +183,30 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
             f"LoRA backend {type(self).__name__} does not support the prefill CUDA graph."
         )
 
+    def init_prefill_cuda_graph_moe_buffers(self, max_num_tokens: int) -> None:
+        """Allocate graph-stable MoE routing metadata for prefill buckets.
+
+        Decode metadata is sized by request count and is therefore too small
+        for a captured prefill token bucket.  The SGL MoE-LoRA engine reads
+        this separate token-sized allocation while dense LoRA kernels keep
+        using their backend-specific static batch info.
+        """
+        if not self.is_moe_lora:
+            return
+        self.prefill_moe_cg_buffers = {
+            "adapter_enabled": torch.zeros(
+                self.max_loras_per_batch,
+                dtype=torch.int32,
+                device=self.device,
+            ),
+            "token_lora_mapping": torch.full(
+                (max_num_tokens,),
+                -1,
+                dtype=torch.int32,
+                device=self.device,
+            ),
+        }
+
     @property
     def is_moe_lora(self) -> bool:
         return self._is_moe_lora
@@ -192,6 +221,7 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         max_loras: int,
         compute_dtype: torch.dtype,
         moe_layer,
+        include_legacy_kernel_buffers: bool = True,
     ):
         """Phase 1 of LoRA CUDA graph init: MoE intermediate buffers.
 
@@ -199,16 +229,34 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         to extract dimensions.  All FusedMoEWithLoRA layers share the same
         buffers since they execute sequentially during forward.
 
-        This is backend-agnostic because MoE LoRA always uses the same
-        fused Triton kernel (TritonRunnerCoreWithLoRA) regardless of which
-        dense LoRA backend is selected.
+        Two groups live here:
+
+        * batch metadata (``adapter_enabled``, ``token_lora_mapping``) is
+          engine-independent. ``_add_moe_lora_info`` writes into these exact
+          tensors under CUDA graphs, so their addresses must stay stable across
+          replays; every execution engine needs them and they depend only on
+          ``max_bs``/``max_loras``.
+        * kernel scratch for the legacy fused Triton MoE-LoRA path, which
+          needs layer geometry from ``moe_layer._quant_info``. Engines that
+          bring their own kernels pass
+          ``include_legacy_kernel_buffers=False``; that also keeps the
+          allocation out of the KV-cache budget.
         """
+        device = moe_layer.base_layer.w13_weight.device
+        self.moe_cg_buffers = {
+            "adapter_enabled": torch.zeros(max_loras, dtype=torch.int32, device=device),
+            "token_lora_mapping": torch.full(
+                (max_bs,), -1, dtype=torch.int32, device=device
+            ),
+        }
+        if not include_legacy_kernel_buffers:
+            return
+
         base = moe_layer.base_layer
         top_k = base.top_k
         qinfo = moe_layer._quant_info
         E, N, _ = qinfo.w13_weight.shape
         hidden_dim = qinfo.w2_weight.shape[1]
-        device = qinfo.w13_weight.device
         dtype = compute_dtype
         num_experts = base.num_experts
 
@@ -219,56 +267,54 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         ) * block_size_m
         max_num_m_blocks = (max_num_tokens_padded + block_size_m - 1) // block_size_m
 
-        self.moe_cg_buffers = {
-            "intermediate_cache1": torch.empty(
-                (max_bs, top_k, N), device=device, dtype=dtype
-            ),
-            "intermediate_cache2": torch.empty(
-                (max_bs * top_k, N // 2), device=device, dtype=dtype
-            ),
-            "intermediate_cache3": torch.empty(
-                (max_bs, top_k, hidden_dim), device=device, dtype=dtype
-            ),
-            "out_hidden_states": torch.empty(
-                (max_bs, hidden_dim), device=device, dtype=dtype
-            ),
-            "sorted_token_ids_lora": torch.empty(
-                (max_loras * max_num_tokens_padded,),
-                device=device,
-                dtype=torch.int32,
-            ),
-            "expert_ids_lora": torch.empty(
-                (max_loras * max_num_m_blocks,),
-                device=device,
-                dtype=torch.int32,
-            ),
-            "num_tokens_post_padded_lora": torch.empty(
-                (max_loras,), device=device, dtype=torch.int32
-            ),
-            "adapter_enabled": torch.zeros(max_loras, dtype=torch.int32, device=device),
-            # int64 copy of weight_indices for index_fill_(), which requires
-            # LongTensor.  weight_indices itself must stay int32 because the
-            # CUDA moe_lora_align kernel casts it to int32_t*.
-            "weight_indices_long": torch.zeros(
-                max_bs, dtype=torch.int64, device=device
-            ),
-            "lora_ids": torch.arange(max_loras, dtype=torch.int32, device=device),
-            "cumsum_buffer": torch.zeros(
-                max_loras * (num_experts + 1),
-                dtype=torch.int32,
-                device=device,
-            ),
-            "token_mask": torch.empty(
-                (max_loras * max_bs * top_k,),
-                dtype=torch.int32,
-                device=device,
-            ),
-            "max_num_tokens_padded": max_num_tokens_padded,
-            "max_num_m_blocks": max_num_m_blocks,
-            "token_lora_mapping": torch.full(
-                (max_bs,), -1, dtype=torch.int32, device=device
-            ),
-        }
+        self.moe_cg_buffers.update(
+            {
+                "intermediate_cache1": torch.empty(
+                    (max_bs, top_k, N), device=device, dtype=dtype
+                ),
+                "intermediate_cache2": torch.empty(
+                    (max_bs * top_k, N // 2), device=device, dtype=dtype
+                ),
+                "intermediate_cache3": torch.empty(
+                    (max_bs, top_k, hidden_dim), device=device, dtype=dtype
+                ),
+                "out_hidden_states": torch.empty(
+                    (max_bs, hidden_dim), device=device, dtype=dtype
+                ),
+                "sorted_token_ids_lora": torch.empty(
+                    (max_loras * max_num_tokens_padded,),
+                    device=device,
+                    dtype=torch.int32,
+                ),
+                "expert_ids_lora": torch.empty(
+                    (max_loras * max_num_m_blocks,),
+                    device=device,
+                    dtype=torch.int32,
+                ),
+                "num_tokens_post_padded_lora": torch.empty(
+                    (max_loras,), device=device, dtype=torch.int32
+                ),
+                # int64 copy of weight_indices for index_fill_(), which requires
+                # LongTensor.  weight_indices itself must stay int32 because the
+                # CUDA moe_lora_align kernel casts it to int32_t*.
+                "weight_indices_long": torch.zeros(
+                    max_bs, dtype=torch.int64, device=device
+                ),
+                "lora_ids": torch.arange(max_loras, dtype=torch.int32, device=device),
+                "cumsum_buffer": torch.zeros(
+                    max_loras * (num_experts + 1),
+                    dtype=torch.int32,
+                    device=device,
+                ),
+                "token_mask": torch.empty(
+                    (max_loras * max_bs * top_k,),
+                    dtype=torch.int32,
+                    device=device,
+                ),
+                "max_num_tokens_padded": max_num_tokens_padded,
+                "max_num_m_blocks": max_num_m_blocks,
+            }
+        )
 
     def _add_moe_lora_info(
         self, forward_batch: ForwardBatch, batch_info: LoRABatchInfo
@@ -277,8 +323,16 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
             return batch_info
 
         if batch_info.use_cuda_graph:
-            adapter_enabled = self.moe_cg_buffers["adapter_enabled"]
-            token_lora_mapping = self.moe_cg_buffers["token_lora_mapping"]
+            if batch_info is getattr(self, "prefill_cuda_graph_batch_info", None):
+                buffers = self.prefill_moe_cg_buffers
+                if buffers is None:
+                    raise RuntimeError(
+                        "prefill MoE-LoRA CUDA graph metadata was not initialized"
+                    )
+            else:
+                buffers = self.moe_cg_buffers
+            adapter_enabled = buffers["adapter_enabled"]
+            token_lora_mapping = buffers["token_lora_mapping"]
         else:
             adapter_enabled = None
             token_lora_mapping = None
@@ -368,12 +422,17 @@ def _compute_moe_lora_info_kernel(
     valid = offs < seg_len
     lora_id = tl.load(weight_indices_ptr + pid_seg)
     lora_rank = tl.load(lora_ranks_ptr + lora_id)
+    adapter_is_enabled = lora_rank > 0
     tl.store(
         adapter_enabled_ptr + lora_id,
-        (lora_rank > 0).to(tl.int32),
+        adapter_is_enabled.to(tl.int32),
         mask=pid_m == 0,
     )
-    tl.store(token_lora_mapping_ptr + seg_start + offs, lora_id, mask=valid)
+    tl.store(
+        token_lora_mapping_ptr + seg_start + offs,
+        tl.where(adapter_is_enabled, lora_id, -1),
+        mask=valid,
+    )
 
 
 def _compute_moe_lora_info(
@@ -389,6 +448,12 @@ def _compute_moe_lora_info(
         assert (
             num_tokens <= token_lora_mapping.shape[0]
         ), "num_tokens must be less than or equal to the shape of token_lora_mapping"
+        # This graph-stable buffer can be larger than the current batch.
+        # Re-arm its unused rows on every refresh: otherwise a smaller replay
+        # inherits adapter slots from an earlier larger batch and constructs
+        # LoRA route work for padded rows.
+        if num_tokens < token_lora_mapping.shape[0]:
+            token_lora_mapping[num_tokens:].fill_(-1)
         token_lora_mapping = token_lora_mapping[:num_tokens]
     else:
         token_lora_mapping = torch.empty(
@@ -451,8 +516,12 @@ def _compute_moe_lora_info(
         torch.searchsorted(seg_indptr.to(torch.int32), token_positions, right=True) - 1
     )
 
-    token_lora_mapping = torch.index_select(
+    torch.index_select(
         weight_indices.to(torch.int32), 0, req_indices, out=token_lora_mapping
     )
+    token_lora_ranks = torch.index_select(
+        lora_ranks, 0, token_lora_mapping.to(torch.int64)
+    )
+    token_lora_mapping.masked_fill_(token_lora_ranks <= 0, -1)
 
     return adapter_enabled, token_lora_mapping

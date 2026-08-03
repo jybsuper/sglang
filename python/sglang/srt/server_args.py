@@ -2774,6 +2774,32 @@ class ServerArgs:
         ),
         NS("lora"),
     ] = "csgmv"
+    lora_execution_engine: A[
+        Literal["auto", "legacy", "sgl_lora"],
+        Arg(
+            help=(
+                "Choose the LoRA execution engine. 'legacy' preserves the "
+                "existing layer execution, while 'sgl_lora' selects the new "
+                "MoE LoRA execution path. 'auto' currently resolves to 'legacy'."
+            ),
+            choices=["auto", "legacy", "sgl_lora"],
+        ),
+        NS("lora"),
+    ] = "auto"
+    lora_moe_base_gemm_provider: A[
+        Literal["auto", "cutedsl", "deepgemm"],
+        Arg(
+            help=(
+                "Choose one fixed base-GEMM provider for the SGL MoE-LoRA "
+                "execution engine. 'auto' selects the qualified faster "
+                "provider for the exact GPU model. The selected provider is "
+                "used for every eager and CUDA-graph batch size; unsupported "
+                "provider/device combinations fail during server startup."
+            ),
+            choices=["auto", "cutedsl", "deepgemm"],
+        ),
+        NS("lora"),
+    ] = "auto"
     max_lora_chunk_size: A[
         Optional[int],
         Arg(
@@ -8523,6 +8549,62 @@ class ServerArgs:
 
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
+
+        if self.lora_moe_base_gemm_provider not in (
+            "auto",
+            "cutedsl",
+            "deepgemm",
+        ):
+            raise ValueError(
+                "lora_moe_base_gemm_provider must be one of "
+                "'auto', 'cutedsl', or 'deepgemm'"
+            )
+
+        # Keep execution-engine selection orthogonal to the dense LoRA kernel
+        # backend and legacy virtual-expert flag.
+        if self.lora_execution_engine == "auto":
+            self.override(
+                "check_lora_server_args",
+                lora_execution_engine="legacy",
+            )
+        if (
+            self.lora_execution_engine != "sgl_lora"
+            and self.lora_moe_base_gemm_provider != "auto"
+        ):
+            raise ValueError(
+                "--lora-moe-base-gemm-provider is only valid with "
+                "--lora-execution-engine sgl_lora"
+            )
+        if self.lora_execution_engine == "sgl_lora":
+            if getattr(self, "ep_join_mode", None) is not None:
+                raise ValueError("sgl_lora does not yet support elastic EP")
+            if self.enable_dp_attention and self.dp_size > 1:
+                raise ValueError(
+                    "sgl_lora does not yet support DP-attention with dp_size > 1"
+                )
+            if (
+                self.enable_eplb
+                or self.init_expert_location != "trivial"
+                or self.ep_num_redundant_experts > 0
+            ):
+                raise ValueError(
+                    "sgl_lora currently requires trivial expert placement "
+                    "without EPLB or redundant experts"
+                )
+            if self.enable_pdmux:
+                raise ValueError(
+                    "sgl_lora does not yet support PD-multiplexing: its "
+                    "fused-align routing scratch is cached per "
+                    "(device, num_buckets) and is not safe under concurrent "
+                    "prefill/decode streams"
+                )
+            if self.enable_two_batch_overlap:
+                raise ValueError(
+                    "sgl_lora does not yet support two-batch overlap: its "
+                    "batch metadata and graph-stable MoE workspace are shared "
+                    "across layers and are not safe for concurrent child "
+                    "forwards"
+                )
 
         # Enable LoRA if any LoRA paths are provided for backward compatibility.
         if self.lora_paths:

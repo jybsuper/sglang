@@ -898,6 +898,7 @@ def post_reorder_for_cutlass_moe(
 @triton.jit
 def post_reorder_deepgemm_triton_kernel(
     down_output_ptr,
+    pair_delta_ptr,
     output_ptr,
     src2dst_ptr,
     topk_ids_ptr,
@@ -906,11 +907,16 @@ def post_reorder_deepgemm_triton_kernel(
     num_tokens,
     hidden_size,
     routed_scaling_factor: float,
+    HAS_PAIR_DELTA: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
     NUM_STAGES: tl.constexpr,
 ):
-    """`expert_id >= 0` includes the shared expert at num_experts (padding=-1); don't
-    switch to the cutlass `!= num_local_experts` gate. routed_scaling_factor is folded into the store.
+    """Fixed-order DeepGEMM pair combine.
+
+    ``pair_delta`` is an unweighted canonical token/top-k contribution.  It is
+    added to the provider pair before this kernel applies the route weight and
+    the final routed scaling.  ``expert_id >= 0`` includes a shared expert at
+    ``num_experts``; padding/nonlocal pairs use ``-1``.
     """
     OutDtype = output_ptr.dtype.element_ty
 
@@ -939,6 +945,10 @@ def post_reorder_deepgemm_triton_kernel(
                 weight_scale = tl.load(token_topk_weights_ptr + idx).to(tl.float32)
                 load_ptr_offs = down_output_ptr_offs + dst_idx * hidden_size
                 in_data = tl.load(load_ptr_offs, mask=mask).to(tl.float32)
+                if HAS_PAIR_DELTA:
+                    pair_idx = src_idx * topk + idx
+                    delta_ptr_offs = pair_delta_ptr + pair_idx * hidden_size + offset
+                    in_data += tl.load(delta_ptr_offs, mask=mask).to(tl.float32)
                 sum_vec += in_data * weight_scale
         sum_vec *= routed_scaling_factor
         store_ptr_offs = output_ptr_offs + src_idx * hidden_size
@@ -955,10 +965,22 @@ def post_reorder_deepgemm(
     num_tokens,
     hidden_size,
     routed_scaling_factor: float,
+    pair_delta=None,
 ):
+    if pair_delta is not None:
+        expected_shape = (num_tokens, topk, hidden_size)
+        if tuple(pair_delta.shape) != expected_shape:
+            raise ValueError(
+                f"pair_delta must have shape {expected_shape}, "
+                f"got {tuple(pair_delta.shape)}"
+            )
+        if pair_delta.device != down_output.device or not pair_delta.is_contiguous():
+            raise ValueError("pair_delta must be contiguous on the provider device")
+    pair_delta_ptr = down_output if pair_delta is None else pair_delta
     grid, block_dim = _get_launch_config_2d(down_output.device, num_tokens, hidden_size)
     post_reorder_deepgemm_triton_kernel[grid](
         down_output,
+        pair_delta_ptr,
         output,
         src2dst,
         topk_ids,
@@ -967,6 +989,7 @@ def post_reorder_deepgemm(
         num_tokens,
         hidden_size,
         float(routed_scaling_factor),
+        HAS_PAIR_DELTA=pair_delta is not None,
         BLOCK_SIZE=block_dim,
         NUM_STAGES=3,
     )
@@ -1433,22 +1456,54 @@ def fused_moe_dispatch_index(
     topk_ids: torch.Tensor,
     num_local_experts: int,
     m_max: int,
+    *,
+    masked_m_out: Optional[torch.Tensor] = None,
+    src2dst_out: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_toks = topk_ids.numel()
-    src2dst = torch.empty(num_toks, device=topk_ids.device, dtype=torch.int32)
+    if src2dst_out is None:
+        src2dst = torch.empty(num_toks, device=topk_ids.device, dtype=torch.int32)
+    else:
+        if (
+            src2dst_out.shape != (num_toks,)
+            or src2dst_out.dtype != torch.int32
+            or src2dst_out.device != topk_ids.device
+            or not src2dst_out.is_contiguous()
+        ):
+            raise ValueError(
+                "src2dst_out must be contiguous int32 "
+                f"[{num_toks}] on {topk_ids.device}"
+            )
+        src2dst = src2dst_out
     # masked_m doubles as the atomic cursor and the final per-expert count; must be zeroed before any atomic_add.
     single_block = max(num_toks, num_local_experts) <= 1024
+    if masked_m_out is not None:
+        if (
+            masked_m_out.shape != (num_local_experts,)
+            or masked_m_out.dtype != torch.int32
+            or masked_m_out.device != topk_ids.device
+            or not masked_m_out.is_contiguous()
+        ):
+            raise ValueError(
+                "masked_m_out must be contiguous int32 "
+                f"[{num_local_experts}] on {topk_ids.device}"
+            )
+        masked_m = masked_m_out
     if single_block:
         BLOCK_SIZE = triton.next_power_of_2(max(num_toks, num_local_experts))
-        masked_m = torch.empty(
-            num_local_experts, device=topk_ids.device, dtype=torch.int32
-        )
+        if masked_m_out is None:
+            masked_m = torch.empty(
+                num_local_experts, device=topk_ids.device, dtype=torch.int32
+            )
         grid = (1,)
     else:
         BLOCK_SIZE = 256
-        masked_m = torch.zeros(
-            num_local_experts, device=topk_ids.device, dtype=torch.int32
-        )
+        if masked_m_out is None:
+            masked_m = torch.zeros(
+                num_local_experts, device=topk_ids.device, dtype=torch.int32
+            )
+        else:
+            masked_m.zero_()
         grid = (triton.cdiv(num_toks, BLOCK_SIZE),)
     fused_moe_dispatch_index_triton_kernel[grid](
         topk_ids.view(-1),
@@ -1536,18 +1591,42 @@ def moe_ep_deepgemm_preprocess(
     block_shape,
     output_dtype: torch.dtype = torch.float8_e4m3fn,
     use_mxfp8: bool = False,
+    *,
+    masked_m_out: Optional[torch.Tensor] = None,
+    src2dst_out: Optional[torch.Tensor] = None,
+    gateup_input_out: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # For masked grouped GEMM, shape M should be multiple of the block M (current block M: {block_m}) https://github.com/deepseek-ai/DeepGEMM/blob/main/deep_gemm/jit_kernels/m_grouped_gemm.py#L165
     m_max = (hidden_states.size(0) // 256 + 1) * 256
     expected_m = (topk_ids.numel() - 1) // num_local_experts + 1
 
-    masked_m, src2dst = fused_moe_dispatch_index(topk_ids, num_local_experts, m_max)
-
-    gateup_input = torch.empty(
-        (num_local_experts, m_max, hidden_states.size(1)),
-        device=hidden_states.device,
-        dtype=output_dtype,
+    masked_m, src2dst = fused_moe_dispatch_index(
+        topk_ids,
+        num_local_experts,
+        m_max,
+        masked_m_out=masked_m_out,
+        src2dst_out=src2dst_out,
     )
+
+    gateup_shape = (num_local_experts, m_max, hidden_states.size(1))
+    if gateup_input_out is None:
+        gateup_input = torch.empty(
+            gateup_shape,
+            device=hidden_states.device,
+            dtype=output_dtype,
+        )
+    else:
+        if (
+            gateup_input_out.shape != gateup_shape
+            or gateup_input_out.dtype != output_dtype
+            or gateup_input_out.device != hidden_states.device
+            or not gateup_input_out.is_contiguous()
+        ):
+            raise ValueError(
+                "gateup_input_out must be contiguous "
+                f"{output_dtype} {gateup_shape} on {hidden_states.device}"
+            )
+        gateup_input = gateup_input_out
 
     if block_shape is None:
         block_shape = [128, 128]

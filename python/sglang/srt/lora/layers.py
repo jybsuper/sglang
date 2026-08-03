@@ -5,11 +5,16 @@ import torch.nn.functional as F
 from torch import nn
 
 from sglang.srt.distributed import (
+    get_tp_group,
     split_tensor_along_last_dim,
     tensor_model_parallel_all_gather,
     tensor_model_parallel_all_reduce,
 )
+from sglang.srt.distributed.device_communicators.pynccl_allocator import (
+    use_symmetric_memory,
+)
 from sglang.srt.environ import envs
+from sglang.srt.layers.dp_attention import is_allocation_symmetric
 from sglang.srt.layers.linear import (
     ColumnParallelLinear,
     MergedColumnParallelLinear,
@@ -26,7 +31,7 @@ from sglang.srt.layers.vocab_parallel_embedding import (
 )
 from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.utils import LoRABatchInfo, get_lm_head_lora_b_shard_size
-from sglang.srt.runtime_context import get_parallel
+from sglang.srt.runtime_context import get_global_dwdp_manager, get_parallel
 
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 
@@ -914,11 +919,15 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self,
         base_layer: FusedMoE,
         lora_backend: BaseLoRABackend,
+        lora_execution_engine: str = "legacy",
+        lora_moe_base_gemm_provider: str | None = None,
     ):
         # initializes FusedMoE with its own moe_runner for base path
         super().__init__(base_layer, lora_backend)
 
         lora_backend.is_moe_lora = True
+        self.lora_execution_engine = lora_execution_engine
+        self.lora_moe_base_gemm_provider = lora_moe_base_gemm_provider
 
         self.experts_shared_outer_loras: bool = False
         self.lora_use_virtual_experts: bool = False
@@ -943,6 +952,15 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         self._uses_interleaved_gate_up = (
             getattr(base_layer.moe_runner_config, "gemm1_alpha", None) is not None
         )
+
+        if self.lora_execution_engine == "sgl_lora":
+            self._initialize_sgl_lora_execution(base_layer)
+            return
+        if self.lora_execution_engine != "legacy":
+            raise ValueError(
+                "FusedMoEWithLoRA received an unresolved LoRA execution engine: "
+                f"{self.lora_execution_engine!r}"
+            )
 
         # Initialize triton_lora moe runner for batches with lora enabled
         from sglang.srt.layers.moe import MoeRunnerBackend
@@ -1020,6 +1038,32 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
                 f"LoRA MoE not supported for backend {runner_backend}"
             )
 
+    def _initialize_sgl_lora_execution(self, base_layer: FusedMoE) -> None:
+        """Attach the SGL LoRA execution engine to this layer.
+
+        The engine owns admission against the resident provider contract,
+        provider construction, the shared-factor map, and launch configuration;
+        this wrapper keeps no engine internals.
+        """
+        from sglang.srt.lora.sgl_lora.policy_backend import (
+            SglMoeLoraPolicyBackend,
+        )
+        from sglang.srt.lora.sgl_lora.workspace import MoeLoraWorkspace
+
+        if self.lora_moe_base_gemm_provider is None:
+            raise RuntimeError(
+                "sgl_lora requires a base-GEMM provider resolved at server startup"
+            )
+        workspace = self.lora_backend.sgl_lora_workspace
+        if workspace is None:
+            workspace = MoeLoraWorkspace()
+            self.lora_backend.sgl_lora_workspace = workspace
+        self.sgl_lora_policy = SglMoeLoraPolicyBackend.from_layer(
+            base_layer,
+            base_gemm_provider=self.lora_moe_base_gemm_provider,
+            workspace=workspace,
+        )
+
     def set_lora_info(
         self,
         gate_up_lora_a_weights: torch.Tensor,
@@ -1028,14 +1072,58 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         down_lora_b_weights: torch.Tensor = None,
     ):
         """Set LoRA weight tensors from memory pool."""
+        if self.lora_execution_engine == "sgl_lora":
+            # Factor dtype and expert domain are immutable once bound, so they
+            # are validated here rather than on every forward.
+            from sglang.srt.lora.sgl_lora.execution_plan import (
+                MoeLoraFactorLayout,
+            )
+
+            self.sgl_lora_policy.bind_factors(
+                gate_up_lora_a=gate_up_lora_a_weights,
+                gate_up_lora_b=gate_up_lora_b_weights,
+                down_lora_a=down_lora_a_weights,
+                down_lora_b=down_lora_b_weights,
+                factor_layout=MoeLoraFactorLayout.serving(
+                    self.experts_shared_outer_loras
+                ),
+            )
+
         self.set_lora = True
         self.gate_up_lora_a_weights = gate_up_lora_a_weights
         self.gate_up_lora_b_weights = gate_up_lora_b_weights
         self.down_lora_a_weights = down_lora_a_weights
         self.down_lora_b_weights = down_lora_b_weights
 
+    def _get_sgl_lora_batch(self):
+        """Build the narrow SGL LoRA batch view straight from batch info.
+
+        Deliberately does not go through the legacy ``LoRAInfo``: this engine
+        consumes eight fields, and building the 18-field legacy structure first
+        would re-couple the new execution boundary to the old one.
+        """
+        from sglang.srt.lora.sgl_lora.execution_plan import MoeLoraFactorLayout
+        from sglang.srt.lora.sgl_lora.moe_lora_runner import SglMoeLoraBatch
+
+        batch_info = self.lora_backend.batch_info
+        moe_lora_info = batch_info.moe_lora_info
+        assert moe_lora_info is not None
+        return SglMoeLoraBatch(
+            gate_up_lora_a=self.gate_up_lora_a_weights,
+            gate_up_lora_b=self.gate_up_lora_b_weights,
+            down_lora_a=self.down_lora_a_weights,
+            down_lora_b=self.down_lora_b_weights,
+            token_slots=moe_lora_info.token_lora_mapping,
+            adapter_enabled=moe_lora_info.adapter_enabled,
+            physical_rank=self.down_lora_a_weights.shape[2],
+            factor_layout=MoeLoraFactorLayout.serving(self.experts_shared_outer_loras),
+            use_cuda_graph=batch_info.use_cuda_graph,
+            is_prefill=batch_info.is_prefill,
+            has_active_lora=batch_info.has_active_lora,
+        )
+
     def _get_lora_info(self):
-        """Build LoRAInfo for the current batch."""
+        """Build LoRAInfo for the current batch (legacy engine)."""
         from sglang.srt.lora.lora_moe_runners import LoRAInfo
 
         batch_info = self.lora_backend.batch_info
@@ -1091,11 +1179,62 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
         2. After down projection, before final reduction
         """
 
+        if self.lora_execution_engine == "sgl_lora":
+            return self._forward_sgl_lora(hidden_states, topk_output, **kwargs)
+
         # Build LoRA info for this batch
         lora_info = self._get_lora_info()
 
         # run lora moe_runner
         return self._forward_with_lora(hidden_states, topk_output, lora_info, **kwargs)
+
+    def _forward_sgl_lora(
+        self, hidden_states: torch.Tensor, topk_output: TopKOutput, **kwargs
+    ):
+        """Run the SGL LoRA engine over the base layer's dispatch boundary."""
+        base_layer = self.base_layer
+        batch = self._get_sgl_lora_batch()
+        choice = self.sgl_lora_policy.select(
+            batch,
+            num_tokens=hidden_states.shape[0],
+        )
+        output_dtype = kwargs.pop("output_dtype", None)
+        origin_hidden_states_dim = hidden_states.shape[-1]
+        if base_layer._dwdp_bound:
+            dwdp_mgr = get_global_dwdp_manager()
+            dwdp_mgr.wait_prefetch(base_layer.layer_id)
+
+        dispatch_output = base_layer.dispatcher.dispatch(
+            hidden_states=hidden_states, topk_output=topk_output
+        )
+        combine_input = self.sgl_lora_policy.run_selected(
+            choice,
+            dispatch_output,
+            batch,
+            output_dtype=output_dtype,
+        )
+        if base_layer._dwdp_bound:
+            dwdp_mgr.record_compute_and_prefetch_next(base_layer.layer_id)
+
+        # Keep the normal FusedMoE post-core shell.  The SGL runner replaces
+        # run_moe_core only; dispatch/combine ownership, symmetric allocation,
+        # hidden-width crop, DWDP hooks, and distributed reduction remain layer
+        # semantics and must not disappear merely because LoRA is active.
+        with use_symmetric_memory(
+            get_tp_group(), disabled=not is_allocation_symmetric()
+        ):
+            final_hidden_states = base_layer.dispatcher.combine(
+                combine_input=combine_input
+            )
+            final_hidden_states = final_hidden_states[
+                ..., :origin_hidden_states_dim
+            ].contiguous()
+
+        if base_layer.reduce_results and (
+            base_layer.moe_tp_size > 1 or base_layer.moe_ep_size > 1
+        ):
+            final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
+        return final_hidden_states
 
     def _forward_with_lora(
         self,
@@ -1256,7 +1395,11 @@ class FusedMoEWithLoRA(BaseLayerWithLoRA):
 
 
 def get_lora_layer(
-    layer: nn.Module, lora_backend: BaseLoRABackend
+    layer: nn.Module,
+    lora_backend: BaseLoRABackend,
+    *,
+    lora_execution_engine: str = "legacy",
+    lora_moe_base_gemm_provider: str | None = None,
 ) -> BaseLayerWithLoRA:
     supported_layer_types = {
         # the order matters
@@ -1275,6 +1418,13 @@ def get_lora_layer(
         return InklingQKVRLinearWithLoRA(layer, lora_backend)
     for src_layer_type, lora_layer_type in supported_layer_types.items():
         if isinstance(layer, src_layer_type):  # pylint: disable=unidiomatic-typecheck
+            if lora_layer_type is FusedMoEWithLoRA:
+                return lora_layer_type(
+                    layer,
+                    lora_backend,
+                    lora_execution_engine=lora_execution_engine,
+                    lora_moe_base_gemm_provider=lora_moe_base_gemm_provider,
+                )
             ret = lora_layer_type(layer, lora_backend)
             return ret
     raise Exception(f"No corresponding LoRA layer supported for {type(layer)}.")
