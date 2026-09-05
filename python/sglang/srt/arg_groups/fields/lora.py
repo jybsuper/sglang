@@ -109,6 +109,13 @@ class Lora(msgspec.Struct):
         bool,
         "Keep streamed LoRA weights on the GPU and drop the staged copy once the adapter is installed in the memory pool, instead of holding a host copy per TP rank. Evicting an adapter from the pool is then refused, so every loaded adapter needs its own slot.",
     ] = False
+    moe_lora_base_gemm: A[
+        str,
+        Arg(
+            help="Kernel vendor for the MoE LoRA base GEMMs.",
+            choices=["cutedsl", "triton"],
+        ),
+    ] = "cutedsl"
     lora_drain_wait_threshold: A[
         float,
         "When any LoRA adapter request waits longer than this threshold (in seconds), the scheduler will selectively drain one running adapter to make room. This mitigates extreme tail latency under high or skewed workloads by preventing a small set of adapters from monopolizing batch slots. Set to 0 to disable draining (default).",
