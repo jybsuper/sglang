@@ -33,15 +33,18 @@ def _embedding_lora_a_kernel(
     # Meta-parameters
     BLOCK_RANK: tl.constexpr,
     HAS_EXTRA_EMBEDDINGS: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     Embedding lookup for LoRA A weights with support for extra tokens.
 
     Each program handles one token across a block of rank dimensions.
-    Grid: (cdiv(max_len, 1), bs) - one program per token in each batch
     """
-    batch_id = tl.program_id(axis=1)
     token_idx = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=1)
+    if SEGMENT_TILES:
+        batch_id = token_idx // SEGMENT_TILES
+        token_idx %= SEGMENT_TILES
 
     w_index = tl.load(weight_indices + batch_id)
     rank_val = tl.load(lora_ranks + w_index)
@@ -159,6 +162,9 @@ def embedding_lora_a_fwd(
 
     output = torch.zeros((S, rank), device=input_ids.device, dtype=weights.dtype)
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _embedding_lora_a_kernel[grid](
         input_ids,
         weights,
@@ -181,6 +187,7 @@ def embedding_lora_a_fwd(
         batch_info.lora_ranks,
         BLOCK_RANK,
         has_extra_embeddings,
+        SEGMENT_TILES=segment_tiles,
     )
 
     return output

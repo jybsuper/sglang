@@ -35,6 +35,7 @@ def _sgemm_lora_a_kernel(
     BLOCK_S: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA A matrix.
@@ -54,7 +55,11 @@ def _sgemm_lora_a_kernel(
 
     # Current block computes sequence with batch_id,
     # which starts from row seg_start of x with length seg_len
+    pid = tl.program_id(axis=0)
     batch_id = tl.program_id(axis=1)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -62,7 +67,6 @@ def _sgemm_lora_a_kernel(
     if rank == 0:
         return
 
-    pid = tl.program_id(axis=0)
     seg_start = tl.load(seg_indptr + batch_id)
     seg_len = tl.load(seg_lens + batch_id)
     if seg_len == 0:
@@ -155,6 +159,9 @@ def sgemm_lora_a_fwd(
     sorted_by_adapter = batch_info.permutation is not None
 
     output = torch.empty((S, R), device=x.device, dtype=x.dtype)
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_a_kernel[grid](
         x,
         weights,
@@ -178,5 +185,6 @@ def sgemm_lora_a_fwd(
         BLOCK_S,
         BLOCK_R,
         BLOCK_K,
+        SEGMENT_TILES=segment_tiles,
     )
     return output

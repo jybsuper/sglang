@@ -44,6 +44,7 @@ def _sgemm_lora_a_kernel(
     SPLIT_K: tl.constexpr = 1,
     ENABLE_PDL: tl.constexpr = False,
     PADDED_RANK: tl.constexpr = False,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA A matrix.
@@ -63,7 +64,11 @@ def _sgemm_lora_a_kernel(
 
     # Current block computes sequence with batch_id,
     # which starts from row seg_start of x with length seg_len
+    pid = tl.program_id(axis=0)
     batch_id = tl.program_id(axis=1)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -71,7 +76,6 @@ def _sgemm_lora_a_kernel(
     if rank == 0:
         return
 
-    pid = tl.program_id(axis=0)
     # Fold the split-K factor out of axis-0 (SPLIT_K == 1 -> pid_sk == 0, pid_tile == pid).
     pid_sk = pid % SPLIT_K
     pid_tile = pid // SPLIT_K
@@ -239,6 +243,9 @@ def sgemm_lora_a_fwd(
     )
 
     enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_a_kernel[grid](
         x,
         weights,
@@ -263,6 +270,7 @@ def sgemm_lora_a_fwd(
         BLOCK_R,
         BLOCK_K,
         split_k,
+        SEGMENT_TILES=segment_tiles,
         ENABLE_PDL=enable_pdl,
         **launch_kwargs,
         **pdl_kwargs,
@@ -308,6 +316,9 @@ def shared_sink_sgemm_lora_a_fwd(
                 (num_tokens, rank_width), device=x.device, dtype=x.dtype
             )
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_a_kernel[grid](
         x,
         weights,
@@ -331,6 +342,7 @@ def shared_sink_sgemm_lora_a_fwd(
         block_s,
         block_rank,
         block_k,
+        SEGMENT_TILES=segment_tiles,
         PADDED_RANK=padded_rank,
     )
     return output

@@ -228,7 +228,6 @@ class TritonLoRABackend(BaseLoRABackend):
             num_chunks = min(
                 max_num_tokens,
                 (max_num_tokens + chunk_size - 1) // chunk_size + num_slots - 1,
-                65535,
             )
             self.prefill_cuda_graph_sgemm_batch_info = dataclasses.replace(
                 self.prefill_cuda_graph_batch_info,
@@ -388,29 +387,27 @@ class TritonLoRABackend(BaseLoRABackend):
                     + self.prefill_cuda_graph_max_bs
                     - 1,
                 )
-                # Larger grids keep the request view to fit CUDA's y/z limit.
-                if num_chunks <= sgemm.seg_lens.numel():
-                    indices, lengths = merge_and_chunk_segments(
-                        weight_indices, forward_batch.extend_seq_lens_cpu, chunk_size
-                    )
-                    num_segments = len(lengths)
-                    sgemm.bs = num_chunks
-                    sgemm.num_segments = num_segments
-                    sgemm.weight_indices[:num_segments].copy_(
-                        torch.tensor(
-                            indices, dtype=torch.int32, pin_memory=True, device="cpu"
-                        ),
-                        non_blocking=True,
-                    )
-                    sgemm.seg_lens[:num_segments].copy_(
-                        torch.tensor(
-                            lengths, dtype=torch.int32, pin_memory=True, device="cpu"
-                        ),
-                        non_blocking=True,
-                    )
-                    sgemm.seg_lens[num_segments:].zero_()
-                    torch.cumsum(sgemm.seg_lens, dim=0, out=sgemm.seg_indptr[1:])
-                    self.sgemm_batch_info = sgemm
+                indices, lengths = merge_and_chunk_segments(
+                    weight_indices, forward_batch.extend_seq_lens_cpu, chunk_size
+                )
+                num_segments = len(lengths)
+                sgemm.bs = num_chunks
+                sgemm.num_segments = num_segments
+                sgemm.weight_indices[:num_segments].copy_(
+                    torch.tensor(
+                        indices, dtype=torch.int32, pin_memory=True, device="cpu"
+                    ),
+                    non_blocking=True,
+                )
+                sgemm.seg_lens[:num_segments].copy_(
+                    torch.tensor(
+                        lengths, dtype=torch.int32, pin_memory=True, device="cpu"
+                    ),
+                    non_blocking=True,
+                )
+                sgemm.seg_lens[num_segments:].zero_()
+                torch.cumsum(sgemm.seg_lens, dim=0, out=sgemm.seg_indptr[1:])
+                self.sgemm_batch_info = sgemm
 
         self.lm_head_batch_info, self.lm_head_pass_batch_infos = (
             self._prepare_lm_head_batch_info(forward_batch, weight_indices, batch_info)

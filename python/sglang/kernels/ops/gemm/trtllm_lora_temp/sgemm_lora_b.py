@@ -70,6 +70,7 @@ def _sgemm_lora_b_kernel(
     PADDED_RANK: tl.constexpr = True,
     FLAT_GRID: tl.constexpr = False,
     ATOMIC_ADD: tl.constexpr = True,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA B matrix
@@ -88,16 +89,18 @@ def _sgemm_lora_b_kernel(
             the base model's output for a fused add operation.
     """
 
+    pid = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=1) if FLAT_GRID else tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     if FLAT_GRID:
-        pid = tl.program_id(axis=0)
-        batch_id = tl.program_id(axis=1)
         num_pid_n = tl.cdiv(N, BLOCK_N)
         pid_s = pid // num_pid_n
         pid_n = pid % num_pid_n
     else:
-        pid_s = tl.program_id(axis=0)
+        pid_s = pid
         pid_n = tl.program_id(axis=1)
-        batch_id = tl.program_id(axis=2)
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -219,6 +222,9 @@ def sgemm_lora_b_fwd(
 
     sorted_by_adapter = batch_info.permutation is not None
     enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_b_kernel[grid](
         x,
         weights,
@@ -242,6 +248,7 @@ def sgemm_lora_b_fwd(
         BLOCK_N,
         BLOCK_R,
         batch_info.scalings,
+        SEGMENT_TILES=segment_tiles,
         ENABLE_PDL=enable_pdl,
         **pdl_kwargs,
     )
@@ -280,6 +287,9 @@ def shared_sink_sgemm_lora_b_fwd(
         if base_output is None
         else base_output
     )
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_b_kernel[grid](
         x,
         weights,
@@ -303,6 +313,7 @@ def shared_sink_sgemm_lora_b_fwd(
         block_n,
         block_rank,
         batch_info.scalings,
+        SEGMENT_TILES=segment_tiles,
         APPLY_SCALING=apply_scaling,
         PADDED_RANK=padded_rank,
         FLAT_GRID=True,

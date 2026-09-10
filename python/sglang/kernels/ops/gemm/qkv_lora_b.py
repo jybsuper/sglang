@@ -38,6 +38,7 @@ def _qkv_lora_b_kernel(
     BLOCK_K: tl.constexpr,
     # For fused output scaling
     scalings,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     This kernel packs 3 sgemms (q/k/v) into a single kernel. The multiplication
@@ -61,7 +62,11 @@ def _qkv_lora_b_kernel(
     # Current block computes sequence with batch_id,
     # which starts from row seg_start of x with length seg_len.
     # qkv_id decides which of q,k,v to compute (0: q, 1: k, 2: v)
+    pid = tl.program_id(axis=0)
     batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -70,7 +75,6 @@ def _qkv_lora_b_kernel(
         return
 
     qkv_id = tl.program_id(axis=1)
-    pid = tl.program_id(axis=0)
     seg_len = tl.load(seg_lens + batch_id)
     if seg_len == 0:
         return
@@ -187,6 +191,9 @@ def qkv_lora_b_fwd(
         output = base_output
 
     sorted_by_adapter = batch_info.permutation is not None
+    segment_tiles = grid_b[0] if grid_b[-1] > 65535 else 0
+    if segment_tiles:
+        grid_b = (segment_tiles * grid_b[-1], *grid_b[1:-1])
     _qkv_lora_b_kernel[grid_b](
         x,
         qkv_lora_b,
@@ -211,6 +218,7 @@ def qkv_lora_b_fwd(
         BLOCK_OUT,
         BLOCK_R,
         batch_info.scalings,
+        SEGMENT_TILES=segment_tiles,
     )
 
     return output

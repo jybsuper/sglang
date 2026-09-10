@@ -25,7 +25,7 @@ routing used by ``chunked_sgmv_*``:
   * ``step_b_v_fwd``: per-head per-slot SGMM with V-half of B, transposed,
     scaled+accumulated, ``(S,H,rank) -> (S,H,v_head_dim)``
 
-Grid axes for each kernel:
+Default grid axes:
   axis 0 : output tile in (S, N)         -- tile_id = pid_s * num_pid_n + pid_n
   axis 1 : head_id                       -- per-head weight slice
   axis 2 : batch_id (segment / request)  -- per-slot weight routing via weight_indices
@@ -140,10 +140,14 @@ def _step_a_q_kernel(
     BLOCK_S: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
-    batch_id = tl.program_id(axis=2)
-    head_id = tl.program_id(axis=1)
     pid = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
+    head_id = tl.program_id(axis=1)
 
     if batch_id >= num_segments:
         return
@@ -256,6 +260,9 @@ def step_a_q_fwd(
     )
     sorted_by_adapter = batch_info.permutation is not None
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _step_a_q_kernel[grid](
         q_nope,
         B_buf,
@@ -278,6 +285,7 @@ def step_a_q_fwd(
         batch_info.lora_ranks,
         batch_info.permutation,
         segment_grid,
+        SEGMENT_TILES=segment_tiles,
         FULL_K=full_K_per_head,
         SORTED_BY_ADAPTER=sorted_by_adapter,
         BLOCK_S=_BLOCK_S,
@@ -329,10 +337,14 @@ def _step_b_q_kernel(
     BLOCK_S: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
-    batch_id = tl.program_id(axis=2)
-    head_id = tl.program_id(axis=1)
     pid = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
+    head_id = tl.program_id(axis=1)
 
     if batch_id >= num_segments:
         return
@@ -445,6 +457,9 @@ def step_b_q_fwd(
     )
     sorted_by_adapter = batch_info.permutation is not None
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _step_b_q_kernel[grid](
         q_lora_a,
         A_buf,
@@ -467,6 +482,7 @@ def step_b_q_fwd(
         batch_info.permutation,
         batch_info.scalings,
         segment_grid,
+        SEGMENT_TILES=segment_tiles,
         SORTED_BY_ADAPTER=sorted_by_adapter,
         BLOCK_S=_BLOCK_S,
         BLOCK_N=_STEP_B_BLOCK_N,
@@ -516,10 +532,14 @@ def _step_a_v_kernel(
     BLOCK_S: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
-    batch_id = tl.program_id(axis=2)
-    head_id = tl.program_id(axis=1)
     pid = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
+    head_id = tl.program_id(axis=1)
 
     if batch_id >= num_segments:
         return
@@ -625,6 +645,9 @@ def step_a_v_fwd(
     )
     sorted_by_adapter = batch_info.permutation is not None
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _step_a_v_kernel[grid](
         attn_output,
         A_buf,
@@ -646,6 +669,7 @@ def step_a_v_fwd(
         batch_info.lora_ranks,
         batch_info.permutation,
         segment_grid,
+        SEGMENT_TILES=segment_tiles,
         SORTED_BY_ADAPTER=sorted_by_adapter,
         BLOCK_S=_BLOCK_S,
         BLOCK_N=_STEP_A_BLOCK_N,
@@ -699,10 +723,14 @@ def _step_b_v_kernel(
     BLOCK_S: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
-    batch_id = tl.program_id(axis=2)
-    head_id = tl.program_id(axis=1)
     pid = tl.program_id(axis=0)
+    batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
+    head_id = tl.program_id(axis=1)
 
     if batch_id >= num_segments:
         return
@@ -821,6 +849,9 @@ def step_b_v_fwd(
     )
     sorted_by_adapter = batch_info.permutation is not None
 
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _step_b_v_kernel[grid](
         attn_lora_a,
         B_buf,
@@ -843,6 +874,7 @@ def step_b_v_fwd(
         batch_info.permutation,
         batch_info.scalings,
         segment_grid,
+        SEGMENT_TILES=segment_tiles,
         FULL_K=full_K_per_head,
         QK_NOPE_OFFSET=qk_nope_head_dim,
         SORTED_BY_ADAPTER=sorted_by_adapter,

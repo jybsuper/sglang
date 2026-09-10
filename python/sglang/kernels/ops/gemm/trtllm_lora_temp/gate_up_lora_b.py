@@ -46,6 +46,7 @@ def _gate_up_lora_b_kernel(
     # For fused output scaling
     scalings,
     ENABLE_PDL: tl.constexpr = False,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     This kernel packs 2 sgemms (gate/up) into a single kernel. The multiplication
@@ -69,7 +70,11 @@ def _gate_up_lora_b_kernel(
     # Current block computes sequence with batch_id,
     # which starts from row seg_start of x with length seg_len.
     # gate_up_id decides which of gate or up (0: gate, 1: up)
+    pid = tl.program_id(axis=0)
     batch_id = tl.program_id(axis=2)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -78,7 +83,6 @@ def _gate_up_lora_b_kernel(
         return
 
     gate_up_id = tl.program_id(axis=1)
-    pid = tl.program_id(axis=0)
     seg_len = tl.load(seg_lens + batch_id)
     if seg_len == 0:
         return
@@ -237,6 +241,9 @@ def gate_up_lora_b_fwd(
 
     sorted_by_adapter = batch_info.permutation is not None
     enable_pdl, pdl_kwargs = get_pdl_launch_metadata()
+    segment_tiles = grid_b[0] if grid_b[-1] > 65535 else 0
+    if segment_tiles:
+        grid_b = (segment_tiles * grid_b[-1], *grid_b[1:-1])
     _gate_up_lora_b_kernel[grid_b](
         x,
         gate_up_lora_b,
@@ -260,6 +267,7 @@ def gate_up_lora_b_fwd(
         BLOCK_OUT,
         BLOCK_R,
         batch_info.scalings,
+        SEGMENT_TILES=segment_tiles,
         ENABLE_PDL=enable_pdl,
         **pdl_kwargs,
     )

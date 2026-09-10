@@ -36,6 +36,7 @@ def _sgemm_lora_b_kernel(
     BLOCK_K: tl.constexpr,
     # For fused output scaling
     scalings,
+    SEGMENT_TILES: tl.constexpr = 0,
 ):
     """
     Computes a segmented batched matrix multiplication for the LoRA B matrix
@@ -56,7 +57,11 @@ def _sgemm_lora_b_kernel(
 
     # Current block computes sequence with batch_id,
     # which starts from row seg_start of x with length seg_len
+    pid = tl.program_id(axis=0)
     batch_id = tl.program_id(axis=1)
+    if SEGMENT_TILES:
+        batch_id = pid // SEGMENT_TILES
+        pid %= SEGMENT_TILES
     w_index = tl.load(weight_indices + batch_id)
     rank = tl.load(lora_ranks + w_index)
 
@@ -64,7 +69,6 @@ def _sgemm_lora_b_kernel(
     if rank == 0:
         return
 
-    pid = tl.program_id(axis=0)
     seg_len = tl.load(seg_lens + batch_id)
     if seg_len == 0:
         return
@@ -161,6 +165,9 @@ def sgemm_lora_b_fwd(
         output = base_output
 
     sorted_by_adapter = batch_info.permutation is not None
+    segment_tiles = grid[0] if grid[-1] > 65535 else 0
+    if segment_tiles:
+        grid = (segment_tiles * grid[-1], *grid[1:-1])
     _sgemm_lora_b_kernel[grid](
         x,
         weights,
@@ -184,5 +191,6 @@ def sgemm_lora_b_fwd(
         BLOCK_N,
         BLOCK_R,
         batch_info.scalings,
+        SEGMENT_TILES=segment_tiles,
     )
     return output
