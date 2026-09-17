@@ -1,9 +1,12 @@
-"""The load contract is fail-closed: any missing, malformed, or version-mismatched
-table returns ``None`` and the providers keep their built-in heuristics."""
+"""The load contract is fail-closed for missing or malformed tables, which return
+``None`` so the providers keep their built-in heuristics; a table tuned with
+another package version is still used."""
 
 from __future__ import annotations
 
 import json
+import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -17,7 +20,7 @@ from sglang.srt.lora.moe.base_gemm_provider.gemm_config_store import (
 )
 from sglang.test.ci.ci_register import register_cpu_ci
 
-register_cpu_ci(est_time=3, suite="base-c-test-cpu")
+register_cpu_ci(est_time=3, suite="base-a-test-cpu")
 
 _GEOMETRY = dict(num_local_experts=32, n_gemm1=1536, n_gemm2=7168, k=7168)
 _VALID = {
@@ -51,20 +54,17 @@ def _load(tmp_path: Path, **overrides):
         return load_config_table("cutedsl_bf16_masked", **kwargs)
 
 
-def test_config_file_name_encodes_geometry_and_device() -> None:
+def test_missing_file_falls_back_to_none(tmp_path: Path) -> None:
+    assert _load(tmp_path) is None
+
+
+def test_valid_table_loads_via_env_override(tmp_path: Path) -> None:
     assert config_file_name(
         "cutedsl_bf16_masked", device_name="NVIDIA GB300", **_GEOMETRY
     ) == (
         "provider=cutedsl_bf16_masked,E=32,N1=1536,N2=7168,K=7168,"
         "device_name=NVIDIA_GB300.json"
     )
-
-
-def test_missing_file_falls_back_to_none(tmp_path: Path) -> None:
-    assert _load(tmp_path) is None
-
-
-def test_valid_table_loads_via_env_override(tmp_path: Path) -> None:
     _write(tmp_path, _VALID)
     table = _load(tmp_path)
     assert table is not None
@@ -113,11 +113,8 @@ def test_nearest_m_pick() -> None:
     (
         "{not json",
         {"buckets": {}},
-        {"buckets": {"eight": {"token_width": 8}}},
         {"buckets": {"8": {"token_width": "wide"}}},
-        {"buckets": {"8": {}}},
         {"buckets": {"-8": {"token_width": 8}}},
-        {"buckets": {"8": {"token_width": -8}}},
         {
             "tiles": [
                 {"token_width": 64, "persistent_clusters": 128},
@@ -125,18 +122,29 @@ def test_nearest_m_pick() -> None:
             ],
             "buckets": {"8": {"token_width": 64}},
         },
-        {"tiles": [{"token_width": 64}], "buckets": {"8": {"token_width": 64}}},
+        {"buckets": {"8": {"token_width": 8}}, "bucket": {}},
+        {"buckets": {"8": {"token_width": 8, "block_size": 8}}},
+        {"buckets": {"8": {"token_width": 3}}},
+        {
+            "tiles": [{"token_width": 3, "persistent_clusters": 128}],
+            "buckets": {"8": {"token_width": 8}},
+        },
+        {
+            "tiles": [{"token_width": 64, "persistent_clusters": 0}],
+            "buckets": {"8": {"token_width": 64}},
+        },
     ),
     ids=(
         "invalid-json",
         "empty-buckets",
-        "non-int-bucket-key",
         "non-int-payload",
-        "empty-payload",
         "negative-bucket-key",
-        "negative-payload",
         "duplicate-tile-width",
-        "tile-missing-field",
+        "unknown-table-field",
+        "unknown-bucket-field",
+        "non-power-of-two-bucket-width",
+        "non-power-of-two-tile-width",
+        "zero-cluster-count",
     ),
 )
 def test_malformed_files_are_rejected(tmp_path: Path, payload) -> None:
@@ -144,20 +152,55 @@ def test_malformed_files_are_rejected(tmp_path: Path, payload) -> None:
     assert _load(tmp_path) is None
 
 
-def test_version_mismatch_is_rejected(tmp_path: Path) -> None:
+def test_version_mismatch_is_reported_not_rejected(tmp_path: Path, caplog) -> None:
     _write(tmp_path, _VALID)
-    assert _load(tmp_path, expected_versions={"cutedsl": "9.9.9"}) is None
+    with caplog.at_level(logging.WARNING, logger=gemm_config_store.__name__):
+        table = _load(tmp_path, installed_versions={"cutedsl": "9.9.9"})
+    assert table is not None
+    assert [tile.token_width for tile in table.tiles] == [64, 128]
+    assert "tuned with cutedsl 4.2.0; installed 9.9.9" in caplog.text
+    assert "not re-validated on this release" in caplog.text
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_tile_declarations_remain_optional(tmp_path: Path) -> None:
+    _write(tmp_path, {"buckets": {"8": {"token_width": 8}}})
+    table = _load(tmp_path)
+    assert table is not None
+    assert table.tiles == ()
 
 
 def test_matching_and_absent_versions_are_accepted(tmp_path: Path) -> None:
     _write(tmp_path, _VALID)
-    assert _load(tmp_path, expected_versions={"cutedsl": "4.2.0"}) is not None
+    assert _load(tmp_path, installed_versions={"cutedsl": "4.2.0"}) is not None
     # Keys the file does not record are provenance-only, never a rejection.
     stripped = dict(_VALID, version={"generated_on": "GB300-152SM"})
     other = tmp_path / "stripped"
     other.mkdir()
     _write(other, stripped)
-    assert _load(other, expected_versions={"cutedsl": "4.2.0"}) is not None
+    assert _load(other, installed_versions={"cutedsl": "4.2.0"}) is not None
+
+
+def test_every_shipped_table_loads() -> None:
+    shipped = sorted(
+        (Path(gemm_config_store._PACKAGE_CONFIG_DIR) / "base_gemm").glob("*.json")
+    )
+    assert shipped
+    pattern = re.compile(
+        r"provider=(\w+),E=(\d+),N1=(\d+),N2=(\d+),K=(\d+),device_name=(.+)\.json"
+    )
+    with envs.SGLANG_LORA_MOE_CONFIG_DIR.override(None):
+        for path in shipped:
+            key, experts, n1, n2, k, device = pattern.fullmatch(path.name).groups()
+            table = load_config_table(
+                key,
+                num_local_experts=int(experts),
+                n_gemm1=int(n1),
+                n_gemm2=int(n2),
+                k=int(k),
+                device_name=device,
+            )
+            assert table is not None, path.name
 
 
 if __name__ == "__main__":
