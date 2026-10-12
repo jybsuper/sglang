@@ -84,7 +84,11 @@ class BaseLoRABackend(LoRABackendLmHeadMixing):
         )
 
     def reset_routing_cache(self) -> None:
-        """Clear cached routes without changing batch metadata or storage."""
+        """Clear cached routes without changing batch metadata or storage.
+
+        Called before every warmup and capture forward so route-building launches
+        are recorded in the graph. Repeated calls must be safe.
+        """
         if self.lora_workspace is not None:
             self.lora_workspace.routes.clear()
 

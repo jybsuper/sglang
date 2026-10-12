@@ -43,6 +43,7 @@ class _ContiguousRowStateStub(msgspec.Struct, kw_only=True):
 class TestNvFp4PreparedQuantInfo(CustomTestCase):
     def _layer(self, dtype=torch.bfloat16):
         return SimpleNamespace(
+            params_dtype=dtype,
             w13_weight=torch.zeros((2, 4, 8), dtype=torch.int32),
             w2_weight=torch.zeros((2, 4, 8), dtype=torch.int32),
             w13_weight_scale=torch.zeros((2, 8, 1), dtype=torch.float8_e4m3fn),
@@ -57,18 +58,31 @@ class TestNvFp4PreparedQuantInfo(CustomTestCase):
     def test_prepared_marlin_metadata_is_aliased_not_repacked(self):
         from sglang.srt.lora.moe.quant_info import MoeLoraNvFp4MarlinQuantInfo
 
-        for dtype in (torch.float16, torch.bfloat16):
+        layer = self._layer()
+        info = MoeLoraNvFp4MarlinQuantInfo.from_layer(layer)
+        for field, source in (
+            ("w13_qweight", "w13_weight"),
+            ("w2_qweight", "w2_weight"),
+            ("w13_scales", "w13_weight_scale"),
+            ("w2_scales", "w2_weight_scale"),
+            ("w13_global_scale", "w13_weight_scale_2"),
+            ("w2_global_scale", "w2_weight_scale_2"),
+        ):
+            self.assertIs(getattr(info, field), getattr(layer, source))
+
+    def test_non_bf16_activations_fail_without_mutation(self):
+        from sglang.srt.lora.moe.quant_info import MoeLoraNvFp4MarlinQuantInfo
+
+        for dtype in (torch.float16, torch.float32):
             layer = self._layer(dtype)
-            info = MoeLoraNvFp4MarlinQuantInfo.from_layer(layer)
-            for field, source in (
-                ("w13_qweight", "w13_weight"),
-                ("w2_qweight", "w2_weight"),
-                ("w13_scales", "w13_weight_scale"),
-                ("w2_scales", "w2_weight_scale"),
-                ("w13_global_scale", "w13_weight_scale_2"),
-                ("w2_global_scale", "w2_weight_scale_2"),
+            original = vars(layer).copy()
+            with (
+                self.subTest(dtype=dtype),
+                self.assertRaisesRegex(NotImplementedError, "BF16 activations"),
             ):
-                self.assertIs(getattr(info, field), getattr(layer, source))
+                MoeLoraNvFp4MarlinQuantInfo.from_layer(layer)
+            for name, value in original.items():
+                self.assertIs(getattr(layer, name), value)
 
     def test_unprepared_weights_fail_without_mutation(self):
         from sglang.srt.lora.moe.quant_info import MoeLoraNvFp4MarlinQuantInfo

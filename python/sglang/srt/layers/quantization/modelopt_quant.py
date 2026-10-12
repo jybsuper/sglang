@@ -3046,6 +3046,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
             return
 
         if moe_runner_backend.is_lora():
+            self.runner = None
             return
 
         if moe_runner_backend.is_flashinfer_cutedsl():

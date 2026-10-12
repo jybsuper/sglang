@@ -54,6 +54,7 @@ def test_route_scan_restores_both_count_buffers_between_calls() -> None:
         dtype=torch.int32,
         device=device,
     )
+    device = topk_ids.device
 
     traffic = (
         torch.tensor([0, 1, -1, 0, 1, -1], dtype=torch.int32, device=device),
@@ -71,6 +72,7 @@ def test_route_scan_restores_both_count_buffers_between_calls() -> None:
                 tensor_prefix="route:aligned",
             )
 
+        num_buffers = len(workspace._eager_buffers)
         per_expert_counts = workspace.tensor(
             f"route:aligned:groups{num_local_experts}:counts",
             (num_local_experts * max_loras + 1,),
@@ -86,6 +88,7 @@ def test_route_scan_restores_both_count_buffers_between_calls() -> None:
             zero_on_first_allocation=True,
         )
 
+        assert len(workspace._eager_buffers) == num_buffers
         assert torch.count_nonzero(per_expert_counts).item() == 0
         assert torch.count_nonzero(shared_counts).item() == 0
 

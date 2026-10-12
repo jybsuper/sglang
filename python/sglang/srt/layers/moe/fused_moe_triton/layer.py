@@ -419,7 +419,7 @@ class FusedMoE(torch.nn.Module):
             get_moe_runner_backend().is_flashinfer_trtllm()
             or get_moe_runner_backend().is_flashinfer_trtllm_routed()
         )
-        # LoRA providers use DeepGEMM's resident weight layout and preparation.
+        # Unquantized BF16 LoRA uses DeepGEMM's resident weight layout.
         self.use_deep_gemm = (
             get_moe_runner_backend().is_deep_gemm()
             or get_moe_runner_backend().is_lora()

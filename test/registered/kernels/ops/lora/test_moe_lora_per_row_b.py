@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from sglang.kernels.ops.lora.common import lora_b as shared_lora_b
 from sglang.kernels.ops.lora.common.route_view import RouteView, RouteViewKind
 from sglang.kernels.ops.lora.common.routing import build_route
 from sglang.kernels.ops.lora.moe.lora_b import (
@@ -151,6 +152,42 @@ def test_per_row_matches_grouped_on_identical_inputs(
     assert invalid_rows.numel() > 0
     assert torch.count_nonzero(invalid_rows) == 0
     assert torch.count_nonzero(indexed[pair_valid.to(device)]) > 0
+
+
+@pytest.mark.parametrize("zero_sentinel", (True, False))
+def test_sentinel_rows_with_zero_rank_slot(zero_sentinel: bool) -> None:
+    device = torch.device("cuda")
+    slots = torch.tensor([-1, 1, 0, 1, 1], dtype=torch.int32, device=device)
+    experts = torch.tensor([[0], [-1], [0], [1], [3]], dtype=torch.int32, device=device)
+    raw = build_route(
+        slots,
+        view=RouteViewKind.RAW,
+        group_ids=experts,
+        groups_per_slot=3,
+        max_loras=_SLOTS,
+        block_size=16,
+    )
+    bridge = torch.ones((5, _RANK), dtype=torch.bfloat16, device=device)
+    weight = torch.ones((6, 64, _RANK), dtype=torch.bfloat16, device=device)
+    destination = _destination(5, 1, 64, device)
+    shared_lora_b.per_row_lora_b(
+        bridge,
+        weight,
+        destination,
+        raw,
+        geometry=shared_lora_b.slice_geometry((0, 64), 64, device),
+        config=_PER_ROW_CONFIG,
+        add_inplace=not zero_sentinel,
+        zero_sentinel=zero_sentinel,
+        lora_ranks=torch.tensor([0, _RANK], dtype=torch.int32, device=device),
+    )
+
+    expected = torch.full_like(destination, _POISON)
+    # Invalid rows zero a delta but preserve a base; a live rank-zero slot is untouched.
+    if zero_sentinel:
+        expected[[0, 1, 4]] = 0
+    expected[3] = _RANK + (0 if zero_sentinel else _POISON)
+    assert torch.equal(destination, expected)
 
 
 def test_zero_pair_batches_return_without_launching() -> None:

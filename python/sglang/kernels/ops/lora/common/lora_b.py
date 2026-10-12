@@ -554,8 +554,6 @@ def _per_row_lora_b_kernel(
     slot = safe_bucket_id // GROUPS_PER_SLOT
     if lora_ranks_ptr is not None:
         rank = tl.load(lora_ranks_ptr + slot).to(tl.int32)
-        if rank == 0:
-            return
     else:
         rank = RANK
     if UNIFORM_WIDTH > 0:
@@ -596,6 +594,10 @@ def _per_row_lora_b_kernel(
                 zeros.to(destination_ptr.dtype.element_ty),
                 mask=n_mask,
             )
+            return
+
+    if lora_ranks_ptr is not None:
+        if rank == 0:
             return
 
     if PAIR_BRIDGE:

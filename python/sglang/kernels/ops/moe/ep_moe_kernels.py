@@ -898,15 +898,14 @@ def post_reorder_for_cutlass_moe(
     )
 
 
-def _check_out_buffer(tensor, shape, dtype, device, name: str) -> None:
+def _check_out_buffer(tensor, shape, device, name: str) -> None:
     if (
         tuple(tensor.shape) != tuple(shape)
-        or tensor.dtype != dtype
         or tensor.device != device
         or not tensor.is_contiguous()
     ):
         raise ValueError(
-            f"{name} must be contiguous {dtype} {tuple(shape)} on {device}; got "
+            f"{name} must be contiguous {tuple(shape)} on {device}; got "
             f"{tensor.dtype} {tuple(tensor.shape)} on {tensor.device}"
         )
 
@@ -982,7 +981,6 @@ def post_reorder_deepgemm(
         _check_out_buffer(
             lora_delta,
             (num_tokens, topk, hidden_size),
-            lora_delta.dtype,
             down_output.device,
             "lora_delta",
         )

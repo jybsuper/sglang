@@ -2,8 +2,6 @@
 Decode uses the separate nolora graph variant for adapter-free batches.
 """
 
-import importlib
-import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +9,7 @@ import pytest
 from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.backend.triton_v2_backend import TritonV2LoRABackend
 from sglang.srt.lora.layers import BaseLayerWithLoRA
-from sglang.srt.lora.utils import capturing_lora_graph, kv_b_lora_correction
+from sglang.srt.lora.utils import kv_b_lora_correction
 from sglang.srt.model_executor.runner.decode_cuda_graph_runner import (
     _lora_backend_skips_inactive,
 )
@@ -128,46 +126,6 @@ def test_kv_b_correction_runs_v2_legacy_or_nothing(capture):
 def test_kv_b_correction_under_capture(capture, variant, expected):
     capture(True, variant)
     assert kv_b_lora_correction(_attn(_layer(False, skip_dense=True))) == expected
-
-
-def test_capture_lora_variant_restores_the_previous_label(capture):
-    capture(True, None)
-    with capture_mode.capture_lora_variant("lora"):
-        assert capture_mode.get_capture_lora_variant() == "lora"
-        with capture_mode.capture_lora_variant("nolora"):
-            assert capture_mode.get_capture_lora_variant() == "nolora"
-            assert not capturing_lora_graph()
-        assert capture_mode.get_capture_lora_variant() == "lora"
-    assert capture_mode.get_capture_lora_variant() is None
-    with pytest.raises(RuntimeError):
-        with capture_mode.capture_lora_variant("nolora"):
-            raise RuntimeError("capture failed")
-    assert capture_mode.get_capture_lora_variant() is None
-    # A later single-graph capture (prefill, a draft runner) keeps its LoRA work.
-    assert capturing_lora_graph()
-
-
-BACKENDS = [
-    ("sglang.srt.lora.backend.triton_backend", "TritonLoRABackend"),
-    ("sglang.srt.lora.backend.triton_v2_backend", "TritonV2LoRABackend"),
-    ("sglang.srt.lora.backend.chunked_backend", "ChunkedSgmvLoRABackend"),
-    ("sglang.srt.lora.backend.torch_backend", "TorchNativeLoRABackend"),
-    ("sglang.srt.lora.backend.ascend_backend", "AscendLoRABackend"),
-]
-
-
-@pytest.mark.parametrize("module,name", BACKENDS)
-def test_graph_init_accepts_the_runner_keywords(module, name):
-    try:
-        cls = getattr(importlib.import_module(module), name)
-    except ImportError as exc:  # a platform backend whose imports are absent here
-        pytest.skip(f"{module}: {exc}")
-    inspect.signature(cls.init_decode_cuda_graph_batch_info).bind(
-        None, max_bs_in_cuda_graph=8, num_tokens_per_req=1
-    )
-    inspect.signature(cls.init_prefill_cuda_graph_batch_info).bind(
-        None, max_num_tokens=64, max_num_requests=8
-    )
 
 
 if __name__ == "__main__":

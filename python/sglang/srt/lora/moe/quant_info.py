@@ -99,7 +99,7 @@ StandardLayoutQuantInfo = MoeLoraBf16QuantInfo | MoeLoraFp8QuantInfo
 
 
 class MoeLoraNvFp4MarlinQuantInfo(msgspec.Struct, kw_only=True):
-    """Prepared Marlin W4A16: INT32 weights, E4M3 group-16 and FP16/BF16 globals."""
+    """Prepared Marlin W4A16 for BF16 activations and global scales."""
 
     w13_qweight: torch.Tensor
     w2_qweight: torch.Tensor
@@ -113,6 +113,8 @@ class MoeLoraNvFp4MarlinQuantInfo(msgspec.Struct, kw_only=True):
 
     @classmethod
     def from_layer(cls, base_layer: FusedMoE) -> MoeLoraNvFp4MarlinQuantInfo:
+        if base_layer.params_dtype != torch.bfloat16:
+            raise NotImplementedError("NVFP4 MoE LoRA requires BF16 activations.")
         for name in ("w13_weight", "w2_weight"):
             if getattr(base_layer, name).dtype != torch.int32:
                 raise ValueError(
