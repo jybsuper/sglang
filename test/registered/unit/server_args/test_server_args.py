@@ -1090,6 +1090,9 @@ class TestKV4Compatibility(unittest.TestCase):
 
 
 class TestLoraDpAttentionArgs(unittest.TestCase):
+    """DP-attention is derived from --enable-dp-attention and --dp-size; plain
+    --dp-size > 1 means independent replicas, which the V2 backends serve."""
+
     def _args(self, **overrides):
         kwargs = dict(
             model_path="dummy",
@@ -1102,39 +1105,51 @@ class TestLoraDpAttentionArgs(unittest.TestCase):
         kwargs.update(overrides)
         return ServerArgs(**kwargs)
 
-    def test_rejects_v2_attention_dp(self):
+    def test_allows_v2_startup(self):
         for runner in ("auto", "lora_cutedsl"):
+            for lora_args in (
+                {"enable_lora": True},
+                {"enable_lora": None, "lora_paths": ["adapter=/tmp/adapter"]},
+            ):
+                with self.subTest(runner=runner, **lora_args):
+                    args = self._args(moe_runner_backend=runner, **lora_args)
+                    check_lora_server_args(args)
+                    self.assertTrue(resolution_result(args, "enable_lora"))
+
+    # The rejecting option is the dense backend for a plain MoE runner and the
+    # lora_* runner itself when one is selected.
+    _REJECTING_OPTION = {"auto": "triton_v2", "lora_cutedsl": "lora_cutedsl"}
+
+    def test_rejects_v2_attention_dp(self):
+        for runner, option in self._REJECTING_OPTION.items():
             with (
                 self.subTest(runner=runner),
-                self.assertRaisesRegex(ValueError, "DP-attention"),
+                self.assertRaisesRegex(ValueError, f"{option}.*DP-attention"),
             ):
                 check_lora_server_args(
-                    self._args(attn_dp_size=2, moe_runner_backend=runner)
+                    self._args(
+                        enable_dp_attention=True, dp_size=2, moe_runner_backend=runner
+                    )
                 )
 
-    def test_rejects_v2_normalized_legacy_attention_dp(self):
-        args = self._args(enable_dp_attention=True, dp_size=2)
-        parallel_hook.handle_deprecated_dp_attention(args)
-        self.assertFalse(resolution_result(args, "enable_dp_attention"))
-        self.assertEqual(resolution_result(args, "attn_dp_size"), 2)
-        self.assertEqual(resolution_result(args, "dp_size"), 1)
-        with self.assertRaisesRegex(ValueError, "triton_v2.*DP-attention"):
-            check_lora_server_args(args)
-
     def test_paths_enable_v2_attention_dp_guard(self):
-        args = self._args(
-            enable_lora=None, lora_paths=["adapter=/tmp/adapter"], attn_dp_size=2
-        )
-        with self.assertRaisesRegex(ValueError, "triton_v2.*DP-attention"):
-            check_lora_server_args(args)
-        self.assertTrue(resolution_result(args, "enable_lora"))
+        for runner, option in self._REJECTING_OPTION.items():
+            with self.subTest(runner=runner):
+                args = self._args(
+                    enable_lora=None,
+                    lora_paths=["adapter=/tmp/adapter"],
+                    enable_dp_attention=True,
+                    dp_size=2,
+                    moe_runner_backend=runner,
+                )
+                with self.assertRaisesRegex(ValueError, f"{option}.*DP-attention"):
+                    check_lora_server_args(args)
+                self.assertTrue(resolution_result(args, "enable_lora"))
 
     def test_allows_independent_dp_replicas(self):
-        for backend in ("auto", "lora_cutedsl"):
-            with self.subTest(backend=backend):
-                args = self._args(dp_size=2, moe_runner_backend=backend)
-                check_lora_server_args(args)
-                self.assertEqual(resolution_result(args, "attn_dp_size"), 1)
+        for runner in ("auto", "lora_cutedsl"):
+            with self.subTest(runner=runner):
+                check_lora_server_args(self._args(dp_size=2, moe_runner_backend=runner))
 
     def test_preserves_legacy_and_disabled_lora(self):
         for overrides in (
@@ -1143,20 +1158,16 @@ class TestLoraDpAttentionArgs(unittest.TestCase):
             {"enable_lora": False, "lora_paths": ["adapter=/tmp/adapter"]},
         ):
             with self.subTest(**overrides):
-                check_lora_server_args(self._args(attn_dp_size=2, **overrides))
+                check_lora_server_args(
+                    self._args(enable_dp_attention=True, dp_size=2, **overrides)
+                )
 
     def test_moe_rejects_effective_attention_dp(self):
-        for deprecated in (False, True):
-            with self.subTest(deprecated=deprecated):
-                args = self._args(moe_runner_backend="lora_cutedsl")
-                if deprecated:
-                    args.enable_dp_attention = True
-                    args.dp_size = 2
-                    parallel_hook.handle_deprecated_dp_attention(args)
-                else:
-                    args.attn_dp_size = 2
-                with self.assertRaisesRegex(ValueError, "lora_cutedsl.*DP-attention"):
-                    check_lora_moe_runner_args(args)
+        args = self._args(
+            moe_runner_backend="lora_cutedsl", enable_dp_attention=True, dp_size=2
+        )
+        with self.assertRaisesRegex(ValueError, "lora_cutedsl.*DP-attention"):
+            check_lora_moe_runner_args(args)
 
 
 class TestLoraMoeRunnerBackendArgs(unittest.TestCase):

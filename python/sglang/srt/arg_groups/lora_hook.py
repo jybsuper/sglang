@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def _check_v2_lora_modes(cfg: Any, option: str):
+    # `attn_dp_size` is derived at publish; resolve it from the inputs here.
+    attn_dp_size = cfg.dp_size if cfg.enable_dp_attention else 1
     for unsupported, mode in (
-        (cfg.attn_dp_size > 1, "DP-attention with --attn-dp-size > 1"),
+        (attn_dp_size > 1, "DP-attention (--enable-dp-attention with --dp-size > 1)"),
         (cfg.enable_pdmux, "PD-multiplexing"),
         (cfg.enable_two_batch_overlap, "two-batch overlap"),
         # Both reach the legacy kv_b correction kernels with V2 batch metadata.
