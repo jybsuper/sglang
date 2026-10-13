@@ -279,7 +279,7 @@ def test_manager_preserves_graph_ownership_across_backend_signatures(
     slots = {None: 0, "adapter": 1}
     manager = SimpleNamespace(
         lora_backend=backend,
-        attn_dp_enabled=False,
+        enable_dp_attention=False,
         max_loras_per_batch=2,
         memory_pool=SimpleNamespace(
             uid_to_buffer_id=slots, get_buffer_id=slots.__getitem__

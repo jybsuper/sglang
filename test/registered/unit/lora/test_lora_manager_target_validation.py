@@ -49,7 +49,7 @@ class TestManagerTargetValidation(CustomTestCase):
         manager.init_lora_modules = mock.Mock()
         manager.init_memory_pool = mock.Mock()
         manager.update_lora_info = mock.Mock()
-        manager.attn_dp_enabled = False
+        manager.enable_dp_attention = False
         manager.num_pinned_loras = 0
         manager.max_loras_per_batch = 4
         manager.lora_added_tokens_size = None
