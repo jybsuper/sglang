@@ -308,6 +308,8 @@ class TestLayerRunnerBackendResolution(CustomTestCase):
             moe_tp_rank=0,
             intermediate_size_per_partition=32,
             runner=SimpleNamespace(runner_backend=base_runner_backend),
+            # The wrapper aliases the base layer's own parameters for weight loaders.
+            named_parameters=lambda recurse=True: iter(()),
         )
         with (
             mock.patch(
