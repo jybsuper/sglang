@@ -61,6 +61,9 @@ class TestManagerTargetValidation(CustomTestCase):
         pool.target_modules = set(targets)
         pool.max_lora_rank = 8
         pool.lora_added_tokens_size = 0
+        # The pool resolves HF target paths and fused shared experts through the
+        # base model; these tests bind no modules.
+        pool.base_model = SimpleNamespace(modules=lambda: [], named_modules=lambda: [])
         return pool
 
     @staticmethod
@@ -167,7 +170,11 @@ class TestManagerTargetValidation(CustomTestCase):
             manager.loras = {}
             manager.base_hf_config = SimpleNamespace(vocab_size=100)
             manager.load_lora_weights = mock.Mock()
-            manager.load_lora_weights_from_tensors = mock.Mock()
+            # The tensor path stages the adapter before committing served state.
+            manager.lora_no_cpu_backup = False
+            manager._create_lora_adapter_from_tensors = mock.Mock(
+                return_value=SimpleNamespace()
+            )
             manager.create_lora_update_result = lambda **kwargs: SimpleNamespace(
                 **kwargs
             )
@@ -190,7 +197,7 @@ class TestManagerTargetValidation(CustomTestCase):
             self.assertEqual(manager.memory_pool.target_modules, before)
             self.assertIn("new", manager.configs)
             loader = (
-                manager.load_lora_weights_from_tensors
+                manager._create_lora_adapter_from_tensors
                 if tensors
                 else manager.load_lora_weights
             )

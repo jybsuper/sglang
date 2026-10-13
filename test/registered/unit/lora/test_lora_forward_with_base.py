@@ -282,7 +282,9 @@ def test_manager_preserves_graph_ownership_across_backend_signatures(
         enable_dp_attention=False,
         max_loras_per_batch=2,
         memory_pool=SimpleNamespace(
-            uid_to_buffer_id=slots, get_buffer_id=slots.__getitem__
+            uid_to_buffer_id=slots,
+            get_buffer_id=slots.__getitem__,
+            check_valid=lambda: None,
         ),
         loras={"adapter": SimpleNamespace(config=SimpleNamespace(r=8), scaling=0.5)},
         can_use_prefill_cuda_graph=lambda batch: graph_enabled and mode == "prefill",
