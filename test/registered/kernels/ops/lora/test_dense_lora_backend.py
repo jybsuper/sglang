@@ -257,7 +257,7 @@ def test_prefill_graph_capture_and_replay_after_new_batch(request_capacity):
         use_prefill_cuda_graph=True,
     )
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         forward()
     assert ours.runner.token_slots.numel() == bucket
 
@@ -332,7 +332,7 @@ def test_prefill_graph_replay_builds_the_route_its_bucket_selects():
     captured_key = ("sorted", captured_plan.block_size)
     prepare(capture, True)
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         forward()
         captured_route = ours.runner.route(captured_plan.block_size)
 
@@ -381,8 +381,9 @@ def test_graph_workspace_phase_follows_buffers_not_target_verify_plans():
         )
         assert ours.runner.phase is Phase.PREFILL
         scratch = workspace.tensor("phase_probe", (8,), dtype=DTYPE, device=DEVICE)
-        key = ("phase_probe", DTYPE, DEVICE, is_prefill_graph)
-        assert workspace._graph_storage[key].data_ptr() == scratch.data_ptr()
+        # the same name on the same stream and phase reuses one storage
+        again = workspace.tensor("phase_probe", (4,), dtype=DTYPE, device=DEVICE)
+        assert again.data_ptr() == scratch.data_ptr()
         assert (
             buffers.setdefault(is_prefill_graph, scratch.data_ptr())
             == scratch.data_ptr()
@@ -498,7 +499,7 @@ def test_prefill_graph_admits_any_request_count_within_the_token_bucket(
     )
     assert not ours.runner.workspace.routes
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         forward()
         captured_route = ours.runner.route(16)
     assert _cached_route_keys(ours.runner) == {key}
@@ -569,7 +570,7 @@ def test_decode_graph_capture_and_replay_after_new_batch():
     torch.cuda.current_stream().wait_stream(stream)
     _prepare(ours, batch, use_decode_cuda_graph=True)
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         forward()
 
     legacy = TritonLoRABackend(SLOTS, DEVICE)
@@ -645,6 +646,7 @@ def test_variable_bucket_graphs_replay_without_dense_host_work(monkeypatch, pref
         )
 
     graphs = {}
+    stream = torch.cuda.Stream()  # one stream for every bucket, as in a graph runner
     for bucket in (64, 16):
 
         def forward(bucket=bucket):
@@ -652,14 +654,13 @@ def test_variable_bucket_graphs_replay_without_dense_host_work(monkeypatch, pref
             out[:bucket].copy_(layer(x[:bucket])[0])
 
         prepare(batch_for(bucket, 0))
-        stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
             forward()
             forward()
         torch.cuda.current_stream().wait_stream(stream)
         graphs[bucket] = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graphs[bucket]):
+        with torch.cuda.graph(graphs[bucket], stream=stream):
             forward()
         assert ours.runner._token_slots.numel() == 64
         assert ours.runner.token_slots.numel() == bucket
@@ -1010,6 +1011,7 @@ def test_vocab_layers_use_unified_forward(monkeypatch, site, overlap, graph_mode
         output[:bucket].copy_(layer(x[:bucket]))
 
     graphs = {}
+    stream = torch.cuda.Stream()  # one stream for every bucket, as in a graph runner
     for bucket in (64, 16):
         lengths = [bucket // 2, bucket // 2] if prefill else [1] * bucket
         slots = [i % SLOTS for i in range(len(lengths))]
@@ -1031,14 +1033,13 @@ def test_vocab_layers_use_unified_forward(monkeypatch, site, overlap, graph_mode
                 DenseLoraKind.EMBEDDING if embedding else DenseLoraKind.LM_HEAD
             )
         if graph_mode:
-            stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(stream):
                 forward(bucket)
             torch.cuda.current_stream().wait_stream(stream)
             prepare(lengths, slots, RANKS, SCALINGS)
             graphs[bucket] = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graphs[bucket]):
+            with torch.cuda.graph(graphs[bucket], stream=stream):
                 forward(bucket)
 
     for step, bucket in enumerate((64, 16, 64, 16)):
@@ -1106,6 +1107,7 @@ def test_graph_phases_replay_with_changed_ranks_scales_and_old_buckets(verify):
         _prepare_batch(backend, fb, slots, ranks, scales, not prefill, prefill)
 
     graphs = {}
+    stream = torch.cuda.Stream()  # one stream for every bucket, as in a graph runner
     for prefill in (False, True):
         for bucket in (64, 32):
             lengths = [bucket] if prefill else [width] * (bucket // width)
@@ -1116,14 +1118,13 @@ def test_graph_phases_replay_with_changed_ranks_scales_and_old_buckets(verify):
                 backend.reset_routing_cache()
                 output[:bucket].copy_(layer(x[:bucket])[0])
 
-            stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(stream):
                 forward()
             torch.cuda.current_stream().wait_stream(stream)
             prepare(prefill, lengths, slots, RANKS, SCALINGS)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, stream=stream):
                 forward()
             graphs[prefill, bucket] = graph
 

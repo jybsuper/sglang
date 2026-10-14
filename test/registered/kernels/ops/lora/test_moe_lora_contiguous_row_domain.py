@@ -648,12 +648,16 @@ def test_cutedsl_replays_in_a_real_cuda_graph(
     cutedsl = _build_runner(architecture, choice, "cutedsl", gpu, num_experts, layout)
     token_lora_mapping = _token_lora_mapping("active", num_tokens).to(device)
 
-    for _ in range(2):  # warm the JIT and keep the graph buffers before capture
-        _run_once(cutedsl, gpu, token_lora_mapping, layout, use_cuda_graph=True)
+    # The workspace keys scratch by stream: warm up on the capture stream.
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(2):  # warm the JIT and keep the graph buffers before capture
+            _run_once(cutedsl, gpu, token_lora_mapping, layout, use_cuda_graph=True)
     torch.cuda.synchronize(device)
 
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         captured = _run_once(
             cutedsl, gpu, token_lora_mapping, layout, use_cuda_graph=True
         )

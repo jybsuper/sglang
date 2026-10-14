@@ -287,7 +287,7 @@ def _capture(backend, fn):
         forward()
     torch.cuda.current_stream().wait_stream(stream)
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         out = forward()
     return graph, out
 

@@ -84,8 +84,9 @@ def masked_provider(request):
     return family, provider, w13.float(), w2.float(), separate_quant
 
 
-def _capture(fn):
-    stream = torch.cuda.Stream()
+def _capture(fn, stream):
+    # One capture stream per workspace, as in a graph runner: the workspace
+    # keys scratch by stream, so buckets grow and retire storage only within one.
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
         fn()
@@ -157,6 +158,7 @@ def test_masked_capacity_boundary_graphs(masked_provider, monkeypatch, token_wid
     # Exercise each already-compiled kernel without modifying dispatch policy.
     monkeypatch.setattr(provider, "_token_width_for", lambda *_: token_width)
     workspace = LoraWorkspace()
+    stream = torch.cuda.Stream()
     workspace.begin_forward(graph_mode=True)
     captured = []
     generator = torch.Generator().manual_seed(720)
@@ -188,7 +190,7 @@ def test_masked_capacity_boundary_graphs(masked_provider, monkeypatch, token_wid
                 provider.down(state, act, down)
                 return state, gateup, act, down
 
-            graph, result = _capture(run)
+            graph, result = _capture(run, stream)
             alignment = token_width if family == "fp8" else 8
             expected_capacity = max(
                 alignment, (n + alignment - 1) // alignment * alignment
@@ -209,6 +211,7 @@ def test_masked_capacity_boundary_graphs(masked_provider, monkeypatch, token_wid
 def test_graph_workspace_growth_preserves_old_graphs_and_phase_isolation():
     _require_cuda()
     workspace = LoraWorkspace()
+    stream = torch.cuda.Stream()
     captured = []
     # Grow decode after its first capture; a larger prefill allocation must not
     # replace its buffers either. No Python reference retains the old scratch.
@@ -226,7 +229,7 @@ def test_graph_workspace_growth_preserves_old_graphs_and_phase_isolation():
             out.copy_(scratch + indices)
             return scratch.data_ptr(), indices.data_ptr()
 
-        graph, addresses = _capture(run)
+        graph, addresses = _capture(run, stream)
         captured.append((graph, value, out, addresses))
 
     assert len({addresses[0] for _, _, _, addresses in captured}) == 3

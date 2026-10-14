@@ -200,8 +200,9 @@ def _record_errors(record_property, errors):
         record_property(name, max(values))
 
 
-def _capture(run):
-    stream = torch.cuda.Stream()
+def _capture(run, stream):
+    # One capture stream per workspace, as in a graph runner: the workspace
+    # keys scratch by stream, so buckets grow and retire storage only within one.
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
         run()
@@ -240,6 +241,7 @@ def test_reused_rows_old_graphs_survive_growth_and_other_phase(
 ):
     provider, w13, w2, family, separate_quant = provider_case
     workspace = LoraWorkspace()
+    stream = torch.cuda.Stream()
     captured = []
     # The non-monotonic order explicitly grows storage after capture.
     buckets = (
@@ -255,7 +257,7 @@ def test_reused_rows_old_graphs_survive_growth_and_other_phase(
         run, hidden, ids, weights = _case(
             provider, workspace, n, is_prefill, separate_quant=separate_quant
         )
-        graph, result = _capture(run)
+        graph, result = _capture(run, stream)
         state, down, output = result
         assert down.data_ptr() == provider._input_rows(state).data_ptr()
         assert down.data_ptr() != hidden.data_ptr()

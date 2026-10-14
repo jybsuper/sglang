@@ -242,11 +242,16 @@ class TestMoeLoraRouting(CustomTestCase):
             host_slots, host_groups, groups_per_slot, max_loras
         )
         captures = []
+        # The workspace keys scratch by stream: warm up on the capture stream.
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
         for build in builders:
-            warm = build()
+            with torch.cuda.stream(stream):
+                warm = build()
+            torch.cuda.current_stream().wait_stream(stream)
             self._assert_route_layout(warm, expected, block_size)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, stream=stream):
                 result = build()
             self.assertEqual(
                 [tensor.data_ptr() for tensor in result],

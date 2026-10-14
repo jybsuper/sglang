@@ -357,12 +357,16 @@ def test_selected_pipeline_replays_correctly_in_a_real_cuda_graph(
         is_prefill=mode is Phase.PREFILL,
     )
 
-    for _ in range(2):  # JIT + workspace graph-buffer retention before capture
-        runner.run(dispatch, batch)
+    # The workspace keys scratch by stream: warm up on the capture stream.
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(2):  # JIT + workspace graph-buffer retention before capture
+            runner.run(dispatch, batch)
     torch.cuda.synchronize(device)
 
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         captured = runner.run(dispatch, batch)
     output = captured.hidden_states
     output_ptr = output.data_ptr()

@@ -269,10 +269,14 @@ def test_shared_outer_decode_replays_in_a_cuda_graph(
     gpu = {name: tensor.to(device) for name, tensor in cpu.items()}
     reference = _fp32_reference(cpu)
     runner = _build_runner(gpu, vendor)
-    _run_once(runner, gpu, use_cuda_graph=True)
+    # The workspace keys scratch by stream: warm up on the capture stream.
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        _run_once(runner, gpu, use_cuda_graph=True)
     torch.cuda.synchronize()
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         captured = _run_once(runner, gpu, use_cuda_graph=True)
     graph.replay()
     torch.cuda.synchronize()
@@ -309,10 +313,16 @@ def test_shared_outer_prefill_graph_replays_other_request_boundaries(
     # Capture: every token on slot 0.
     gpu["token_lora_mapping"].fill_(0)
     capture = dict(is_prefill=True, use_cuda_graph=True)
-    _run_once(runner, gpu, **capture)
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        _run_once(runner, gpu, **capture)
     torch.cuda.synchronize()
+    # The backend resets the route cache every forward, so the capture rebuilds
+    # the shared-token route from the static mapping buffer and replays it.
+    runner.workspace.routes.clear()
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         captured = _run_once(runner, gpu, **capture)
     # Replay tokens on slots 0 and 1 in the same static buffers.
     mapping = torch.tensor([0, 0, 0, 1, 1, 1, 1, 1], dtype=torch.int32)

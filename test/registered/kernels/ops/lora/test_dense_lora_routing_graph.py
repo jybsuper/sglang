@@ -129,7 +129,7 @@ def test_capture_rebuilds_warmup_route_once_and_old_graph_replays(monkeypatch, p
         torch.cuda.current_stream().wait_stream(stream)
         count = len(builds)
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, stream=stream):
             route = forward()
         assert builds[count:] == [True]
         captures[tokens] = (graph, route)
@@ -182,6 +182,7 @@ def test_dense_moe_token_route_reuse_graph_replay(overlap, moe_first):
         route_builder=RouteBuilderFamily.STANDARD,
     )
     captures = {}
+    stream = torch.cuda.Stream()  # one stream for every bucket, as in a graph runner
     for tokens in (64, 8):
         x = rand(tokens, 128)
         slots = torch.arange(tokens, device="cuda", dtype=torch.int32) % 4
@@ -248,11 +249,14 @@ def test_dense_moe_token_route_reuse_graph_replay(overlap, moe_first):
             )
             return dense, delta, again, cached
 
-        forward()
-        forward()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            forward()
+            forward()
+        torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, stream=stream):
             outputs = forward()
         captures[tokens] = graph, x, slots, topk, ranks, scalings, outputs
 
@@ -333,9 +337,13 @@ def test_moe_only_forward_reset_rebuilds_each_block_size_during_capture():
             for block in (16, 32)
         ]
 
-    warmup = forward()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        warmup = forward()
+    torch.cuda.current_stream().wait_stream(stream)
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         routes = forward()
     assert all(route is not old for route, old in zip(routes, warmup))
     assert routes[0].sorted_pair_ids.data_ptr() != routes[1].sorted_pair_ids.data_ptr()

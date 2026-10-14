@@ -399,7 +399,7 @@ def test_graph_mode_buffers_are_stable_and_capture_replays(overlap):
 
     graph = torch.cuda.CUDAGraph()
     begin()
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, stream=stream):
         forward()
         captured_route = engine.route(plan.block_size)
     assert captured_route.sorted_pair_ids.data_ptr() == route_before
@@ -438,6 +438,112 @@ def test_graph_mode_buffers_are_stable_and_capture_replays(overlap):
     torch.cuda.synchronize()
     expected = base.float() + _reference(x, a, b, offsets, static_slots[:num_tokens])
     torch.testing.assert_close(out.float(), expected, rtol=2e-2, atol=2e-2)
+
+
+def test_two_sites_on_two_streams_keep_separate_scratch():
+    """Two dense sites sharing one workspace, issued on two streams the way a
+    model forks a second projection onto an alternate stream inside a captured
+    graph: the wider site (three 64-column slices, split-K 8) on the capture
+    stream, the narrower site (one 64-column slice, split-K 4) on an alternate
+    stream whose shrink lands on the wider site's first bridge tile. Replays
+    must equal an independent-workspace serial execution of the same kernels,
+    and the split-K tile counters must be at rest after every replay."""
+    generator = torch.Generator(device=DEVICE).manual_seed(5)
+    sites = {"wide": SITES["qkv"], "narrow": (0, 64)}
+    pools = {name: _pool(offsets, generator) for name, offsets in sites.items()}
+    plans = {
+        "wide": DensePlan(
+            b_family=BFamily.PER_ROW,
+            overlap=Overlap.A,
+            a_tiles={**DensePlan().a_tiles, "SPLIT_K": 8},
+        ),
+        "narrow": DensePlan(
+            b_family=BFamily.PER_ROW,
+            overlap=Overlap.A,
+            a_tiles={**DensePlan().a_tiles, "SPLIT_K": 4},
+        ),
+    }
+    batch_info, token_slots = _batch("decode")
+    num_tokens = int(batch_info.seg_indptr[-1])
+    x = torch.randn(num_tokens, K_IN, generator=generator, device=DEVICE, dtype=DTYPE)
+    bases = {
+        name: torch.randn(
+            num_tokens, offsets[-1], generator=generator, device=DEVICE, dtype=DTYPE
+        )
+        for name, offsets in sites.items()
+    }
+    outs = {name: torch.empty_like(base) for name, base in bases.items()}
+    # the wider site's base GEMM in a model outlasts the narrower site's shrink;
+    # a fixed filler keeps that window, so a shared bridge would be overwritten
+    # before the wider expand reads it
+    filler = torch.randn(1536, 1536, generator=generator, device=DEVICE)
+
+    def base_fn(name):
+        if name == "wide":
+            for _ in range(4):
+                torch.matmul(filler, filler)
+        return bases[name].clone()
+
+    def apply(engine, name):
+        a, b = pools[name]
+        return engine.apply(
+            x, lambda: base_fn(name), plans[name], a=a, b=b, offsets=sites[name]
+        )
+
+    def bind(engine, graph_mode):
+        engine.begin_batch(
+            token_slots=token_slots,
+            lora_ranks=batch_info.lora_ranks,
+            scalings=batch_info.scalings,
+            num_tokens=num_tokens,
+            phase=Phase.DECODE,
+            graph_mode=graph_mode,
+        )
+
+    shared = DenseLoraRunner(LoraWorkspace(), max_loras=SLOTS, device=DEVICE)
+    stream, alt = torch.cuda.Stream(), torch.cuda.Stream()
+
+    def forward():
+        shared.reset_routes()
+        current = torch.cuda.current_stream()
+        alt.wait_stream(current)
+        outs["wide"].copy_(apply(shared, "wide"))
+        with torch.cuda.stream(alt):
+            outs["narrow"].copy_(apply(shared, "narrow"))
+        current.wait_stream(alt)
+
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        bind(shared, graph_mode=True)
+        forward()  # warm-up on the capture stream allocates both streams' scratch
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    bind(shared, graph_mode=True)
+    with torch.cuda.graph(graph, stream=stream):
+        forward()
+
+    serial = {
+        name: DenseLoraRunner(LoraWorkspace(), max_loras=SLOTS, device=DEVICE)
+        for name in sites
+    }
+    for _ in range(4):
+        x.copy_(torch.randn_like(x))
+        for base in bases.values():
+            base.copy_(torch.randn_like(base))
+        bind(shared, graph_mode=True)
+        graph.replay()
+        torch.cuda.synchronize()
+        for name in sites:
+            bind(serial[name], graph_mode=False)
+            expected = apply(serial[name], name)
+            torch.cuda.synchronize()
+            assert torch.equal(outs[name], expected), name
+        counters = [
+            storage
+            for key, storage in shared.workspace._graph_storage.items()
+            if key[0] == "dense:splitk_counters"
+        ]
+        assert len(counters) >= 2 and not any(bool(c.any()) for c in counters)
 
 
 def _mla_v_reference(attn_output, a_buf, b_buf, token_slots, qk_nope, v_dim):

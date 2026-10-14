@@ -17,21 +17,23 @@ _T = TypeVar("_T")
 class LoraWorkspace:
     """Scratch for the LoRA runners.
 
-    Graph buckets share prefix views per (name, dtype, device, graph phase).
-    Prefill and decode keep separate capacities. A larger warm-up retires the old
-    storage without freeing it: previously captured graphs retain its address.
+    Storage is owned per (name, dtype, device, caller stream) and, in graph
+    mode, per graph phase: sites a model issues on different streams never
+    share scratch, so a capture must be warmed on the stream it captures on.
+    Graph buckets share prefix views of one storage; a larger warm-up retires
+    the old storage without freeing it because captured graphs keep its address.
     """
 
     def __init__(self) -> None:
         self._graph_storage: dict[
-            tuple[str, torch.dtype, torch.device, bool], torch.Tensor
+            tuple[str, torch.dtype, torch.device, int, bool], torch.Tensor
         ] = {}
         self._graph_iota: dict[tuple[torch.device, bool], torch.Tensor] = {}
         self._retired: list[
             torch.Tensor
         ] = []  # outgrown storages captured graphs still read
         self._eager_buffers: dict[
-            tuple[str, torch.dtype, torch.device], torch.Tensor
+            tuple[str, torch.dtype, torch.device, int], torch.Tensor
         ] = {}
         self._iota: dict[torch.device, torch.Tensor] = {}
         self._streams: dict[tuple[torch.device, int], torch.cuda.Stream] = {}
@@ -85,7 +87,8 @@ class LoraWorkspace:
         elements = 1
         for dimension in resolved_shape:
             elements *= dimension
-        key = (name, dtype, resolved_device)
+        stream = self._caller(resolved_device) if resolved_device.type == "cuda" else 0
+        key = (name, dtype, resolved_device, stream)
         if self._graph_mode:
             key = (*key, self._is_prefill_graph)
             storage = self._graph_storage.get(key)
