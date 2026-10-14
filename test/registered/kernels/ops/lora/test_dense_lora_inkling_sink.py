@@ -207,9 +207,10 @@ def _real_sink(
     default = torch.get_default_dtype()
     torch.set_default_dtype(DTYPE)
     try:
-        # The sink partitions its shared experts over the "tp" group, which
-        # resolves to the published tp_size and the overridden tp_rank before
-        # any process group exists.
+        # The Miles port's sink takes its TP partition as explicit tp_rank and
+        # tp_size (upstream's parallel-group selection, #42587, is not in this
+        # branch); the overrides keep the published tp_size and rank consistent
+        # with those arguments before any process group exists.
         with (
             get_context().override_server_args(
                 enable_lora=enable_lora, lora_backend=lora_backend, tp_size=tp_size
@@ -223,7 +224,8 @@ def _real_sink(
                 layer_id=0,
                 prefix=SINK_PREFIX,
                 inference_moe_w13_interleaved=True,
-                parallel_group="tp",
+                tp_rank=tp_rank,
+                tp_size=tp_size,
                 linearized_bf16=linearized_bf16,
             )
     finally:
