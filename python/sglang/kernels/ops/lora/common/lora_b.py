@@ -158,7 +158,7 @@ def _build_geometry(
     )
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_pairs", "num_m_blocks", "sorted_capacity"])
 def _grouped_lora_b_kernel(
     bridge_ptr,
     weight_ptr,
@@ -171,7 +171,6 @@ def _grouped_lora_b_kernel(
     slice_offsets_ptr,
     out_offsets_ptr,
     num_pairs,
-    num_pid_n: tl.constexpr,
     stride_bp,
     stride_bm,
     stride_bk,
@@ -181,6 +180,9 @@ def _grouped_lora_b_kernel(
     stride_dn,
     stride_dt,
     stride_dh,
+    num_m_blocks,
+    sorted_capacity,
+    num_pid_n: tl.constexpr,
     WIDTH: tl.constexpr,
     PAIR_BRIDGE: tl.constexpr,
     RANK: tl.constexpr,
@@ -192,8 +194,6 @@ def _grouped_lora_b_kernel(
     UNIFORM_WIDTH: tl.constexpr,
     OUT_STRIDE: tl.constexpr,
     FULL_TILES: tl.constexpr,
-    NUM_M_BLOCKS: tl.constexpr,
-    SORTED_CAPACITY: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -220,17 +220,17 @@ def _grouped_lora_b_kernel(
             UNIFORM_WIDTH + BLOCK_SIZE_N - 1
         ) // BLOCK_SIZE_N
         pid_m, pid_n = grouped_tile_coords(
-            pid, NUM_SLICES * tiles_per_slice, NUM_M_BLOCKS, GROUP_SIZE_M
+            pid, NUM_SLICES * tiles_per_slice, num_m_blocks, GROUP_SIZE_M
         )
     else:
-        pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, NUM_M_BLOCKS, GROUP_SIZE_M)
+        pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, num_m_blocks, GROUP_SIZE_M)
     # Issue route loads together, but the JIT route's final block can be short.
     num_pairs_post_padded = tl.load(num_pairs_post_padded_ptr)
     bucket_id = tl.load(block_bucket_ids_ptr + pid_m)
     pair_slots = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     pair_ids = tl.load(
         sorted_pair_ids_ptr + pair_slots,
-        mask=pair_slots < SORTED_CAPACITY,
+        mask=pair_slots < sorted_capacity,
         other=num_pairs,
     ).to(tl.int64)
     if pid_m * BLOCK_SIZE_M >= num_pairs_post_padded:
@@ -455,7 +455,6 @@ def grouped_lora_b(
         geometry.slice_offsets,
         geometry.out_offsets,
         num_pairs,
-        geometry.num_column_tiles,
         bridge.stride(0) if planes > 1 else 0,
         bridge.stride(-2),
         bridge.stride(-1),
@@ -465,6 +464,9 @@ def grouped_lora_b(
         stride_dn,
         stride_dt,
         stride_dh,
+        num_m_blocks=num_m_blocks,
+        sorted_capacity=routing.sorted_pair_ids.numel(),
+        num_pid_n=geometry.num_column_tiles,
         WIDTH=routing.width,
         PAIR_BRIDGE=pair_bridge,
         RANK=weight.shape[2],
@@ -476,8 +478,6 @@ def grouped_lora_b(
         UNIFORM_WIDTH=geometry.uniform_width,
         OUT_STRIDE=geometry.out_stride,
         FULL_TILES=geometry.full_tiles,
-        NUM_M_BLOCKS=num_m_blocks,
-        SORTED_CAPACITY=routing.sorted_pair_ids.numel(),
         BLOCK_SIZE_M=routing.block_size,
         BLOCK_SIZE_N=int(config["BLOCK_SIZE_N"]),
         BLOCK_SIZE_K=_k_tile(int(config["BLOCK_SIZE_K"]), weight.shape[2]),

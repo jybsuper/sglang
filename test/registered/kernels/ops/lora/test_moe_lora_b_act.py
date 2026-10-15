@@ -5,6 +5,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from sglang.kernels.ops.lora.common.lora_a import _grouped_lora_a_kernel
+from sglang.kernels.ops.lora.common.lora_b import _grouped_lora_b_kernel
+from sglang.kernels.ops.lora.moe.fused_act import _b_act_kernel
+from sglang.kernels.ops.lora.moe.lora_b import _down_b_into_base_kernel
 from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
 from sglang.srt.lora.moe.plan import (
     ActFamily,
@@ -369,6 +373,54 @@ def test_runner_b_act_matches_the_materialized_reference(
             **_B_ACT_TOLERANCE,
             msg=f"{base_gemm_rows}: into_base={into_base} {traffic}",
         )
+
+
+def test_capacity_changes_do_not_add_jit_variants(monkeypatch: pytest.MonkeyPatch):
+    """Changing routed-row capacity must reuse compiled kernels for fixed tiles."""
+    from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+    monkeypatch.setattr(
+        MoeLoraRunner, "_allocate_output", _standalone_output_allocation
+    )
+    kernels = (
+        _grouped_lora_a_kernel,
+        _grouped_lora_b_kernel,
+        _b_act_kernel,
+        _down_b_into_base_kernel,
+    )
+    device = torch.cuda.current_device()
+    caches = []
+    torch.cuda.synchronize()
+    # Isolate in-process caches without dropping kernels held by earlier tests.
+    for kernel in kernels:
+        old = kernel.device_caches[device]
+        cache = {}
+        monkeypatch.setitem(kernel.device_caches, device, (cache, *old[1:]))
+        caches.append(cache)
+
+    plans = (
+        _make_plan(act_family=ActFamily.B_ACTIVATION, down_b_into_base=True),
+        _make_plan(),
+    )
+    launch = _shipped_launch(_reference_choice())
+    try:
+        for plan in plans:
+            baseline = None
+            # 15/16 crosses input divisibility; 60 gives 16 M blocks; 272 uses
+            # the non-small route builder. Keep the tile selection fixed.
+            for num_tokens in (8, 15, 16, 60, 64, 272):
+                gpu = _make_gpu_tensors(num_tokens, 4, torch.device("cuda"))
+                runner = _build_runner(plan, launch, "route_major", gpu, 4)
+                _run_once(runner, gpu, _token_lora_mapping("active", num_tokens).cuda())
+                torch.cuda.synchronize()
+                sizes = tuple(map(len, caches))
+                if baseline is None:
+                    baseline = sizes
+                else:
+                    assert sizes == baseline, f"T={num_tokens}: {baseline} -> {sizes}"
+        assert all(caches), "not all four kernels were exercised"
+    finally:
+        torch.cuda.synchronize()
 
 
 if __name__ == "__main__":

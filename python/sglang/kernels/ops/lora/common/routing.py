@@ -77,14 +77,16 @@ def route_bucket_ids(
 def grouped_tile_coords(
     pid,
     num_pid_n,
-    NUM_M_BLOCKS: tl.constexpr,
+    num_m_blocks,
     GROUP_SIZE_M: tl.constexpr,
 ):
-    # Group M blocks to reuse weight tiles in cache.
+    # Group M blocks to reuse weight tiles in cache. num_m_blocks is a runtime
+    # scalar: it follows the routed-row capacity of the batch, and baking it in
+    # would compile one kernel variant per prefill size.
     programs_per_group = GROUP_SIZE_M * num_pid_n
     group_id = pid // programs_per_group
     first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(NUM_M_BLOCKS - first_pid_m, GROUP_SIZE_M)
+    group_size_m = tl.minimum(num_m_blocks - first_pid_m, GROUP_SIZE_M)
     pid_m = first_pid_m + ((pid % programs_per_group) % group_size_m)
     pid_n = (pid % programs_per_group) // group_size_m
     return pid_m, pid_n

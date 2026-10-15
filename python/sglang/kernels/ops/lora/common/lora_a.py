@@ -19,7 +19,7 @@ from sglang.kernels.ops.lora.common.routing import (
 )
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_input_rows", "num_pairs", "num_m_blocks"])
 def _grouped_lora_a_kernel(
     input_ptr,
     weight_ptr,
@@ -43,6 +43,7 @@ def _grouped_lora_a_kernel(
     stride_pp,
     stride_pm,
     stride_pn,
+    num_m_blocks,
     WIDTH: tl.constexpr,
     N: tl.constexpr,
     K: tl.constexpr,
@@ -52,7 +53,6 @@ def _grouped_lora_a_kernel(
     SPLIT_MODE: tl.constexpr,
     GROUPS_PER_SLOT: tl.constexpr,
     WEIGHT_DIV: tl.constexpr,
-    NUM_M_BLOCKS: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -73,7 +73,7 @@ def _grouped_lora_a_kernel(
         num_pid_n = STACK * TILES_PER_BLOCK
     else:
         num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, NUM_M_BLOCKS, GROUP_SIZE_M)
+    pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, num_m_blocks, GROUP_SIZE_M)
     if pid_m * BLOCK_SIZE_M >= tl.load(num_pairs_post_padded_ptr):
         return
     bucket_id = tl.load(block_bucket_ids_ptr + pid_m)
@@ -241,6 +241,7 @@ def grouped_lora_a(
         stride_pp,
         stride_pm,
         stride_pn,
+        num_m_blocks=num_m_blocks,
         WIDTH=routing.width,
         N=weight.shape[1],
         K=weight.shape[2],
@@ -250,7 +251,6 @@ def grouped_lora_a(
         SPLIT_MODE=split_mode,
         GROUPS_PER_SLOT=routing.groups_per_slot,
         WEIGHT_DIV=weight_div,
-        NUM_M_BLOCKS=num_m_blocks,
         BLOCK_SIZE_M=routing.block_size,
         BLOCK_SIZE_N=block_size_n,
         BLOCK_SIZE_K=int(config["BLOCK_SIZE_K"]),

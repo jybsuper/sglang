@@ -82,7 +82,7 @@ def _delta_slice(
     return acc
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_pairs", "num_m_blocks"])
 def _b_act_kernel(
     bridge_ptr,
     b_ptr,
@@ -106,6 +106,7 @@ def _b_act_kernel(
     stride_an,
     stride_qm,
     stride_qn,
+    num_m_blocks,
     num_local_experts: tl.constexpr,
     top_k: tl.constexpr,
     width: tl.constexpr,
@@ -115,7 +116,6 @@ def _b_act_kernel(
     gate_first: tl.constexpr,
     interleaved: tl.constexpr,
     bridge_token_major: tl.constexpr,
-    num_m_blocks: tl.constexpr,
     block_m: tl.constexpr,
     block_w: tl.constexpr,
     block_k: tl.constexpr,
@@ -272,6 +272,7 @@ def _launch_b_act(
         act_rows.stride(1),
         pair_target.stride(0),
         pair_target.stride(1),
+        num_m_blocks=num_m_blocks,
         num_local_experts=num_local_experts,
         top_k=routing.width,
         width=width,
@@ -281,7 +282,6 @@ def _launch_b_act(
         gate_first=gate_first,
         interleaved=interleaved,
         bridge_token_major=bridge_top_k != 1,
-        num_m_blocks=num_m_blocks,
         block_m=routing.block_size,
         block_w=block_w,
         block_k=int(config["BLOCK_SIZE_K"]),

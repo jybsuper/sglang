@@ -131,7 +131,7 @@ def run_lora_b(
             raise NotImplementedError(f"no production LoRA-B executor for {family!r}")
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_pairs", "num_m_blocks"])
 def _down_b_into_base_kernel(
     bridge_ptr,
     weight_ptr,
@@ -148,9 +148,9 @@ def _down_b_into_base_kernel(
     stride_wk,
     stride_dm,
     stride_dn,
+    num_m_blocks,
     N_HIDDEN: tl.constexpr,
     RANK: tl.constexpr,
-    NUM_M_BLOCKS: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -159,7 +159,7 @@ def _down_b_into_base_kernel(
     pid = tl.program_id(0)
     num_pairs_post_padded = tl.load(num_pairs_post_padded_ptr)
     num_pid_n: tl.constexpr = (N_HIDDEN + BLOCK_SIZE_N - 1) // BLOCK_SIZE_N
-    pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, NUM_M_BLOCKS, GROUP_SIZE_M)
+    pid_m, pid_n = grouped_tile_coords(pid, num_pid_n, num_m_blocks, GROUP_SIZE_M)
     if pid_m * BLOCK_SIZE_M >= num_pairs_post_padded:
         return
 
@@ -243,9 +243,9 @@ def invoke_down_b_into_base(
         b_down.stride(2),
         down_rows.stride(0),
         down_rows.stride(1),
+        num_m_blocks=num_m_blocks,
         N_HIDDEN=hidden,
         RANK=rank,
-        NUM_M_BLOCKS=num_m_blocks,
         BLOCK_SIZE_M=routing.block_size,
         BLOCK_SIZE_N=block_size_n,
         BLOCK_SIZE_K=int(config["BLOCK_SIZE_K"]),
