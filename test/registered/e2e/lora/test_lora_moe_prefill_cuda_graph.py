@@ -15,6 +15,7 @@
 
 import os
 import unittest
+from contextlib import contextmanager
 
 import torch
 
@@ -34,6 +35,21 @@ LOGPROB_THRESHOLD = 1.0
 MAX_NEW_TOKENS = 8
 # Keep padded buckets within the runner's 2x token-count limit.
 PREFILL_GRAPH_BATCH_SIZES = [512, 1024, 2048, 4096]
+_POINTER_AUDIT_ENV = "SGLANG_DEBUG_CUDA_GRAPH_POINTERS"
+
+
+@contextmanager
+def _pointer_audit_enabled():
+    """Restore the audit flag without clearing engine-set Prometheus state."""
+    previous = os.environ.get(_POINTER_AUDIT_ENV)
+    os.environ[_POINTER_AUDIT_ENV] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_POINTER_AUDIT_ENV, None)
+        else:
+            os.environ[_POINTER_AUDIT_ENV] = previous
 
 
 class TestMoELoRAPrefillCudaGraph(CustomTestCase):
@@ -91,7 +107,8 @@ class TestMoELoRAPrefillCudaGraph(CustomTestCase):
             collectors_before = set(REGISTRY._collector_to_names)
             engine = None
             try:
-                engine = sgl.Engine(**kwargs)
+                with _pointer_audit_enabled():
+                    engine = sgl.Engine(**kwargs)
                 # Compare prefill outputs before decoding.
                 prompt_out = engine.generate(
                     prompts,
