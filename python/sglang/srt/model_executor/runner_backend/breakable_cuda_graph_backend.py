@@ -33,6 +33,7 @@ from sglang.srt.model_executor.runner_backend.base_cuda_graph_backend import (
 from sglang.srt.model_executor.runner_backend.cuda_graph_dedup_mixin import (
     DedupedCudaGraphMixin,
 )
+from sglang.srt.model_executor.runner_backend_utils import cuda_graph_pointer_audit
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
     BreakableCUDAGraph,
     BreakableCUDAGraphCapture,
@@ -102,7 +103,7 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
         self._shared_output_buffer = None
         self.begin_cuda_graph_capture()
         try:
-            with self.replay_session():
+            with self.replay_session(), cuda_graph_pointer_audit.session():
                 yield
         finally:
             try:
@@ -127,6 +128,14 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
                 post_warmup_hook()
 
         graph = BreakableCUDAGraph(self.deduped_cuda_graph)
+        audit = cuda_graph_pointer_audit.active()
+        if audit is not None:
+            audit.begin_capture(
+                self,
+                cuda_graph_pointer_audit.shape_label(
+                    self._cuda_graph_runner, shape_key
+                ),
+            )
         captured_fn = eager_on_graph(forward_fn) if self._debug_eager else forward_fn
         size = shape_key.size
         if self._shared_output_buffer is None:
@@ -152,6 +161,8 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
             out_rows = self._output_rows(out, size)
             self._copy_output_to_buffer(out, self._shared_output_buffer, out_rows)
 
+        if audit is not None:
+            audit.end_capture()
         stored = self._slice_output(self._shared_output_buffer, out_rows)
         self._graphs[shape_key] = graph
         self._outputs[shape_key] = stored
@@ -269,6 +280,7 @@ class BreakableCudaGraphBackend(DedupedCudaGraphMixin, BaseCudaGraphBackend):
         return self._outputs[shape_key]
 
     def cleanup(self) -> None:
+        cuda_graph_pointer_audit.retire(self)
         self.close()
         self._graphs.clear()
         self._outputs.clear()

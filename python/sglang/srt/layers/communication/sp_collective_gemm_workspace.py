@@ -88,4 +88,10 @@ def sp_collective_gemm_workspace(
             kind, group, rows, width, x.dtype, x.device, row_align, flag_tile_mn
         )
         _workspaces[key] = ws
+        from sglang.srt.model_executor.runner_backend_utils import (
+            cuda_graph_pointer_audit,
+        )
+
+        if cuda_graph_pointer_audit.enabled():
+            cuda_graph_pointer_audit.checkpoint("SP collective GEMM workspace growth")
     return ws

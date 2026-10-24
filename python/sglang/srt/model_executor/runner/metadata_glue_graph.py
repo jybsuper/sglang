@@ -38,6 +38,8 @@ from typing import Any, Dict, List
 
 import torch
 
+from sglang.srt.model_executor.runner_backend_utils import cuda_graph_pointer_audit
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,8 +57,8 @@ class MetadataGlueGraph:
         self._capture_stream = None
 
     def reset(self):
-        """Drop captured graphs (call when the runner recaptures its graphs —
-        static buffers and backend state may have been rebuilt)."""
+        """Drop graphs and their audit records before recapture."""
+        cuda_graph_pointer_audit.retire(self)
         self._states.clear()
 
     def note_not_routed(self) -> None:
@@ -110,26 +112,39 @@ class MetadataGlueGraph:
 
         if self._capture_stream is None:
             self._capture_stream = torch.cuda.Stream()
-        graph = torch.cuda.CUDAGraph()
-        try:
-            # captured while serving: other threads may use CUDA meanwhile
-            with torch.cuda.graph(
-                graph, stream=self._capture_stream, capture_error_mode="thread_local"
-            ):
+        with cuda_graph_pointer_audit.session() as audit:
+            if audit is not None:
+                audit.begin_capture(self, f"{type(self).__name__} key={key}")
+                audit.begin_graph()
+                graph = audit.new_graph()
+            else:
+                graph = torch.cuda.CUDAGraph()
+            try:
+                # captured while serving: other threads may use CUDA meanwhile
+                with torch.cuda.graph(
+                    graph,
+                    stream=self._capture_stream,
+                    capture_error_mode="thread_local",
+                ):
+                    attn_backend.init_forward_metadata_out_graph(fb_view)
+            except Exception:
+                if audit is not None:
+                    audit.cancel_capture()
+                logger.warning(
+                    "Metadata glue-graph capture failed for key %s; falling back "
+                    "to eager metadata prep permanently.",
+                    key,
+                    exc_info=True,
+                )
+                self.disabled = True
+                self.eager += 1
+                # Ops under a failed capture were recorded, not executed — run
+                # this step's prep for real.
                 attn_backend.init_forward_metadata_out_graph(fb_view)
-        except Exception:
-            logger.warning(
-                "Metadata glue-graph capture failed for key %s; falling back "
-                "to eager metadata prep permanently.",
-                key,
-                exc_info=True,
-            )
-            self.disabled = True
-            self.eager += 1
-            # Ops under a failed capture were recorded, not executed — run
-            # this step's prep for real.
-            attn_backend.init_forward_metadata_out_graph(fb_view)
-            return
+                return
+            if audit is not None:
+                audit.add_graph(graph)
+                audit.end_capture()
 
         st["meta"] = [(b, b.forward_metadata) for b in self._leaves(attn_backend)]
         st["graph"] = graph

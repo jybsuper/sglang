@@ -30,6 +30,7 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
 from sglang.srt.model_executor.runner_backend.base_cuda_graph_backend import (
     BaseCudaGraphBackend,
 )
+from sglang.srt.model_executor.runner_backend_utils import cuda_graph_pointer_audit
 from sglang.srt.model_executor.runner_utils.pool import (
     GraphPoolPrecarve,
     get_or_create_global_graph_memory_pool,
@@ -130,7 +131,8 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         set_graph_pool_id(self._pool)
         self._capture_stream = stream
         try:
-            yield
+            with cuda_graph_pointer_audit.session():
+                yield
         finally:
             self._capture_stream = None
 
@@ -179,7 +181,8 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
             self._reuse_output_buffer = self._output_buffer is not None
         del warmup_output
 
-        graph = torch.cuda.CUDAGraph()
+        audit = cuda_graph_pointer_audit.active()
+        graph = audit.new_graph() if audit is not None else torch.cuda.CUDAGraph()
 
         graph_ctx: Callable[..., AbstractContextManager]
         if (
@@ -195,6 +198,11 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         else:
             graph_ctx = self._device_module.graph
 
+        if audit is not None:
+            audit.begin_capture(
+                self, cuda_graph_pointer_audit.shape_label(runner, shape_key)
+            )
+            audit.begin_graph()
         with (
             graph_pool_capture_scope(),
             graph_ctx(cuda_graph=graph, pool=self._pool, stream=self._capture_stream),
@@ -208,6 +216,9 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
                 self._reuse_output_buffer = shared_output is not None
                 if shared_output is not None:
                     out = shared_output
+        if audit is not None:
+            audit.add_graph(graph)
+            audit.end_capture()
 
         if profiler is not None:
             profiler.step()
@@ -233,6 +244,7 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         return self._outputs[shape_key]
 
     def cleanup(self) -> None:
+        cuda_graph_pointer_audit.retire(self)
         for graph in self._graphs.values():
             graph.reset()
         self._graphs.clear()

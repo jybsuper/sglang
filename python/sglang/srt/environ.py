@@ -1612,6 +1612,8 @@ class Envs:
     SGLANG_USE_BREAKABLE_CUDA_GRAPH = EnvBool(False)
     # Guards CUDA graph executable dedup via cudaGraphExecUpdate.
     SGLANG_ENABLE_CUDA_GRAPH_DEDUP = EnvBool(False)
+    # Debug allocator/driver audit of captured CUDA graph operand lifetimes.
+    SGLANG_DEBUG_CUDA_GRAPH_POINTERS = EnvBool(False)
     SGLANG_MEMORY_SAVER_CUDA_GRAPH = EnvBool(False)
     # Graph-input fill fast paths: skip the padding reset of an unpadded replay and copy
     # one dense integer dtype pair with a single foreach launch.

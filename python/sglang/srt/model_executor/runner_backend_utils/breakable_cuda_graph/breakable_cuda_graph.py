@@ -35,6 +35,7 @@ try:
 except ImportError:
     rt = None
 
+from sglang.srt.model_executor.runner_backend_utils import cuda_graph_pointer_audit
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.cuda_utils import (
     checkCudaErrors,
 )
@@ -388,6 +389,10 @@ class BreakableCUDAGraphCapture:
         self._forked_token = None
         self._current_graph = None
         self._current_graph_needs_instantiate = False
+        self._pointer_audit = None if _is_xpu else cuda_graph_pointer_audit.active()
+        # A caller that did not open a captured forward on the audit gets one
+        # here, so every segment is recorded under one forward window.
+        self._owns_audit_capture = False
 
     def __enter__(self):
         _install_wait_stream_hook()
@@ -399,12 +404,17 @@ class BreakableCUDAGraphCapture:
             self._stream or get_device_module().current_stream()
         )
         self._forked_token = _forked_streams_var.set(set())
+        if self._pointer_audit is not None and not self._pointer_audit.capturing:
+            self._pointer_audit.begin_capture(self, type(self).__name__)
+            self._owns_audit_capture = True
         self._begin_new_segment()
         return self
 
     def __exit__(self, *args: object):
         try:
             self._end_current_segment()
+            if self._owns_audit_capture and args[0] is None:
+                self._pointer_audit.end_capture()
         finally:
             _forked_streams_var.reset(self._forked_token)
             _current_stream_var.reset(self._stream_token)
@@ -420,7 +430,10 @@ class BreakableCUDAGraphCapture:
         # keep_graph retains the raw graph for dedup; skip it on the plain path.
         # Dedup is CUDA-only (it introspects the raw graph via cuda-python), so
         # XPU always takes the plain path below.
-        if self.cuda_graph._deduped_cuda_graph is not None:
+        if (
+            self.cuda_graph._deduped_cuda_graph is not None
+            or self._pointer_audit is not None
+        ):
             try:
                 graph = graph_cls(keep_graph=True)
                 self._current_graph_needs_instantiate = True
@@ -430,6 +443,8 @@ class BreakableCUDAGraphCapture:
         else:
             graph = graph_cls()
             self._current_graph_needs_instantiate = False
+        if self._pointer_audit is not None:
+            self._pointer_audit.begin_graph()
         if _is_xpu:
             # torch.xpu.XPUGraph.capture_begin takes only an optional pool.
             graph.capture_begin(pool=self._pool)
@@ -457,6 +472,9 @@ class BreakableCUDAGraphCapture:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="The CUDA Graph is empty")
             graph.capture_end()
+        if self._pointer_audit is not None:
+            # _append_segment instantiates the kept graph.
+            self._pointer_audit.add_graph(graph, instantiate=False)
         self.cuda_graph._append_segment(graph, self._current_graph_needs_instantiate)
         self._current_graph = None
         self._current_graph_needs_instantiate = False

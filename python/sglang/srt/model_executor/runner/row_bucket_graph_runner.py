@@ -29,6 +29,7 @@ from sglang.srt.model_executor.forward_context import (
     get_forward_context,
     has_forward_context,
 )
+from sglang.srt.model_executor.runner_backend_utils import cuda_graph_pointer_audit
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph import (
     BreakableCUDAGraph,
     BreakableCUDAGraphCapture,
@@ -298,7 +299,12 @@ class RowBucketGraphRunner:
         set_graph_pool_id(pool)
         tp_group = get_parallel().tp_group
         graph = BreakableCUDAGraph()
-        with graph_capture(stream=get_or_create_global_graph_capture_stream()) as ctx:
+        with (
+            cuda_graph_pointer_audit.session() as audit,
+            graph_capture(stream=get_or_create_global_graph_capture_stream()) as ctx,
+        ):
+            if audit is not None:
+                audit.begin_capture(self, f"{type(self).__name__} rows={rows}")
             # The warmups run eagerly; their KV writes repeat the replay's.
             for _ in range(2):
                 torch.cuda.synchronize()
@@ -314,6 +320,8 @@ class RowBucketGraphRunner:
                 ),
             ):
                 outputs = body()
+            if audit is not None:
+                audit.end_capture()
         torch.cuda.current_stream().wait_stream(ctx.stream)
         torch.cuda.synchronize()
         recorded = _Graph(
