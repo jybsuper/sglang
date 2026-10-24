@@ -20,10 +20,12 @@ CPU-only.
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
 from sglang.srt.layers.attention.trtllm_mha_backend import TRTLLMHAAttnBackend
+from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
@@ -38,6 +40,51 @@ def _strided_rows(num_slots, row_shape, slot_stride):
 
 
 class TestTRTLLMHAPagedKV(unittest.TestCase):
+    def test_graph_variants_keep_decode_prefix_sums_and_verify_row_map_alive(self):
+        backend = TRTLLMHAAttnBackend.__new__(TRTLLMHAAttnBackend)
+        backend.device = "cpu"
+        backend.max_num_pages = 4
+        backend.speculative_num_draft_tokens = 3
+        backend.use_sliding_window_kv_pool = False
+        backend._swa_kv_pool = None
+        backend.expand_encoder_only_verify = True
+        backend.page_size = 1
+        backend.req_to_token = torch.zeros((4, 4), dtype=torch.int32)
+        backend._swa_full_to_swa_mapping = None
+        backend.kv_index_translator = SimpleNamespace(is_translating=False)
+        backend.init_cuda_graph_state(4, 12)
+        backend._build_cuda_graph_metadata(2, 2, ForwardMode.DECODE, None, "cpu")
+        captured = backend.decode_cuda_graph_metadata[2]
+        backend._build_cuda_graph_metadata(2, 2, ForwardMode.DECODE, None, "cpu")
+
+        def update(**kwargs):
+            lengths = kwargs["seq_lens"].to(torch.int32)
+            kwargs["cache_seqlens"].copy_(lengths)
+            kwargs["cu_seqlens_k"][1:].copy_(lengths.cumsum(0))
+
+        with patch(
+            "sglang.srt.layers.attention.trtllm_mha_backend.update_trtllm_mha_graph_metadata",
+            side_effect=update,
+        ):
+            backend._apply_cuda_graph_metadata(
+                2, torch.tensor([0, 1]), torch.tensor([7, 11]), ForwardMode.DECODE, None
+            )
+        torch.testing.assert_close(
+            captured.cu_seqlens_q, torch.tensor([0, 1, 2], dtype=torch.int32)
+        )
+        torch.testing.assert_close(
+            captured.cu_seqlens_k, torch.tensor([0, 7, 18], dtype=torch.int32)
+        )
+
+        backend._build_cuda_graph_metadata(2, 6, ForwardMode.TARGET_VERIFY, None, "cpu")
+        captured_map = backend.target_verify_metadata[2].encoder_row_map
+        backend._build_cuda_graph_metadata(2, 6, ForwardMode.TARGET_VERIFY, None, "cpu")
+        self.assertEqual(
+            captured_map.data_ptr(),
+            backend.target_verify_metadata[2].encoder_row_map.data_ptr(),
+        )
+        torch.testing.assert_close(captured_map, torch.tensor([0, 0, 0, 1, 1, 1]))
+
     def test_reshape_keeps_slot_stride_for_packed_and_flat_rows(self):
         H, D, pages = 4, 32, 3
         slot_stride = 3 * H * D

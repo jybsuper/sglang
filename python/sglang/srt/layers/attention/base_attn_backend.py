@@ -52,6 +52,10 @@ class AttentionBackend(ABC):
         GPU op, runs inside ``with graph.capture():`` at capture time and
         is auto-replayed by ``graph.replay()``. Default is no-op.
 
+    Graph variants must retain captured buffers and owners until retirement,
+    and replay must refresh that exact storage. New views over persistent
+    storage are safe; replacing an owning wrapper or buffer is not.
+
     The legacy ``init_forward_metadata_capture_cuda_graph`` and
     ``init_forward_metadata_replay_cuda_graph`` overrides are fully
     deprecated and removed from the ABC: out-of-tree backends overriding
