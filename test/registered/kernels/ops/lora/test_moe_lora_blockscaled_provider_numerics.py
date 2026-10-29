@@ -23,6 +23,14 @@ _E2M1 = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
 _E2M1_MID = torch.tensor([0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0])
 
 
+def _e2m1_codes(magnitude: torch.Tensor) -> torch.Tensor:
+    """Nearest E2M1 code; ties go to the even code, as the hardware cvt.rn does."""
+    mid = _E2M1_MID.to(magnitude.device)
+    idx = torch.bucketize(magnitude, mid)  # a tie lands on the lower code
+    tie = (idx < 7) & (magnitude == mid[idx.clamp(max=6)]) & (idx % 2 == 1)
+    return idx + tie.long()
+
+
 def _skip_unless_sm100():
     if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 10:
         pytest.skip("block-scaled tcgen05 MMA needs SM100")
@@ -44,7 +52,7 @@ def _quant_mx(x: torch.Tensor, elem: str):
     scaled = groups / scale[..., None]
     if elem == "e2m1":
         table = _E2M1.to(x.device)
-        idx = torch.bucketize(scaled.abs(), _E2M1_MID.to(x.device))
+        idx = _e2m1_codes(scaled.abs())
         sign = scaled < 0
         values = torch.where(sign, -table[idx], table[idx])
         codes = (idx | (sign.long() << 3)).to(torch.uint8).reshape(*lead, k)
@@ -69,7 +77,7 @@ def _quant_nvfp4(x: torch.Tensor, global_scale: float):
     denom = block.float() * global_scale
     scaled = (groups / denom[..., None]).clamp(-6.0, 6.0)
     table = _E2M1.to(x.device)
-    idx = torch.bucketize(scaled.abs(), _E2M1_MID.to(x.device))
+    idx = _e2m1_codes(scaled.abs())
     sign = scaled < 0
     values = torch.where(sign, -table[idx], table[idx])
     codes = (idx | (sign.long() << 3)).to(torch.uint8).reshape(*lead, k)

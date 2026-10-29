@@ -18,6 +18,14 @@ _E2M1 = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
 _E2M1_MID = torch.tensor([0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0])
 
 
+def _e2m1_codes(magnitude: torch.Tensor) -> torch.Tensor:
+    """Nearest E2M1 code; ties go to the even code, as the hardware cvt.rn does."""
+    mid = _E2M1_MID.to(magnitude.device)
+    idx = torch.bucketize(magnitude, mid)  # a tie lands on the lower code
+    tie = (idx < 7) & (magnitude == mid[idx.clamp(max=6)]) & (idx % 2 == 1)
+    return idx + tie.long()
+
+
 def _skip_unless_sm100():
     if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 10:
         pytest.skip("block-scaled tcgen05 MMA needs SM100")
@@ -38,11 +46,10 @@ def _quant_mx_ref(x: torch.Tensor, vec: int, elem: str):
     scale = torch.exp2(exponent)
     scaled = groups / scale[..., None]
     if elem == "e2m1":
-        idx = torch.bucketize(scaled.abs(), _E2M1_MID.to(x.device))
+        idx = _e2m1_codes(scaled.abs())
         sign = scaled < 0
-        values = torch.where(
-            sign, -_E2M1[idx.cpu()].to(x.device), _E2M1[idx.cpu()].to(x.device)
-        )
+        table = _E2M1.to(x.device)
+        values = torch.where(sign, -table[idx], table[idx])
         codes = (idx | (sign.long() << 3)).to(torch.uint8).reshape(*lead, k)
         data = codes[..., 0::2] | (codes[..., 1::2] << 4)
     else:
@@ -64,7 +71,7 @@ def _quant_nvfp4_ref(x: torch.Tensor, global_scale: torch.Tensor):
     )
     denom = block_scale.float() * gs
     scaled = (groups / denom[..., None]).clamp(-6.0, 6.0)
-    idx = torch.bucketize(scaled.abs(), _E2M1_MID.to(x.device))
+    idx = _e2m1_codes(scaled.abs())
     sign = scaled < 0
     table = _E2M1.to(x.device)
     values = torch.where(sign, -table[idx], table[idx])
@@ -107,6 +114,12 @@ def test_triton_row_quantizer_matches_reference(fmt):
     slabs, rows, k = 3, 200, 512
     x = (torch.randn(slabs, rows, k, device=device) * 0.3).to(torch.bfloat16)
     x[0, 5] = 0  # an all-zero row keeps a finite scale
+    # One group of exact E2M1 ties (amax = 6 * 2**-3) rounds to the even codes.
+    x[1, 7, :32] = 0
+    x[1, 7, :8] = (
+        torch.tensor([0.75, -0.25, 1.25, -1.75, 2.5, -3.5, 5.0, 6.0]) * 2.0**-3
+    )
+    pair_to_row = torch.arange(slabs * rows, dtype=torch.int32, device=device)
     global_scale = 0.3
     data_ref, sf_ref, _ = _quantize(
         fmt, x, torch.full((slabs,), global_scale, device=device)
@@ -126,6 +139,7 @@ def test_triton_row_quantizer_matches_reference(fmt):
             sf_out=sf_out,
             global_scale=global_scale,
             rows_per_slab=rows,
+            pair_to_row=pair_to_row,
         )
     else:
         quant_mx_rows(
@@ -134,6 +148,7 @@ def test_triton_row_quantizer_matches_reference(fmt):
             sf_out=sf_out,
             sf_vec_size=vec,
             rows_per_slab=rows,
+            pair_to_row=pair_to_row,
         )
     assert torch.equal(
         out.view(torch.uint8), data_ref.view(torch.uint8).view(slabs * rows, -1)

@@ -97,14 +97,14 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         )
         return data, scales
 
-    def _quantize(self, stage, rows, data, scales, row_counts):
+    def _quantize(self, stage, rows, data, scales, pair_to_row):
         self._quant_rows(
             rows.reshape(-1, rows.shape[-1]),
             out=data.reshape(-1, data.shape[-1]),
             sf_out=scales,
             sf_vec_size=self.SF_VEC_SIZE,
             rows_per_slab=rows.shape[-2],
-            row_counts=row_counts,
+            pair_to_row=pair_to_row,
         )
 
     def _launch(
@@ -167,7 +167,7 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             act_out,
             row_state.act_q,
             row_state.act_sf,
-            self._row_counts(row_state),
+            row_state.pair_to_row,
         )
         self._launch(
             "gemm2",
@@ -206,14 +206,14 @@ class _CuteDslNvFp4Mixin(_CuteDslBlockScaledMixin):
             "gemm2": quant_info.w2_input_scale,
         }
 
-    def _quantize(self, stage, rows, data, scales, row_counts):
+    def _quantize(self, stage, rows, data, scales, pair_to_row):
         self._quant_rows(
             rows.reshape(-1, rows.shape[-1]),
             out=data.reshape(-1, data.shape[-1]),
             sf_out=scales,
             global_scale=self._act_scale[stage],
             rows_per_slab=rows.shape[-2],
-            row_counts=row_counts,
+            pair_to_row=pair_to_row,
         )
 
 
@@ -282,10 +282,6 @@ class _CuteDslBlockScaledMaskedProvider(
     def _group_arg(row_state: CuteDslBlockScaledMaskedRowState) -> torch.Tensor:
         return row_state.masked_m
 
-    @staticmethod
-    def _row_counts(row_state: CuteDslBlockScaledMaskedRowState) -> torch.Tensor:
-        return row_state.masked_m
-
     def prepare(
         self,
         hidden_states: torch.Tensor,
@@ -334,7 +330,7 @@ class _CuteDslBlockScaledMaskedProvider(
             pair_to_row_out=pair_to_row,
             rows_out=hidden_permuted,
         )
-        self._quantize("gemm1", hidden_permuted, rows_q, sf_rows, masked_m)
+        self._quantize("gemm1", hidden_permuted, rows_q, sf_rows, pair_to_row)
         schedule_outputs = {}
         if workspace is not None:
             schedule_outputs = self._schedule_buffers(
@@ -434,11 +430,6 @@ class _CuteDslBlockScaledContiguousProvider(
     def _group_arg(row_state: CuteDslBlockScaledContiguousRowState) -> torch.Tensor:
         return row_state.seg_offsets
 
-    @staticmethod
-    def _row_counts(row_state: CuteDslBlockScaledContiguousRowState) -> torch.Tensor:
-        # One slab of flat rows; the last segment offset bounds the live rows.
-        return row_state.seg_offsets[-1:]
-
     def prepare(
         self,
         hidden_states: torch.Tensor,
@@ -458,9 +449,7 @@ class _CuteDslBlockScaledContiguousProvider(
         act_q, act_sf = self._quant_buffers(
             workspace, f"{prefix}:act", 1, base.m_pad_ceiling, inter, device
         )
-        self._quantize(
-            "gemm1", base.hidden_compact, rows_q, sf_rows, base.seg_offsets[-1:]
-        )
+        self._quantize("gemm1", base.hidden_compact, rows_q, sf_rows, base.pair_to_row)
         # Distinct top-k experts bound each expert to one row per token.
         max_expert_rows = max(int(hidden_states.size(0)), 1)
         expected_m = expected_rows_per_expert(topk_ids.numel(), num_experts)
