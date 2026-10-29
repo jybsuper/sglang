@@ -75,7 +75,7 @@ def _quant_nvfp4(x: torch.Tensor, global_scale: float):
     amax = groups.abs().amax(dim=-1)
     block = (amax / (6.0 * global_scale)).clamp(2.0**-6, 448.0).to(torch.float8_e4m3fn)
     denom = block.float() * global_scale
-    scaled = (groups / denom[..., None]).clamp(-6.0, 6.0)
+    scaled = (groups * (1.0 / denom)[..., None]).clamp(-6.0, 6.0)
     table = _E2M1.to(x.device)
     idx = _e2m1_codes(scaled.abs())
     sign = scaled < 0

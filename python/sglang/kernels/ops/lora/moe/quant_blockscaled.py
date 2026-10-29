@@ -166,12 +166,13 @@ def _quant_nvfp4_rows_kernel(
     groups = tl.reshape(x.to(tl.float32), (ROWS, BLOCK_K // VEC, VEC))
     amax = tl.max(tl.abs(groups), axis=2)
     # E4M3 block scales relative to the global scale; normal range only. The
-    # divisions are correctly rounded so host references reproduce the codes.
+    # per-group divisions are correctly rounded and elements multiply by the
+    # reciprocal, so host references reproduce the codes.
     block_scale = libdevice.div_rn(amax, 6.0 * global_scale)
     block_scale = tl.minimum(tl.maximum(block_scale, 0.015625), 448.0)
     block_scale = block_scale.to(tl.float8e4nv)
-    denom = block_scale.to(tl.float32) * global_scale
-    scaled = libdevice.div_rn(groups, denom[:, :, None])
+    inv_denom = libdevice.div_rn(1.0, block_scale.to(tl.float32) * global_scale)
+    scaled = groups * inv_denom[:, :, None]
 
     group_idx = col0 // VEC + tl.arange(0, BLOCK_K // VEC)
     group_mask = live[:, None] & (group_idx < tl.cdiv(valid_cols, VEC))[None, :]
@@ -254,8 +255,8 @@ def quant_nvfp4_rows(
 ) -> None:
     """NVFP4 rows: E2M1 pairs with E4M3 scales per 16 under one global scale.
 
-    ``x = pair * block_scale * global_scale``; the GEMM epilogue applies the
-    global scales. Layouts follow :func:`quant_mx_rows`.
+    ``pair = round(x * (1 / (block_scale * global_scale)))``; the GEMM epilogue
+    applies the global scales. Layouts follow :func:`quant_mx_rows`.
     """
     rows, k = x.shape
     assert k % 16 == 0 and rows % rows_per_slab == 0
