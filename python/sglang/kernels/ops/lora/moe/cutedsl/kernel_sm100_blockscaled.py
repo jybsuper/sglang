@@ -972,6 +972,7 @@ class GroupedGemmKernelSm100BlockScaled:
             raise testing.CantImplementError(
                 f"Invalid mma tiler M for 1-CTA block-scaled MMA: {self.mma_tiler_mn}"
             )
+        # Narrower token tiles fault in the block-scaled MMA (tried 32 and 64).
         if self.mma_tiler_mn[1] not in (128, 256):
             raise testing.CantImplementError(
                 f"Invalid mma tiler N: {self.mma_tiler_mn[1]}; scale factors tile 128 rows"

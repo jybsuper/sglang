@@ -31,15 +31,68 @@ def _quant_mx_rows_kernel(
     k_atoms,
     VEC: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    ROWS: tl.constexpr,
     ELEM_MAX: tl.constexpr,
     ELEM_MAX_LOG2: tl.constexpr,
     PACK_E2M1: tl.constexpr,
 ):
-    row = tl.program_id(0)
-    if row % rows_per_slab >= tl.load(row_counts_ptr + row // rows_per_slab):
+    row_blocks = tl.cdiv(rows_per_slab, ROWS)
+    slab = tl.program_id(0) // row_blocks
+    row0 = (tl.program_id(0) % row_blocks) * ROWS
+    live_rows = tl.load(row_counts_ptr + slab)
+    if row0 >= live_rows:
         return  # slab padding: the GEMM ignores these rows
     col0 = tl.program_id(1) * BLOCK_K
     offs = col0 + tl.arange(0, BLOCK_K)
+    group_idx = col0 // VEC + tl.arange(0, BLOCK_K // VEC)
+    for r in tl.static_range(ROWS):
+        slab_row = row0 + r
+        if slab_row < live_rows:
+            _quant_mx_row(
+                x_ptr,
+                out_ptr,
+                sf_ptr,
+                slab * rows_per_slab + slab_row,
+                slab,
+                slab_row,
+                col0,
+                offs,
+                group_idx,
+                stride_x_row,
+                stride_out_row,
+                valid_cols,
+                row_atoms,
+                k_atoms,
+                VEC,
+                BLOCK_K,
+                ELEM_MAX,
+                ELEM_MAX_LOG2,
+                PACK_E2M1,
+            )
+
+
+@triton.jit
+def _quant_mx_row(
+    x_ptr,
+    out_ptr,
+    sf_ptr,
+    row,
+    slab,
+    slab_row,
+    col0,
+    offs,
+    group_idx,
+    stride_x_row,
+    stride_out_row,
+    valid_cols,
+    row_atoms,
+    k_atoms,
+    VEC: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    ELEM_MAX: tl.constexpr,
+    ELEM_MAX_LOG2: tl.constexpr,
+    PACK_E2M1: tl.constexpr,
+):
     x = tl.load(x_ptr + row * stride_x_row + offs, mask=offs < valid_cols, other=0.0)
     groups = tl.reshape(x.to(tl.float32), (BLOCK_K // VEC, VEC))
     amax = tl.max(tl.abs(groups), axis=1)
@@ -52,9 +105,6 @@ def _quant_mx_rows_kernel(
     exponent = tl.minimum(tl.maximum(exponent, -126), 127)
     scaled = groups / tl.exp2(exponent.to(tl.float32))[:, None]
 
-    group_idx = col0 // VEC + tl.arange(0, BLOCK_K // VEC)
-    slab = row // rows_per_slab
-    slab_row = row % rows_per_slab
     sf_offs = (
         ((slab * row_atoms + slab_row // 128) * k_atoms + group_idx // 4) * 512
         + (slab_row % 32) * 16
@@ -96,6 +146,10 @@ def _quant_mx_rows_kernel(
         )
 
 
+# Decode slabs hold a few live rows: a program covers this many and exits early.
+_ROWS_PER_PROGRAM = 16
+
+
 def _row_counts(row_counts, rows: int, rows_per_slab: int, device) -> torch.Tensor:
     if row_counts is None:
         return torch.full(
@@ -134,7 +188,10 @@ def quant_mx_rows(
     assert block_k % sf_vec_size == 0
     row_atoms = -(-rows_per_slab // 128)
     k_atoms = -(-(k // sf_vec_size) // 4)
-    grid = (rows, triton.cdiv(k, block_k))
+    grid = (
+        (rows // rows_per_slab) * triton.cdiv(rows_per_slab, _ROWS_PER_PROGRAM),
+        triton.cdiv(k, block_k),
+    )
     _quant_mx_rows_kernel[grid](
         x,
         out,
@@ -148,6 +205,7 @@ def quant_mx_rows(
         k_atoms,
         VEC=sf_vec_size,
         BLOCK_K=block_k,
+        ROWS=_ROWS_PER_PROGRAM,
         ELEM_MAX=6.0 if pack_e2m1 else 448.0,
         ELEM_MAX_LOG2=2 if pack_e2m1 else 8,
         PACK_E2M1=pack_e2m1,
@@ -185,13 +243,61 @@ def _quant_nvfp4_rows_kernel(
     row_atoms,
     k_atoms,
     BLOCK_K: tl.constexpr,
+    ROWS: tl.constexpr,
 ):
     VEC: tl.constexpr = 16
-    row = tl.program_id(0)
-    if row % rows_per_slab >= tl.load(row_counts_ptr + row // rows_per_slab):
+    row_blocks = tl.cdiv(rows_per_slab, ROWS)
+    slab = tl.program_id(0) // row_blocks
+    row0 = (tl.program_id(0) % row_blocks) * ROWS
+    live_rows = tl.load(row_counts_ptr + slab)
+    if row0 >= live_rows:
         return
     col0 = tl.program_id(1) * BLOCK_K
     offs = col0 + tl.arange(0, BLOCK_K)
+    group_idx = col0 // VEC + tl.arange(0, BLOCK_K // VEC)
+    for r in tl.static_range(ROWS):
+        slab_row = row0 + r
+        if slab_row < live_rows:
+            _quant_nvfp4_row(
+                x_ptr,
+                out_ptr,
+                sf_ptr,
+                global_scale,
+                slab * rows_per_slab + slab_row,
+                slab,
+                slab_row,
+                col0,
+                offs,
+                group_idx,
+                stride_x_row,
+                stride_out_row,
+                valid_cols,
+                row_atoms,
+                k_atoms,
+                BLOCK_K,
+            )
+
+
+@triton.jit
+def _quant_nvfp4_row(
+    x_ptr,
+    out_ptr,
+    sf_ptr,
+    global_scale,
+    row,
+    slab,
+    slab_row,
+    col0,
+    offs,
+    group_idx,
+    stride_x_row,
+    stride_out_row,
+    valid_cols,
+    row_atoms,
+    k_atoms,
+    BLOCK_K: tl.constexpr,
+):
+    VEC: tl.constexpr = 16
     x = tl.load(x_ptr + row * stride_x_row + offs, mask=offs < valid_cols, other=0.0)
     groups = tl.reshape(x.to(tl.float32), (BLOCK_K // VEC, VEC))
     amax = tl.max(tl.abs(groups), axis=1)
@@ -204,9 +310,6 @@ def _quant_nvfp4_rows_kernel(
     scaled = libdevice.div_rn(groups, denom[:, None])
     scaled = tl.minimum(tl.maximum(scaled, -6.0), 6.0)
 
-    group_idx = col0 // VEC + tl.arange(0, BLOCK_K // VEC)
-    slab = row // rows_per_slab
-    slab_row = row % rows_per_slab
     sf_offs = (
         ((slab * row_atoms + slab_row // 128) * k_atoms + group_idx // 4) * 512
         + (slab_row % 32) * 16
@@ -261,7 +364,10 @@ def quant_nvfp4_rows(
     block_k = min(1024, triton.next_power_of_2(k))
     row_atoms = -(-rows_per_slab // 128)
     k_atoms = -(-(k // 16) // 4)
-    grid = (rows, triton.cdiv(k, block_k))
+    grid = (
+        (rows // rows_per_slab) * triton.cdiv(rows_per_slab, _ROWS_PER_PROGRAM),
+        triton.cdiv(k, block_k),
+    )
     _quant_nvfp4_rows_kernel[grid](
         x,
         out,
@@ -275,5 +381,6 @@ def quant_nvfp4_rows(
         row_atoms,
         k_atoms,
         BLOCK_K=block_k,
+        ROWS=_ROWS_PER_PROGRAM,
         num_warps=4,
     )
