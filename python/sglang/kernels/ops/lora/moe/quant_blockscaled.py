@@ -22,6 +22,7 @@ def _quant_mx_rows_kernel(
     x_ptr,
     out_ptr,
     sf_ptr,
+    row_counts_ptr,
     stride_x_row,
     stride_out_row,
     rows_per_slab,
@@ -35,6 +36,8 @@ def _quant_mx_rows_kernel(
     PACK_E2M1: tl.constexpr,
 ):
     row = tl.program_id(0)
+    if row % rows_per_slab >= tl.load(row_counts_ptr + row // rows_per_slab):
+        return  # slab padding: the GEMM ignores these rows
     col0 = tl.program_id(1) * BLOCK_K
     offs = col0 + tl.arange(0, BLOCK_K)
     x = tl.load(x_ptr + row * stride_x_row + offs, mask=offs < valid_cols, other=0.0)
@@ -93,6 +96,17 @@ def _quant_mx_rows_kernel(
         )
 
 
+def _row_counts(row_counts, rows: int, rows_per_slab: int, device) -> torch.Tensor:
+    if row_counts is None:
+        return torch.full(
+            (rows // rows_per_slab,), rows_per_slab, dtype=torch.int32, device=device
+        )
+    assert (
+        row_counts.dtype == torch.int32 and row_counts.numel() == rows // rows_per_slab
+    )
+    return row_counts
+
+
 def quant_mx_rows(
     x: torch.Tensor,
     *,
@@ -100,12 +114,14 @@ def quant_mx_rows(
     sf_out: torch.Tensor,
     sf_vec_size: int,
     rows_per_slab: int,
+    row_counts: torch.Tensor | None = None,
 ) -> None:
     """Quantize ``x`` rows into ``out`` (E4M3, or uint8 E2M1 pairs) and ``sf_out``.
 
     ``x`` is [rows, K] (a [slabs, rows_per_slab, K] view of expert slabs is
     flattened by the caller); ``out`` has the same rows with K or K // 2
     columns; ``sf_out`` holds ``scale_atom_bytes(rows_per_slab, K, vec, slabs)``.
+    ``row_counts`` (int32 [slabs]) limits each slab to its live rows.
     """
     rows, k = x.shape
     assert k % sf_vec_size == 0 and rows % rows_per_slab == 0
@@ -123,6 +139,7 @@ def quant_mx_rows(
         x,
         out,
         sf_out,
+        _row_counts(row_counts, rows, rows_per_slab, x.device),
         x.stride(0),
         out.stride(0),
         rows_per_slab,
@@ -159,6 +176,7 @@ def _quant_nvfp4_rows_kernel(
     x_ptr,
     out_ptr,
     sf_ptr,
+    row_counts_ptr,
     global_scale,
     stride_x_row,
     stride_out_row,
@@ -170,6 +188,8 @@ def _quant_nvfp4_rows_kernel(
 ):
     VEC: tl.constexpr = 16
     row = tl.program_id(0)
+    if row % rows_per_slab >= tl.load(row_counts_ptr + row // rows_per_slab):
+        return
     col0 = tl.program_id(1) * BLOCK_K
     offs = col0 + tl.arange(0, BLOCK_K)
     x = tl.load(x_ptr + row * stride_x_row + offs, mask=offs < valid_cols, other=0.0)
@@ -228,6 +248,7 @@ def quant_nvfp4_rows(
     sf_out: torch.Tensor,
     global_scale: float,
     rows_per_slab: int,
+    row_counts: torch.Tensor | None = None,
 ) -> None:
     """NVFP4 rows: E2M1 pairs with E4M3 scales per 16 under one global scale.
 
@@ -245,6 +266,7 @@ def quant_nvfp4_rows(
         x,
         out,
         sf_out,
+        _row_counts(row_counts, rows, rows_per_slab, x.device),
         float(global_scale),
         x.stride(0),
         out.stride(0),
