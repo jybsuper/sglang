@@ -207,10 +207,10 @@ def check_lora_moe_runner_args(server_args: Any):
         )
     _check_v2_lora_modes(cfg, f"--moe-runner-backend {backend}")
     # Layer attachment checks the specific weight layout within each scheme.
-    if cfg.quantization not in (None, "fp8", "modelopt_fp4"):
+    if cfg.quantization not in (None, "fp8", "mxfp8", "modelopt_fp4"):
         raise ValueError(
             f"--moe-runner-backend {backend} supports unquantized BF16, 128-block "
-            "FP8 (with BF16 or MXFP4 experts) and ModelOpt NVFP4 MoE, got "
+            "FP8 (with BF16 or MXFP4 experts), MXFP8 and ModelOpt NVFP4 MoE, got "
             f"--quantization {cfg.quantization}"
         )
     if cfg.quantization == "modelopt_fp4" and backend != "lora_marlin":

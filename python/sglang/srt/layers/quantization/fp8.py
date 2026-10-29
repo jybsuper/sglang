@@ -2502,6 +2502,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             elif (
                 get_moe_runner_backend().is_flashinfer_trtllm()
                 or get_moe_runner_backend().is_flashinfer_trtllm_routed()
+                # The LoRA MoE runner packs the canonical scales itself.
+                or get_moe_runner_backend().is_lora()
             ):
                 # Match FlashInfer TRT-LLM MoE test contracts:
                 # 1) quantize in canonical (non-swizzled) scale layout, and
@@ -2529,6 +2531,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             elif (
                 get_moe_runner_backend().is_flashinfer_trtllm()
                 or get_moe_runner_backend().is_flashinfer_trtllm_routed()
+                or get_moe_runner_backend().is_lora()
             ):
                 w13_q = layer.w13_weight.data
                 w2_q = layer.w2_weight.data

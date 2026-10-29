@@ -163,6 +163,14 @@ class Mxfp4MarlinMoEMethod:
         if getattr(layer, "_mega_moe_weights_built", False):
             return
 
+        if (
+            self._moe_runner_backend.is_lora()
+            and not self._moe_runner_backend.is_lora_marlin()
+        ):
+            # The LoRA runner's block-scaled vendors consume the packed weights.
+            layer._dsv4_mxfp4_backend = "lora"
+            return
+
         platform = get_platform()
         if not (platform.is_sm90 or platform.is_sm100 or platform.is_sm120):
             raise RuntimeError("MXFP4 Marlin requires SM90, SM100 or SM120.")

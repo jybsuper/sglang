@@ -41,6 +41,7 @@ class CuteDslTileMixin:
     WIDE_EXPECTED_M_THRESHOLD: int
     XWIDE_EXPECTED_M_THRESHOLD = 96
     OUTPUT_WIDTH = 128
+    TOKEN_WIDTHS = (NARROW_TOKEN_WIDTH, WIDE_TOKEN_WIDTH, XWIDE_TOKEN_WIDTH)
 
     _ROW_MODE: str
     _DTYPE_TAG: str
@@ -93,6 +94,7 @@ class CuteDslTileMixin:
         )
         if drop_narrow_tile:
             tile_set = tile_set[1:]
+        tile_set = tuple(tile for tile in tile_set if tile[0] in self.TOKEN_WIDTHS)
 
         version = cutedsl_version()
         self._config_table = load_config_table(

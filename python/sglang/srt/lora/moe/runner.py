@@ -188,12 +188,12 @@ class MoeLoraRunner:
         if isinstance(quant_method, Fp8MoEMethod):
             if base_layer.params_dtype != torch.bfloat16:
                 raise NotImplementedError("FP8 MoE LoRA requires BF16 activations.")
-            if not quant_method.block_quant or getattr(
-                quant_method, "use_mxfp8", False
-            ):
+            if getattr(quant_method, "use_mxfp8", False):
+                return "mxfp8"
+            if not quant_method.block_quant:
                 raise NotImplementedError(
                     "MoE LoRA on FP8 requires 128-block weight quantization; "
-                    "per-tensor and MXFP8 layers are unsupported"
+                    "per-tensor layers are unsupported"
                 )
             if base_layer.w13_weight.dtype != torch.float8_e4m3fn:
                 raise NotImplementedError(
@@ -214,8 +214,8 @@ class MoeLoraRunner:
         if isinstance(quant_method, Mxfp4MarlinMoEMethod):
             return "mxfp4"
         raise NotImplementedError(
-            "MoE LoRA supports unquantized BF16, 128-block FP8, MXFP4 and NVFP4 "
-            f"MoE; this layer's quant method is {type(quant_method).__name__}"
+            "MoE LoRA supports unquantized BF16, 128-block FP8, MXFP8, MXFP4 and "
+            f"NVFP4 MoE; this layer's quant method is {type(quant_method).__name__}"
         )
 
     @classmethod

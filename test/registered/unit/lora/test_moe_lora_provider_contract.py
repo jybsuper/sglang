@@ -115,7 +115,8 @@ class TestVendorResolution(CustomTestCase):
         from sglang.srt.lora.moe.base_gemm_provider import VENDORS, resolve_vendor
 
         self.assertEqual(resolve_vendor("mxfp4", "marlin"), "marlin")
-        self.assertEqual(resolve_vendor("mxfp4", "cutedsl"), "marlin")
+        self.assertEqual(resolve_vendor("mxfp4", "triton"), "marlin")
+        self.assertEqual(resolve_vendor("mxfp8", "marlin"), "cutedsl")
         self.assertEqual(resolve_vendor("bf16", None), VENDORS["bf16"][0])
 
     def test_lora_runners_never_fold_routed_scaling(self):
