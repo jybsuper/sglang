@@ -18,7 +18,10 @@ from sglang.kernels.ops.lora.common.lora_a import (
 from sglang.kernels.ops.lora.moe.activation import ActivationFn
 from sglang.kernels.ops.lora.moe.lora_b import invoke_down_b_into_base, run_lora_b
 from sglang.srt.layers.moe.utils import get_moe_runner_backend
-from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
+from sglang.srt.lora.moe.base_gemm_provider import (
+    resolve_vendor,
+    select_provider_cls,
+)
 from sglang.srt.lora.moe.base_gemm_provider.base import (
     MoeBaseProvider,
 )
@@ -127,6 +130,9 @@ class MoeLoraRunner:
         architecture = architecture_for_capability(major)
         config = base_layer.moe_runner_config
         activation = ActivationFn.parse(config.activation)
+        vendor = resolve_vendor(
+            family, get_moe_runner_backend().value.removeprefix("lora_")
+        )
         plans = resolve_plans(
             architecture=architecture,
             is_shared_outer=is_shared_outer,
@@ -135,6 +141,7 @@ class MoeLoraRunner:
             hidden_size=int(base_layer.hidden_size),
             num_local_experts=int(base_layer.num_local_experts),
             quant_family=family,
+            vendor=vendor,
         )
         # Shared finalizers hold the rank reduction in one tile, tested up to 256.
         if physical_rank > 256 and any(
@@ -144,7 +151,6 @@ class MoeLoraRunner:
             raise ValueError(
                 f"the shared finalizes are capped at rank 256, got {physical_rank}"
             )
-        vendor = get_moe_runner_backend().value.removeprefix("lora_")
         runner = cls(
             providers={
                 rows: cls._build_provider(
@@ -201,8 +207,14 @@ class MoeLoraRunner:
 
         if isinstance(quant_method, ModelOptNvFp4FusedMoEMethod):
             return "nvfp4"
+        from sglang.srt.layers.quantization.mxfp4_marlin_moe import (
+            Mxfp4MarlinMoEMethod,
+        )
+
+        if isinstance(quant_method, Mxfp4MarlinMoEMethod):
+            return "mxfp4"
         raise NotImplementedError(
-            "MoE LoRA supports unquantized BF16, 128-block FP8, and NVFP4 "
+            "MoE LoRA supports unquantized BF16, 128-block FP8, MXFP4 and NVFP4 "
             f"MoE; this layer's quant method is {type(quant_method).__name__}"
         )
 
@@ -232,9 +244,7 @@ class MoeLoraRunner:
         if base_layer.should_fuse_routed_scaling_factor_in_topk:
             raise NotImplementedError(
                 "MoE LoRA applies routed scaling exactly once in its own "
-                "finalize; this layer already folds it into the top-k weights. "
-                "Under a lora backend only ModelOpt NVFP4 does that, so those "
-                "experts need --moe-runner-backend lora_marlin"
+                "finalize; this layer already folds it into the top-k weights"
             )
         if getattr(base_layer, "with_bias", False):
             raise NotImplementedError(

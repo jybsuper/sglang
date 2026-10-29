@@ -442,7 +442,11 @@ class Fp8Config(QuantizationConfig):
 
                 return NPUW4A8MXFP4FusedMoEMethod(prefix=prefix)
 
-            if self.is_fp4_experts and get_moe_runner_backend().is_marlin():
+            # The LoRA MoE runner binds FP4 experts through the Marlin method.
+            if self.is_fp4_experts and (
+                get_moe_runner_backend().is_marlin()
+                or get_moe_runner_backend().is_lora()
+            ):
                 from sglang.srt.layers.quantization.mxfp4_marlin_moe import (
                     Mxfp4MarlinMoEMethod,
                 )

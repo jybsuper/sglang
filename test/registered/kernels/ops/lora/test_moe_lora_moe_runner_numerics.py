@@ -83,6 +83,7 @@ def _resolve_execution(
         activation=ActivationFn.SILU,
         hidden_size=hidden_size,
         num_local_experts=_EXPERTS,
+        vendor="cutedsl",
     )[mode]
     launch_config = selected.tiles.config_for(num_tokens)
     if architecture == "sm100" and mode is Phase.DECODE:

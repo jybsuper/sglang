@@ -15,32 +15,36 @@ VENDORS = {
     "bf16": ("cutedsl", "triton"),
     "fp8": ("cutedsl", "triton"),
     "nvfp4": ("marlin",),
+    "mxfp4": ("marlin",),
 }
+
+
+def resolve_vendor(family: str, vendor: str | None) -> str:
+    """Use the family default when the requested vendor cannot serve it."""
+    vendors = VENDORS[family]
+    if vendor in vendors:
+        return vendor
+    if vendor is not None:
+        logger.info(
+            "MoE LoRA base-GEMM vendor %r serves no %s layers; this layer "
+            "family uses its default vendor %r",
+            vendor,
+            family,
+            vendors[0],
+        )
+    return vendors[0]
 
 
 def select_provider_cls(
     base_gemm_rows: str, family: str, vendor: str | None = None
 ) -> type[MoeBaseProvider]:
-    """Use the family default when the requested vendor cannot serve it.
-
-    Triton and Marlin use route-major rows for either requested row order.
-    """
+    """Triton and Marlin use route-major rows for either requested row order."""
     if base_gemm_rows not in ("expert_major", "route_major"):
         raise ValueError(
             f"unknown MoE LoRA base-GEMM row order {base_gemm_rows!r}; "
             "expected 'expert_major' or 'route_major'"
         )
-    vendors = VENDORS[family]
-    if vendor not in vendors:
-        if vendor is not None:
-            logger.info(
-                "MoE LoRA base-GEMM vendor %r serves no %s layers; this layer "
-                "family uses its default vendor %r",
-                vendor,
-                family,
-                vendors[0],
-            )
-        vendor = vendors[0]
+    vendor = resolve_vendor(family, vendor)
     expert_major = base_gemm_rows == "expert_major"
     match vendor, family:
         case "cutedsl", "bf16":
@@ -83,3 +87,9 @@ def select_provider_cls(
             )
 
             return MarlinNvFp4ContiguousProvider
+        case "marlin", "mxfp4":
+            from sglang.srt.lora.moe.base_gemm_provider.marlin_mxfp4 import (
+                MarlinMxfp4ContiguousProvider,
+            )
+
+            return MarlinMxfp4ContiguousProvider
