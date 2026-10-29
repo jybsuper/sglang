@@ -136,6 +136,9 @@ class GroupedGemmKernelSm100BlockScaled:
             mma_inst_shape_k * self.mma_inst_tile_k,
         )
         self.mma_tiler_sfb = (*self.mma_tiler_mn_sfb, self.mma_tiler[2])
+        # Token tiles narrower than a scale atom load the whole atom and shift
+        # the MMA's TMEM view of it by the tile's row offset.
+        self.sfb_tiles_per_atom = max(1, 128 // self.mma_tiler[1])
         self.cta_tile_shape_mnk = (
             self.mma_tiler[0] // cute.size(tiled_mma.thr_id.shape),
             self.mma_tiler[1],
@@ -512,9 +515,11 @@ class GroupedGemmKernelSm100BlockScaled:
         gSFA_mkl = cute.local_tile(
             mSFA_mkl, cute.slice_(self.mma_tiler, (None, 0, None)), (None, None, None)
         )
-        # (bN, bK, RestN, RestK, RestL)
+        # (bN, bK, RestN, RestK, RestL): whole 128-row scale atoms per tile.
         gSFB_nkl = cute.local_tile(
-            mSFB_nkl, cute.slice_(self.mma_tiler, (0, None, None)), (None, None, None)
+            mSFB_nkl,
+            cute.slice_(self.mma_tiler_sfb, (0, None, None)),
+            (None, None, None),
         )
         # (bM, bN, RestM, RestN, RestL)
         gC_mnl = cute.local_tile(
@@ -636,7 +641,12 @@ class GroupedGemmKernelSm100BlockScaled:
                     (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
                 ]
                 tBgSFB_slice = tBgSFB[
-                    (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
+                    (
+                        None,
+                        mma_tile_coord_mnl[1] // self.sfb_tiles_per_atom,
+                        None,
+                        mma_tile_coord_mnl[2],
+                    )
                 ]
 
                 ab_producer.reset()
@@ -699,11 +709,11 @@ class GroupedGemmKernelSm100BlockScaled:
                     cute.slice_(sfa_smem_layout_staged, (None, None, None, 0)),
                 ),
             )
+            sfb_tmem_cols = tcgen05.find_tmem_tensor_col_offset(
+                tCtAcc_base
+            ) + tcgen05.find_tmem_tensor_col_offset(tCtSFA)
             sfb_tmem_ptr = cute.recast_ptr(
-                tmem_ptr
-                + tcgen05.find_tmem_tensor_col_offset(tCtAcc_base)
-                + tcgen05.find_tmem_tensor_col_offset(tCtSFA),
-                dtype=self.sf_dtype,
+                tmem_ptr + sfb_tmem_cols, dtype=self.sf_dtype
             )
             # (MMA, MMA_N, MMA_K)
             tCtSFB = cute.make_tensor(
@@ -740,6 +750,29 @@ class GroupedGemmKernelSm100BlockScaled:
 
                 tiled_mma.set(tcgen05.Field.ACCUMULATE, False)
 
+                tCtSFB_mma = tCtSFB
+                if cutlass.const_expr(self.sfb_tiles_per_atom > 1):
+                    # Rows r, r + 32, r + 64, r + 96 of an atom share TMEM lane
+                    # r as four words, so a tile's rows start N // 32 words in.
+                    token_tile = work_tile.tile_n_idx
+                    if cutlass.const_expr(self.swap_ab):
+                        token_tile = work_tile.tile_m_idx
+                    if cutlass.const_expr(self.contiguous_segments):
+                        token_tile = (
+                            token_tile
+                            + group_m[work_tile.expert_idx]
+                            // self.cta_tile_shape_mnk[1]
+                        )
+                    sfb_shift = (token_tile % self.sfb_tiles_per_atom) * (
+                        self.mma_tiler[1] // 32
+                    )
+                    tCtSFB_mma = cute.make_tensor(
+                        cute.recast_ptr(
+                            tmem_ptr + sfb_tmem_cols + sfb_shift, dtype=self.sf_dtype
+                        ),
+                        tCtSFB.layout,
+                    )
+
                 for k_tile in range(work_tile.k_tile_cnt):
                     if is_leader_cta:
                         handle = ab_consumer.wait_and_advance(peek_ab_full_status)
@@ -757,7 +790,7 @@ class GroupedGemmKernelSm100BlockScaled:
                             tiled_mma,
                             tCtAcc,
                             [tCrA[tile_crd], tCtSFA],
-                            [tCrB[tile_crd], tCtSFB],
+                            [tCrB[tile_crd], tCtSFB_mma],
                             tCtAcc,
                         )
                         tiled_mma.set(tcgen05.Field.ACCUMULATE, True)
@@ -972,10 +1005,11 @@ class GroupedGemmKernelSm100BlockScaled:
             raise testing.CantImplementError(
                 f"Invalid mma tiler M for 1-CTA block-scaled MMA: {self.mma_tiler_mn}"
             )
-        # Narrower token tiles fault in the block-scaled MMA (tried 32 and 64).
-        if self.mma_tiler_mn[1] not in (128, 256):
+        # 32-token tiles fault (misaligned address) with a one-word SFB shift.
+        if self.mma_tiler_mn[1] not in (64, 128, 256):
             raise testing.CantImplementError(
-                f"Invalid mma tiler N: {self.mma_tiler_mn[1]}; scale factors tile 128 rows"
+                f"Invalid mma tiler N: {self.mma_tiler_mn[1]}; token tiles are "
+                "half, one or two 128-row scale atoms"
             )
         if self.cluster_shape_mn != (1, 1):
             raise testing.CantImplementError(

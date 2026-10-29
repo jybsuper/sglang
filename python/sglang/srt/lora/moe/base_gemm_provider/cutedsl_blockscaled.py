@@ -46,8 +46,11 @@ def _contract(key: str, quant_info_cls) -> MoeBaseProviderContract:
 
 
 class _CuteDslBlockScaledMixin(CuteDslTileMixin):
-    # Scale atoms span 128 rows, so token tiles are 128 wide.
-    TOKEN_WIDTHS = (CuteDslTileMixin.XWIDE_TOKEN_WIDTH,)
+    # Token tiles cover half or all of a 128-row scale atom.
+    TOKEN_WIDTHS = (
+        CuteDslTileMixin.WIDE_TOKEN_WIDTH,
+        CuteDslTileMixin.XWIDE_TOKEN_WIDTH,
+    )
     WIDE_EXPECTED_M_THRESHOLD = 32
     SF_VEC_SIZE = 32
 
