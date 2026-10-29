@@ -35,6 +35,10 @@ pack two elements per byte along K. SFA and SFB carry one scale per
 ``(32, 4, M/128, 4, K/(4*sf_vec_size))`` of 512-byte blocks, so every row tile
 of 128 owns whole atoms. Masking and flat segments follow kernel_sm100_bf16.
 
+NVFP4 checkpoints carry per-expert global scales outside the block scales;
+``alpha`` [E, halves] multiplies each output tile in the epilogue, selecting
+the half by the weight row (gate or up rows of a fused W13).
+
 Mainloop and scale-factor plumbing derive from CUTLASS v4.8.0
 blackwell/kernel/blockscaled_gemm/dense_blockscaled_gemm_persistent.py.
 """
@@ -201,12 +205,15 @@ class GroupedGemmKernelSm100BlockScaled:
         sfa: cute.Tensor,
         sfb: cute.Tensor,
         c: cute.Tensor,
+        alpha: cute.Tensor,
         group_m: cute.Tensor,
         direct_schedule: cute.Tensor,
         schedule_tiles: cute.Tensor,
         max_active_clusters: cutlass.Constexpr,
         stream: cuda.CUstream,
         epilogue_op: cutlass.Constexpr = lambda x: x,
+        use_alpha: cutlass.Constexpr = False,
+        alpha_rows_per_half: cutlass.Constexpr = 1,
     ):
         self.a_dtype: Type[cutlass.Numeric] = a.element_type
         self.b_dtype: Type[cutlass.Numeric] = b.element_type
@@ -327,6 +334,7 @@ class GroupedGemmKernelSm100BlockScaled:
             tma_tensor_sfb,
             tma_atom_c,
             tma_tensor_c,
+            alpha,
             group_m,
             direct_schedule,
             schedule_tiles,
@@ -340,6 +348,8 @@ class GroupedGemmKernelSm100BlockScaled:
             self.epi_tile,
             self.tile_sched_params,
             epilogue_op,
+            use_alpha,
+            alpha_rows_per_half,
         ).launch(
             grid=grid,
             block=[self.threads_per_cta, 1, 1],
@@ -363,6 +373,7 @@ class GroupedGemmKernelSm100BlockScaled:
         mSFB_nkl: cute.Tensor,
         tma_atom_c: cute.CopyAtom,
         mC_mnl: cute.Tensor,
+        alpha: cute.Tensor,
         group_m: cute.Tensor,
         direct_schedule: cute.Tensor,
         schedule_tiles: cute.Tensor,
@@ -376,6 +387,8 @@ class GroupedGemmKernelSm100BlockScaled:
         epi_tile: cute.Tile,
         tile_sched_params: MoESchedulerParams,
         epilogue_op: cutlass.Constexpr,
+        use_alpha: cutlass.Constexpr,
+        alpha_rows_per_half: cutlass.Constexpr,
     ):
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
@@ -812,6 +825,19 @@ class GroupedGemmKernelSm100BlockScaled:
                         seg_base_tile + mma_tile_coord_mnl[1],
                         cutlass.Int32(0),
                     )
+                tile_op = epilogue_op
+                if cutlass.const_expr(use_alpha):
+                    # Gate rows and up rows of a fused W13 carry separate scales.
+                    half = (
+                        mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                    ) // alpha_rows_per_half
+                    alpha_value = alpha[(work_tile.expert_idx, half)]
+
+                    def tile_op(x, alpha_value=alpha_value):
+                        return epilogue_op(
+                            (x.to(cutlass.Float32) * alpha_value).to(self.c_dtype)
+                        )
+
                 work_tile = tile_sched.advance_to_next_work()
 
                 # Valid tiles only: pipeline count also counts executed tiles.
@@ -826,7 +852,7 @@ class GroupedGemmKernelSm100BlockScaled:
                     tCgC,
                     epi_tile,
                     num_tiles_executed,
-                    epilogue_op,
+                    tile_op,
                     mma_tile_coord_mnl,
                     acc_consumer_state,
                     acc_pipeline,

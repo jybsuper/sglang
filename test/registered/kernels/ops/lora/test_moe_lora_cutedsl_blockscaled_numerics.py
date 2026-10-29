@@ -95,12 +95,11 @@ def _rel_l2(a, b):
 def test_triton_row_quantizer_matches_reference(fmt):
     """The Triton quantizer reproduces the host rule and atom order exactly."""
     _skip_unless_sm100()
-    if fmt == "nvfp4":
-        pytest.skip("the Triton quantizer covers the MX formats")
     from sglang.kernels.ops.lora.moe.cutedsl.api import scale_atom_bytes
     from sglang.kernels.ops.lora.moe.quant_blockscaled import (
         pack_scale_atoms,
         quant_mx_rows,
+        quant_nvfp4_rows,
     )
 
     vec, elem = FORMATS[fmt]["vec"], FORMATS[fmt]["elem"]
@@ -108,7 +107,10 @@ def test_triton_row_quantizer_matches_reference(fmt):
     slabs, rows, k = 3, 200, 512
     x = (torch.randn(slabs, rows, k, device=device) * 0.3).to(torch.bfloat16)
     x[0, 5] = 0  # an all-zero row keeps a finite scale
-    data_ref, sf_ref, _ = _quantize(fmt, x)
+    global_scale = 0.3
+    data_ref, sf_ref, _ = _quantize(
+        fmt, x, torch.full((slabs,), global_scale, device=device)
+    )
     out = torch.empty(
         (slabs * rows, k // 2 if elem == "e2m1" else k),
         dtype=torch.uint8 if elem == "e2m1" else torch.float8_e4m3fn,
@@ -117,13 +119,22 @@ def test_triton_row_quantizer_matches_reference(fmt):
     sf_out = torch.zeros(
         scale_atom_bytes(rows, k, vec, slabs), dtype=torch.uint8, device=device
     )
-    quant_mx_rows(
-        x.view(slabs * rows, k),
-        out=out,
-        sf_out=sf_out,
-        sf_vec_size=vec,
-        rows_per_slab=rows,
-    )
+    if fmt == "nvfp4":
+        quant_nvfp4_rows(
+            x.view(slabs * rows, k),
+            out=out,
+            sf_out=sf_out,
+            global_scale=global_scale,
+            rows_per_slab=rows,
+        )
+    else:
+        quant_mx_rows(
+            x.view(slabs * rows, k),
+            out=out,
+            sf_out=sf_out,
+            sf_vec_size=vec,
+            rows_per_slab=rows,
+        )
     assert torch.equal(
         out.view(torch.uint8), data_ref.view(torch.uint8).view(slabs * rows, -1)
     )
@@ -156,10 +167,15 @@ def test_blockscaled_grouped_gemm_matches_dequantized_reference(fmt, rows_mode):
     t_gs = torch.full((experts,), 0.1, device=device)
     w_data, w_sf, w_deq = _quantize(fmt, weights, w_gs)
     t_data, t_sf, t_deq = _quantize(fmt, tokens, t_gs)
+    alpha, alpha_rows_per_half = None, 1
     if fmt == "nvfp4":
-        # The kernel multiplies block scales only; global scales are the caller's.
-        w_deq = w_deq / w_gs[:, None, None]
-        t_deq = t_deq / t_gs[:, None, None]
+        # Global scales reach the output through the per-expert alpha epilogue;
+        # the second half of the weight rows doubles its alpha to prove the
+        # gate/up selection.
+        alpha = torch.stack([w_gs * t_gs, 2 * w_gs * t_gs], dim=1).contiguous()
+        alpha_rows_per_half = n // 2
+        w_deq = w_deq.clone()
+        w_deq[:, n // 2 :] *= 2
     sf_weights = pack_scale_atoms(w_sf)
     assert sf_weights.numel() == scale_atom_bytes(n, k, vec, experts)
     config = GroupedGemmConfig(mma_tiler_mn=(128, 128), persistent_clusters=8)
@@ -187,6 +203,8 @@ def test_blockscaled_grouped_gemm_matches_dequantized_reference(fmt, rows_mode):
             masked_m,
             config=config,
             sf_vec_size=vec,
+            alpha=alpha,
+            alpha_rows_per_half=alpha_rows_per_half,
             direct_schedule=schedule,
             schedule_tiles=tiles,
         )
@@ -208,8 +226,6 @@ def test_blockscaled_grouped_gemm_matches_dequantized_reference(fmt, rows_mode):
             start, rows = int(seg_offsets[e]), int(seg_counts[e])
             flat[start : start + rows] = tokens[e, :rows]
         f_data, f_sf, f_deq = _quantize(fmt, flat.unsqueeze(0), t_gs[:1])
-        if fmt == "nvfp4":
-            f_deq = f_deq / t_gs[0]
         f_data = f_data[0]
         sf_tokens = pack_scale_atoms(f_sf)
         assert sf_tokens.numel() == scale_atom_bytes(m_ceil, k, vec, 1)
@@ -235,6 +251,8 @@ def test_blockscaled_grouped_gemm_matches_dequantized_reference(fmt, rows_mode):
             seg_offsets,
             config=config,
             sf_vec_size=vec,
+            alpha=alpha,
+            alpha_rows_per_half=alpha_rows_per_half,
             direct_schedule=schedule,
             schedule_tiles=tiles,
         )

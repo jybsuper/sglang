@@ -1,5 +1,6 @@
-"""CuTeDSL GEMMs on MX block-scaled checkpoints: MXFP8 (E4M3 x E8M0 per 32)
-and MXFP4 (E2M1 pairs x E8M0 per 32).
+"""CuTeDSL GEMMs on block-scaled checkpoints: MXFP8 (E4M3 x E8M0 per 32),
+MXFP4 (E2M1 pairs x E8M0 per 32) and NVFP4 (E2M1 pairs x E4M3 per 16 under
+per-expert global scales).
 
 Activations are quantized per row into the weights' format with the scales
 packed in the tcgen05 atom order; GEMM outputs remain BF16 for LoRA.
@@ -28,9 +29,8 @@ from sglang.srt.lora.moe.quant_info import (
     MoeLoraMxfp4QuantInfo,
     MoeLoraMxfp8QuantInfo,
     MoeLoraMxQuantInfo,
+    MoeLoraNvFp4QuantInfo,
 )
-
-SF_VEC_SIZE = 32
 
 
 def _contract(key: str, quant_info_cls) -> MoeBaseProviderContract:
@@ -49,6 +49,7 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
     # Scale atoms span 128 rows, so token tiles are 128 wide.
     TOKEN_WIDTHS = (CuteDslTileMixin.XWIDE_TOKEN_WIDTH,)
     WIDE_EXPECTED_M_THRESHOLD = 32
+    SF_VEC_SIZE = 32
 
     def _bind_weights(self, quant_info: MoeLoraMxQuantInfo) -> None:
         from sglang.kernels.ops.lora.moe.cutedsl.api import scale_atom_bytes
@@ -60,13 +61,16 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         self._scale_atom_bytes = scale_atom_bytes
         self._quant_rows = quant_mx_rows
         self._pack = quant_info.elements_per_byte
-        # FP4 pairs load as int8; the kernels take packed uint8 storage.
-        self._w13 = quant_info.w13_weight.view(
-            torch.uint8 if self._pack == 2 else quant_info.w13_weight.dtype
-        )
-        self._w2 = quant_info.w2_weight.view(self._w13.dtype)
+        # FP4 pairs may load as int8; the kernels take packed uint8 storage.
+        store_dtype = torch.uint8 if self._pack == 2 else quant_info.w13_weight.dtype
+        self._w13 = quant_info.w13_weight.view(store_dtype)
+        self._w2 = quant_info.w2_weight.view(store_dtype)
         self._sf_w13 = pack_scale_atoms(quant_info.w13_scale)
         self._sf_w2 = pack_scale_atoms(quant_info.w2_scale)
+        # NVFP4 fills these with per-expert global scales and activation scales.
+        self._alpha = {"gemm1": None, "gemm2": None}
+        self._alpha_rows_per_half = {"gemm1": 1, "gemm2": 1}
+        self._act_scale = {"gemm1": None, "gemm2": None}
 
     def _stage_weight(self, stage: str) -> torch.Tensor:
         if stage == "gemm1":
@@ -87,20 +91,19 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         scales = prepare_buffer(
             workspace,
             f"{prefix}:sf",
-            (self._scale_atom_bytes(rows, k, SF_VEC_SIZE, slabs),),
+            (self._scale_atom_bytes(rows, k, self.SF_VEC_SIZE, slabs),),
             dtype=torch.uint8,
             device=device,
         )
         return data, scales
 
-    def _quantize(self, rows: torch.Tensor, data: torch.Tensor, scales: torch.Tensor):
-        rows_per_slab = rows.shape[-2]
+    def _quantize(self, stage: str, rows: torch.Tensor, data: torch.Tensor, scales):
         self._quant_rows(
             rows.reshape(-1, rows.shape[-1]),
             out=data.reshape(-1, data.shape[-1]),
             sf_out=scales,
-            sf_vec_size=SF_VEC_SIZE,
-            rows_per_slab=rows_per_slab,
+            sf_vec_size=self.SF_VEC_SIZE,
+            rows_per_slab=rows.shape[-2],
         )
 
     def _launch(
@@ -122,10 +125,28 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             dyn(sf_tokens, leading_dim=0),
             dyn(call.sf_weights, leading_dim=0),
             dyn(self._rows_arg(c), leading_dim=2),
+            dyn(self._alpha_arg(stage), leading_dim=1),
             dyn(self._group_arg(row_state), leading_dim=0),
             dyn(schedule, leading_dim=0),
             dyn(tiles, leading_dim=0),
             self._stream(a_q.device),
+        )
+
+    def _alpha_arg(self, stage: str) -> torch.Tensor:
+        alpha = self._alpha[stage]
+        if alpha is None:
+            alpha = self._alpha[stage] = torch.ones(
+                (self.quant_info.num_local_experts, 1),
+                dtype=torch.float32,
+                device=self._w13.device,
+            )
+        return alpha
+
+    def _stage_kwargs(self, stage: str) -> dict:
+        return dict(
+            sf_vec_size=self.SF_VEC_SIZE,
+            alpha=self._alpha[stage],
+            alpha_rows_per_half=self._alpha_rows_per_half[stage],
         )
 
     def gateup(self, row_state, out: torch.Tensor) -> None:
@@ -140,7 +161,7 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         )
 
     def down(self, row_state, act_out: torch.Tensor, out: torch.Tensor) -> None:
-        self._quantize(act_out, row_state.act_q, row_state.act_sf)
+        self._quantize("gemm2", act_out, row_state.act_q, row_state.act_sf)
         self._launch(
             "gemm2",
             row_state.act_q,
@@ -149,6 +170,42 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             row_state,
             row_state.gemm2_schedule,
             row_state.gemm2_tiles,
+        )
+
+
+class _CuteDslNvFp4Mixin(_CuteDslBlockScaledMixin):
+    SF_VEC_SIZE = 16
+
+    def _bind_weights(self, quant_info: MoeLoraNvFp4QuantInfo) -> None:
+        super()._bind_weights(quant_info)
+        from sglang.kernels.ops.lora.moe.quant_blockscaled import quant_nvfp4_rows
+
+        self._quant_rows = quant_nvfp4_rows
+        # The epilogue applies activation x weight global scales per expert;
+        # gate and up rows of W13 may carry separate weight scales.
+        w13_global = quant_info.w13_global_scale.reshape(
+            quant_info.num_local_experts, -1
+        )
+        self._alpha["gemm1"] = (w13_global * quant_info.w13_input_scale).contiguous()
+        self._alpha_rows_per_half["gemm1"] = (
+            quant_info.intermediate_size if w13_global.shape[1] == 2 else 1 << 30
+        )
+        self._alpha["gemm2"] = (
+            quant_info.w2_global_scale.reshape(-1, 1) * quant_info.w2_input_scale
+        ).contiguous()
+        self._alpha_rows_per_half["gemm2"] = 1 << 30
+        self._act_scale = {
+            "gemm1": quant_info.w13_input_scale,
+            "gemm2": quant_info.w2_input_scale,
+        }
+
+    def _quantize(self, stage: str, rows: torch.Tensor, data: torch.Tensor, scales):
+        self._quant_rows(
+            rows.reshape(-1, rows.shape[-1]),
+            out=data.reshape(-1, data.shape[-1]),
+            sf_out=scales,
+            global_scale=self._act_scale[stage],
+            rows_per_slab=rows.shape[-2],
         )
 
 
@@ -190,7 +247,9 @@ class _CuteDslBlockScaledMaskedProvider(
             (experts, 256, k_store), dtype=weight.dtype, device=device
         )
         dummy_sf = torch.zeros(
-            self._scale_atom_bytes(256, k_store * self._pack, SF_VEC_SIZE, experts),
+            self._scale_atom_bytes(
+                256, k_store * self._pack, self.SF_VEC_SIZE, experts
+            ),
             dtype=torch.uint8,
             device=device,
         )
@@ -204,7 +263,7 @@ class _CuteDslBlockScaledMaskedProvider(
             dummy_c,
             dummy_masked,
             config=config,
-            sf_vec_size=SF_VEC_SIZE,
+            **self._stage_kwargs(stage),
         )
 
     @staticmethod
@@ -263,7 +322,7 @@ class _CuteDslBlockScaledMaskedProvider(
             pair_to_row_out=pair_to_row,
             rows_out=hidden_permuted,
         )
-        self._quantize(hidden_permuted, rows_q, sf_rows)
+        self._quantize("gemm1", hidden_permuted, rows_q, sf_rows)
         schedule_outputs = {}
         if workspace is not None:
             schedule_outputs = self._schedule_buffers(
@@ -337,7 +396,7 @@ class _CuteDslBlockScaledContiguousProvider(
         num_experts, n, k_store = weight.shape
         dummy_a = torch.zeros((256, k_store), dtype=weight.dtype, device=device)
         dummy_sf = torch.zeros(
-            self._scale_atom_bytes(256, k_store * self._pack, SF_VEC_SIZE),
+            self._scale_atom_bytes(256, k_store * self._pack, self.SF_VEC_SIZE),
             dtype=torch.uint8,
             device=device,
         )
@@ -351,7 +410,7 @@ class _CuteDslBlockScaledContiguousProvider(
             dummy_c,
             dummy_seg,
             config=config,
-            sf_vec_size=SF_VEC_SIZE,
+            **self._stage_kwargs(stage),
         )
 
     @staticmethod
@@ -382,7 +441,7 @@ class _CuteDslBlockScaledContiguousProvider(
         act_q, act_sf = self._quant_buffers(
             workspace, f"{prefix}:act", 1, base.m_pad_ceiling, inter, device
         )
-        self._quantize(base.hidden_compact, rows_q, sf_rows)
+        self._quantize("gemm1", base.hidden_compact, rows_q, sf_rows)
         # Distinct top-k experts bound each expert to one row per token.
         max_expert_rows = max(int(hidden_states.size(0)), 1)
         expected_m = expected_rows_per_expert(topk_ids.numel(), num_experts)
@@ -446,3 +505,15 @@ class CuteDslMxfp4MaskedProvider(_CuteDslBlockScaledMaskedProvider):
 class CuteDslMxfp4ContiguousProvider(_CuteDslBlockScaledContiguousProvider):
     contract = _contract("cutedsl_mxfp4_contiguous", MoeLoraMxfp4QuantInfo)
     _DTYPE_TAG = "mxfp4"
+
+
+class CuteDslNvFp4MaskedProvider(_CuteDslNvFp4Mixin, _CuteDslBlockScaledMaskedProvider):
+    contract = _contract("cutedsl_nvfp4_masked", MoeLoraNvFp4QuantInfo)
+    _DTYPE_TAG = "nvfp4"
+
+
+class CuteDslNvFp4ContiguousProvider(
+    _CuteDslNvFp4Mixin, _CuteDslBlockScaledContiguousProvider
+):
+    contract = _contract("cutedsl_nvfp4_contiguous", MoeLoraNvFp4QuantInfo)
+    _DTYPE_TAG = "nvfp4"

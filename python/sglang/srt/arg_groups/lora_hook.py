@@ -213,10 +213,13 @@ def check_lora_moe_runner_args(server_args: Any):
             "FP8 (with BF16 or MXFP4 experts), MXFP8 and ModelOpt NVFP4 MoE, got "
             f"--quantization {cfg.quantization}"
         )
-    if cfg.quantization == "modelopt_fp4" and backend != "lora_marlin":
+    if cfg.quantization == "modelopt_fp4" and backend not in (
+        "lora_marlin",
+        "lora_cutedsl",
+    ):
         raise ValueError(
             f"--moe-runner-backend {backend} cannot run ModelOpt NVFP4 MoE; "
-            "use --moe-runner-backend lora_marlin"
+            "use --moe-runner-backend lora_marlin or lora_cutedsl"
         )
     if cfg.moe_a2a_backend != "none":
         raise ValueError(

@@ -60,11 +60,61 @@ def _quant_mx(x: torch.Tensor, elem: str):
     )
 
 
+def _quant_nvfp4(x: torch.Tensor, global_scale: float):
+    """E2M1 pairs with E4M3 scales per 16 under one global scale (the row rule)."""
+    *lead, k = x.shape
+    groups = x.float().reshape(*lead, k // 16, 16)
+    amax = groups.abs().amax(dim=-1)
+    block = (amax / (6.0 * global_scale)).clamp(2.0**-6, 448.0).to(torch.float8_e4m3fn)
+    denom = block.float() * global_scale
+    scaled = (groups / denom[..., None]).clamp(-6.0, 6.0)
+    table = _E2M1.to(x.device)
+    idx = torch.bucketize(scaled.abs(), _E2M1_MID.to(x.device))
+    sign = scaled < 0
+    values = torch.where(sign, -table[idx], table[idx])
+    codes = (idx | (sign.long() << 3)).to(torch.uint8).reshape(*lead, k)
+    data = codes[..., 0::2] | (codes[..., 1::2] << 4)
+    return data, block.view(torch.uint8), (values * denom[..., None]).reshape(*lead, k)
+
+
+_W13_GLOBAL = 0.02
+_W2_GLOBAL = 0.01
+_A13_GLOBAL = 0.25
+_A2_GLOBAL = 0.05
+
+
 def _quant_info(family: str, w13: torch.Tensor, w2: torch.Tensor):
     from sglang.srt.lora.moe.quant_info import (
         MoeLoraMxfp4QuantInfo,
         MoeLoraMxfp8QuantInfo,
+        MoeLoraNvFp4QuantInfo,
     )
+
+    if family == "nvfp4":
+        # Distinct gate/up global scales exercise the alpha half selection.
+        w13_gs = torch.tensor([[_W13_GLOBAL, 2 * _W13_GLOBAL]] * _E, device=w13.device)
+        w13_q, w13_s, w13_eff = [], [], []
+        for half in range(2):
+            q, s, eff = _quant_nvfp4(
+                w13[:, half * _I : (half + 1) * _I], w13_gs[0, half].item()
+            )
+            w13_q.append(q), w13_s.append(s), w13_eff.append(eff)
+        w2_q, w2_s, w2_eff = _quant_nvfp4(w2, _W2_GLOBAL)
+        info = MoeLoraNvFp4QuantInfo(
+            w13_weight=torch.cat(w13_q, dim=1),
+            w13_scale=torch.cat(w13_s, dim=1),
+            w2_weight=w2_q,
+            w2_scale=w2_s,
+            elements_per_byte=2,
+            num_local_experts=_E,
+            intermediate_size=_I,
+            hidden_size=_H,
+            w13_global_scale=w13_gs,
+            w2_global_scale=torch.full((_E,), _W2_GLOBAL, device=w2.device),
+            w13_input_scale=_A13_GLOBAL,
+            w2_input_scale=_A2_GLOBAL,
+        )
+        return info, torch.cat(w13_eff, dim=1), w2_eff, "nvfp4"
 
     elem = "e2m1" if family == "mxfp4" else "e4m3"
     w13_q, w13_s, w13_eff = _quant_mx(w13, elem)
@@ -99,7 +149,15 @@ def _rel_l2(a, b):
     return (a - b).norm() / b.norm().clamp(min=1e-12)
 
 
-@pytest.mark.parametrize("family", ["mxfp8", "mxfp4"])
+def _quant_activation(x: torch.Tensor, elem: str, stage: str):
+    """Dequantized activation rows as the provider quantizes them."""
+    if elem == "nvfp4":
+        gs = _A13_GLOBAL if stage == "gemm1" else _A2_GLOBAL
+        return _quant_nvfp4(x, gs)[2]
+    return _quant_mx(x, elem)[2]
+
+
+@pytest.mark.parametrize("family", ["mxfp8", "mxfp4", "nvfp4"])
 @pytest.mark.parametrize("rows", ["expert_major", "route_major"])
 def test_blockscaled_gateup_and_down_match_reference(family, rows):
     _skip_unless_sm100()
@@ -134,7 +192,7 @@ def test_blockscaled_gateup_and_down_match_reference(family, rows):
     pair_to_row = state.pair_to_row
 
     # The provider quantizes its rows with the same rule, so references are exact.
-    _, _, hidden_eff = _quant_mx(hidden[tokens], elem)
+    hidden_eff = _quant_activation(hidden[tokens], elem, "gemm1")
     ref_gateup = torch.einsum("ph,pnh->pn", hidden_eff, w13_eff[experts])
     got_gateup = _gather_pairs(gateup, pair_to_row, pair_idx).float()
     assert _rel_l2(got_gateup, ref_gateup) < 1.5e-2
@@ -149,7 +207,7 @@ def test_blockscaled_gateup_and_down_match_reference(family, rows):
     )
     with get_context().override_server_args():
         provider.down(state, act, down)
-    _, _, act_eff = _quant_mx(act_pairs, elem)
+    act_eff = _quant_activation(act_pairs, elem, "gemm2")
     ref_down = torch.einsum("pi,phi->ph", act_eff, w2_eff[experts])
     got_down = _gather_pairs(down, pair_to_row, pair_idx).float()
     assert _rel_l2(got_down, ref_down) < 1.5e-2
