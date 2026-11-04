@@ -149,10 +149,12 @@ class TestMxfp4ScaleStorage(CustomTestCase):
 
 class TestCompressedTensorsFp8Admission(CustomTestCase):
     """compressed-tensors FP8 experts bind through the scheme the layer carries;
-    the fp8 family reads the block scales the scheme registers."""
+    the fp8 families read the scales the scheme registers."""
 
     _BLOCK = dict(strategy="block", block_structure=[128, 128])
     _GROUP_ACT = dict(strategy="group", group_size=128, dynamic=True)
+    _CHANNEL = dict(strategy="channel")
+    _TOKEN_ACT = dict(strategy="token", dynamic=True)
 
     @staticmethod
     def _layer(weights, activations, params_dtype=torch.bfloat16):
@@ -198,6 +200,43 @@ class TestCompressedTensorsFp8Admission(CustomTestCase):
         self.assertEqual(tuple(info.w2_scale.shape), (2, 2, 1))
         self.assertEqual((info.hidden_size, info.intermediate_size), (256, 128))
 
+    def test_channel_scheme_binds_as_the_fp8_channel_family(self):
+        from sglang.srt.lora.moe.quant_info import MoeLoraFp8ChannelQuantInfo
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        layer = self._layer(self._CHANNEL, self._TOKEN_ACT)
+        self.assertEqual(MoeLoraRunner._weight_family(layer), "fp8_channel")
+        info = MoeLoraFp8ChannelQuantInfo.from_layer(layer)
+        self.assertIs(info.w13_scale, layer.w13_weight_scale)
+        self.assertIs(info.w2_scale, layer.w2_weight_scale)
+        self.assertEqual(tuple(info.w13_scale.shape), (2, 256, 1))
+        self.assertEqual(tuple(info.w2_scale.shape), (2, 256, 1))
+        self.assertEqual((info.hidden_size, info.intermediate_size), (256, 128))
+
+    def test_w8a8_fp8_method_binds_as_the_fp8_channel_family(self):
+        from sglang.srt.layers.quantization.w8a8_fp8 import W8A8FP8MoEMethod
+        from sglang.srt.lora.moe.quant_info import MoeLoraFp8ChannelQuantInfo
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        layer = torch.nn.Module()
+        layer.quant_method = object.__new__(W8A8FP8MoEMethod)
+        layer.params_dtype = torch.bfloat16
+        layer.num_local_experts = 2
+        layer.quant_method.create_weights(
+            layer=layer,
+            num_experts=2,
+            hidden_size=256,
+            intermediate_size_per_partition=128,
+            params_dtype=torch.bfloat16,
+        )
+        self.assertEqual(MoeLoraRunner._weight_family(layer), "fp8_channel")
+        info = MoeLoraFp8ChannelQuantInfo.from_layer(layer)
+        self.assertIs(info.w13_scale, layer.w13_weight_scale)
+        self.assertEqual(tuple(info.w2_scale.shape), (2, 256, 1))
+        layer.params_dtype = torch.float16
+        with self.assertRaisesRegex(NotImplementedError, "BF16 activations"):
+            MoeLoraRunner._weight_family(layer)
+
     def test_other_layouts_and_schemes_are_refused(self):
         from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
         from sglang.srt.lora.moe.runner import MoeLoraRunner
@@ -209,11 +248,6 @@ class TestCompressedTensorsFp8Admission(CustomTestCase):
                 )
             )
         cases = {
-            "per_channel": (
-                dict(strategy="channel"),
-                dict(strategy="token", dynamic=True),
-                "per-channel",
-            ),
             "per_tensor": (
                 dict(strategy="tensor"),
                 dict(strategy="tensor", dynamic=False),
@@ -248,6 +282,7 @@ class TestVendorResolution(CustomTestCase):
         self.assertEqual(resolve_vendor("mxfp4", "cutedsl"), "cutedsl")
         self.assertEqual(resolve_vendor("bf16", "marlin"), "cutedsl")
         self.assertEqual(resolve_vendor("mxfp8", "marlin"), "cutedsl")
+        self.assertEqual(resolve_vendor("fp8_channel", "cutedsl"), "triton")
         with self.assertRaisesRegex(
             NotImplementedError, "lora_triton; use lora_marlin or lora_cutedsl$"
         ):
@@ -302,6 +337,7 @@ class TestProviderGeometry(CustomTestCase):
             ),
             _config_dtype_tag="fp8_w8a8",
             _config_block_shape=[128, 128],
+            _config_per_channel_quant=False,
             _configs={},
         )
         with mock.patch.dict(sys.modules, {module.__name__: module}):

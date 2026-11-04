@@ -1,4 +1,8 @@
-"""Triton FP8 GEMMs with 128-block scales and BF16 LoRA inputs/outputs."""
+"""Triton FP8 GEMMs with BF16 LoRA inputs/outputs.
+
+Block-scaled weights take group-128 activations; per-channel weights take
+per-token activations, quantized by the kernel launcher.
+"""
 
 from __future__ import annotations
 
@@ -9,26 +13,14 @@ from sglang.srt.lora.moe.base_gemm_provider.triton_bf16 import (
     TritonBf16ContiguousProvider,
     TritonRowState,
 )
-from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
+from sglang.srt.lora.moe.quant_info import (
+    MoeLoraFp8ChannelQuantInfo,
+    MoeLoraFp8QuantInfo,
+)
 
 
-class TritonFp8ContiguousProvider(TritonBf16ContiguousProvider):
-    contract = MoeBaseProviderContract(
-        key="triton_fp8_contiguous",
-        quant_info_cls=MoeLoraFp8QuantInfo,
-        gate_first=True,
-        interleaved=False,
-        gate_up_output_dtype=torch.bfloat16,
-        lora_delta_dtype=torch.bfloat16,
-        lora_activation_dtype=torch.bfloat16,
-        act_quant_group=128,
-    )
-
+class _TritonFp8Provider(TritonBf16ContiguousProvider):
     _config_dtype_tag = "fp8_w8a8"
-
-    def __init__(self, quant_info: MoeLoraFp8QuantInfo):
-        super().__init__(quant_info)
-        self._config_block_shape = list(quant_info.block_shape)
 
     def _invoke_fp8(
         self,
@@ -70,7 +62,7 @@ class TritonFp8ContiguousProvider(TritonBf16ContiguousProvider):
             use_int8_w8a8=False,
             use_int8_w8a16=False,
             use_int4_w4a16=False,
-            per_channel_quant=False,
+            per_channel_quant=self._config_per_channel_quant,
             block_shape=self._config_block_shape,
         )
 
@@ -104,3 +96,34 @@ class TritonFp8ContiguousProvider(TritonBf16ContiguousProvider):
             config=row_state.down_config or row_state.config,
             a_scale=a_scale,
         )
+
+
+class TritonFp8ContiguousProvider(_TritonFp8Provider):
+    contract = MoeBaseProviderContract(
+        key="triton_fp8_contiguous",
+        quant_info_cls=MoeLoraFp8QuantInfo,
+        gate_first=True,
+        interleaved=False,
+        gate_up_output_dtype=torch.bfloat16,
+        lora_delta_dtype=torch.bfloat16,
+        lora_activation_dtype=torch.bfloat16,
+        act_quant_group=128,
+    )
+
+    def __init__(self, quant_info: MoeLoraFp8QuantInfo):
+        super().__init__(quant_info)
+        self._config_block_shape = list(quant_info.block_shape)
+
+
+class TritonFp8ChannelContiguousProvider(_TritonFp8Provider):
+    contract = MoeBaseProviderContract(
+        key="triton_fp8_channel_contiguous",
+        quant_info_cls=MoeLoraFp8ChannelQuantInfo,
+        gate_first=True,
+        interleaved=False,
+        gate_up_output_dtype=torch.bfloat16,
+        lora_delta_dtype=torch.bfloat16,
+        lora_activation_dtype=torch.bfloat16,
+    )
+
+    _config_per_channel_quant = True

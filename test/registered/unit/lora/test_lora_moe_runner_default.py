@@ -101,6 +101,7 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
             (dict(quantization="mxfp8"), "lora_cutedsl"),
             (dict(quantization="modelopt_fp4"), "lora_marlin"),
             (dict(quantization="fp8", is_fp4_experts=True), "lora_marlin"),
+            (dict(quantization="w8a8_fp8"), "lora_triton"),
         ]
         for kwargs, expected in cases:
             with self.subTest(**kwargs):
@@ -112,8 +113,8 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
     def test_compressed_tensors_family_from_the_config_groups(self):
         cases = [
             ("block", _compressed_tensors(BLOCK_FP8), "lora_cutedsl"),
-            # No provider serves these layouts yet.
-            ("channel", _compressed_tensors(CHANNEL_FP8), None),
+            ("channel", _compressed_tensors(CHANNEL_FP8), "lora_triton"),
+            # No provider serves per-tensor layers yet.
             ("tensor", _compressed_tensors(TENSOR_FP8), None),
             # Mixed groups and non-FP8 weights stay auto.
             ("mixed", _compressed_tensors(BLOCK_FP8, CHANNEL_FP8), None),

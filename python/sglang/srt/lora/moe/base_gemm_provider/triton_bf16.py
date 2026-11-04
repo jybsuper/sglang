@@ -52,6 +52,7 @@ class TritonBf16ContiguousProvider(ContiguousRowDomainProvider):
 
     _config_dtype_tag: str | None = None
     _config_block_shape: list[int] | None = None
+    _config_per_channel_quant: bool = False
 
     def _config_for(self, num_tokens: int, top_k: int) -> tuple[dict, dict | None]:
         cached = self._configs.get(num_tokens)
@@ -69,6 +70,7 @@ class TritonBf16ContiguousProvider(ContiguousRowDomainProvider):
             num_tokens,
             return_down_config=True,
             block_shape=self._config_block_shape,
+            per_channel_quant=self._config_per_channel_quant,
         )
         # Both GEMMs share a sort; upstream makes their BLOCK_SIZE_M equal.
         resolved = (dict(config), dict(down_config) if down_config else None)

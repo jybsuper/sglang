@@ -106,6 +106,43 @@ def _admit_fp8_block_weights(quant_info: MoeLoraFp8QuantInfo) -> None:
             )
 
 
+class MoeLoraFp8ChannelQuantInfo(msgspec.Struct, kw_only=True):
+    """FP8 weights in standard layout with one FP32 scale per output row;
+    activations quantize per token at GEMM time (compressed-tensors
+    CHANNEL/TOKEN and sglang w8a8_fp8)."""
+
+    w13_weight: torch.Tensor  # [E_local, S * I, H] float8_e4m3fn
+    w13_scale: torch.Tensor  # [E_local, S * I, 1]
+    w2_weight: torch.Tensor  # [E_local, H, I] float8_e4m3fn
+    w2_scale: torch.Tensor  # [E_local, H, 1]
+    num_local_experts: int
+    intermediate_size: int
+    hidden_size: int
+
+    @classmethod
+    def from_layer(cls, base_layer: FusedMoE) -> MoeLoraFp8ChannelQuantInfo:
+        quant_info = cls(
+            w13_weight=base_layer.w13_weight,
+            w13_scale=base_layer.w13_weight_scale,
+            w2_weight=base_layer.w2_weight,
+            w2_scale=base_layer.w2_weight_scale,
+            num_local_experts=int(base_layer.num_local_experts),
+            intermediate_size=int(base_layer.w2_weight.shape[2]),
+            hidden_size=int(base_layer.w2_weight.shape[1]),
+        )
+        for name, scale, rows in (
+            ("w13_scale", quant_info.w13_scale, quant_info.w13_weight.shape[1]),
+            ("w2_scale", quant_info.w2_scale, quant_info.hidden_size),
+        ):
+            expected = (quant_info.num_local_experts, rows, 1)
+            if scale.dtype != torch.float32 or tuple(scale.shape) != expected:
+                raise ValueError(
+                    f"{name} must be fp32 {list(expected)}, got {scale.dtype} "
+                    f"{tuple(scale.shape)}"
+                )
+        return quant_info
+
+
 class MoeLoraMxQuantInfo(msgspec.Struct, kw_only=True):
     """MX block-scaled weights: E4M3 or packed E2M1 pairs with E8M0 scales per 32.
 
@@ -226,7 +263,10 @@ class MoeLoraNvFp4QuantInfo(MoeLoraMxQuantInfo):
 
 # Marlin's packed weights do not use the standard row-domain layout.
 StandardLayoutQuantInfo = (
-    MoeLoraBf16QuantInfo | MoeLoraFp8QuantInfo | MoeLoraMxQuantInfo
+    MoeLoraBf16QuantInfo
+    | MoeLoraFp8QuantInfo
+    | MoeLoraFp8ChannelQuantInfo
+    | MoeLoraMxQuantInfo
 )
 
 

@@ -186,10 +186,12 @@ _LORA_MOE_FAMILIES = {
     "fp8": "fp8",
     "mxfp8": "mxfp8",
     "modelopt_fp4": "nvfp4",
+    "w8a8_fp8": "fp8_channel",
 }
 # compressed-tensors 8-bit float weights by (strategy, dynamic activations).
 _COMPRESSED_TENSORS_FP8_FAMILIES = {
     ("block", True): "fp8",
+    ("channel", True): "fp8_channel",
 }
 _EXPERT_COUNT_FIELDS = (
     "num_experts",
@@ -333,11 +335,13 @@ def check_lora_moe_runner_args(server_args: Any):
         "modelopt_fp4",
         "compressed-tensors",
         "compressed_tensors",
+        "w8a8_fp8",
     ):
         raise ValueError(
-            f"--moe-runner-backend {backend} supports unquantized BF16, 128-block "
-            "FP8 (sglang or compressed-tensors, with BF16 or MXFP4 experts), MXFP8 "
-            f"and ModelOpt NVFP4 MoE, got --quantization {cfg.quantization}"
+            f"--moe-runner-backend {backend} supports unquantized BF16, 128-block or "
+            "per-channel FP8 (sglang or compressed-tensors, with BF16 or MXFP4 "
+            f"experts), MXFP8 and ModelOpt NVFP4 MoE, got --quantization "
+            f"{cfg.quantization}"
         )
     if cfg.quantization == "modelopt_fp4" and backend not in (
         "lora_marlin",
