@@ -83,14 +83,15 @@ def dispatch_fill_masked_bf16(
 def _dispatch_fill_masked_fp8_kernel(
     input_ptr,  # bf16 [num_tokens, K] source rows
     out_ptr,  # fp8e4m3 [E, m_max, K] contiguous
-    scale_ptr,  # fp32 [E, m_max, K // 128] contiguous
+    scale_ptr,  # fp32 [E, m_max, GROUPS] contiguous
     topk_ids_ptr,  # [num_tokens * top_k]; < 0 = padding or EP-unrouted
     pair_to_row_ptr,  # [num_tokens * top_k] int32 out; -1 for pairs without an expert
     masked_m_ptr,  # [E] int32 count and atomic cursor; caller zeroes it
     m_max,
     TOPK: tl.constexpr,
     K: tl.constexpr,
-    GROUPS: tl.constexpr,  # K // 128
+    GROUP: tl.constexpr,  # 128, or BLOCK_K for one scale per token
+    GROUPS: tl.constexpr,  # K // GROUP, or 1 per token
     BLOCK_K: tl.constexpr,
 ):
     t = tl.program_id(0)
@@ -108,14 +109,14 @@ def _dispatch_fill_masked_fp8_kernel(
     x = tl.load(input_ptr + t.to(tl.int64) * K + offs, mask=offs < K, other=0).to(
         tl.float32
     )
-    grouped = tl.reshape(x, (BLOCK_K // 128, 128))
+    grouped = tl.reshape(x, (BLOCK_K // GROUP, GROUP))
     q, scale = quantize_fp8_groups(grouped, GROUPS == 1)
     tl.store(
         out_ptr + dst * K + offs,
         tl.reshape(q, (BLOCK_K,)).to(out_ptr.dtype.element_ty),
         mask=offs < K,
     )
-    groups = tl.arange(0, BLOCK_K // 128)
+    groups = tl.arange(0, BLOCK_K // GROUP)
     tl.store(scale_ptr + dst * GROUPS + groups, scale, mask=groups < GROUPS)
 
 
@@ -128,13 +129,15 @@ def dispatch_fill_masked_fp8(
     pair_to_row_out: torch.Tensor,
     rows_fp8_out: torch.Tensor,
     scale_out: torch.Tensor,
+    per_token: bool = False,
 ) -> None:
-    """Dispatch FP8 rows with FP32 scales per group of 128 values."""
+    """Dispatch FP8 rows with FP32 scales per group of 128 values or per token."""
     check_source_rows(hidden_states, topk_ids, top_k)
     num_tokens, k = hidden_states.shape
     check_fp8_width(k)
     masked_m_out.zero_()
     if num_tokens > 0:
+        block_k = triton.next_power_of_2(k)
         _dispatch_fill_masked_fp8_kernel[(num_tokens, top_k)](
             hidden_states,
             rows_fp8_out,
@@ -145,8 +148,9 @@ def dispatch_fill_masked_fp8(
             rows_fp8_out.size(1),
             TOPK=top_k,
             K=k,
-            GROUPS=k // 128,
-            BLOCK_K=triton.next_power_of_2(k),
+            GROUP=block_k if per_token else 128,
+            GROUPS=1 if per_token else k // 128,
+            BLOCK_K=block_k,
             num_warps=4 if k <= 4096 else 8,
         )
 

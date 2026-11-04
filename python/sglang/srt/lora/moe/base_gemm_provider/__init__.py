@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 VENDORS = {
     "bf16": ("cutedsl", "triton"),
     "fp8": ("cutedsl", "triton"),
-    "fp8_channel": ("triton",),
+    "fp8_channel": ("triton", "cutedsl"),
     "nvfp4": ("marlin", "cutedsl"),
     "mxfp4": ("marlin", "cutedsl"),
     "mxfp8": ("cutedsl",),
@@ -94,6 +94,17 @@ def select_provider_cls(
             )
 
             return TritonFp8ChannelContiguousProvider
+        case "cutedsl", "fp8_channel":
+            from sglang.srt.lora.moe.base_gemm_provider.cutedsl_fp8_channel import (
+                CuteDslFp8ChannelContiguousProvider,
+                CuteDslFp8ChannelMaskedProvider,
+            )
+
+            return (
+                CuteDslFp8ChannelMaskedProvider
+                if expert_major
+                else CuteDslFp8ChannelContiguousProvider
+            )
         case "marlin", "nvfp4":
             from sglang.srt.lora.moe.base_gemm_provider.marlin_nvfp4 import (
                 MarlinNvFp4ContiguousProvider,

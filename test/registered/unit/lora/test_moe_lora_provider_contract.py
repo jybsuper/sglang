@@ -282,7 +282,8 @@ class TestVendorResolution(CustomTestCase):
         self.assertEqual(resolve_vendor("mxfp4", "cutedsl"), "cutedsl")
         self.assertEqual(resolve_vendor("bf16", "marlin"), "cutedsl")
         self.assertEqual(resolve_vendor("mxfp8", "marlin"), "cutedsl")
-        self.assertEqual(resolve_vendor("fp8_channel", "cutedsl"), "triton")
+        self.assertEqual(resolve_vendor("fp8_channel", "marlin"), "triton")
+        self.assertEqual(resolve_vendor("fp8_channel", "cutedsl"), "cutedsl")
         with self.assertRaisesRegex(
             NotImplementedError, "lora_triton; use lora_marlin or lora_cutedsl$"
         ):

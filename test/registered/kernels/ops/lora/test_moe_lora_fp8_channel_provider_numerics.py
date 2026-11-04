@@ -11,12 +11,21 @@ from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=20, stage="base-b-kernel-unit", runner_config="1-gpu-large")
+# The row-scaled CuTeDSL kernel is SM100-only: cover it in per-PR CI on Blackwell.
+register_cuda_ci(est_time=45, stage="base-b-kernel-unit", runner_config="4-gpu-b200")
 
 _E = 4
 _H = 512
 _I = 512
 _TOPK = 2
 _T = 32
+
+
+def _skip_unless_supported(vendor):
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+    if vendor == "cutedsl" and torch.cuda.get_device_capability()[0] < 10:
+        pytest.skip("the row-scaled FP8 CuTeDSL provider needs SM100+")
 
 
 def _channel_quant(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -69,17 +78,23 @@ def _rel_l2(a, b):
 
 # 7168 is a DeepSeek-V3-class hidden size: not a power of two.
 @pytest.mark.parametrize("hidden_size", [_H, 7168])
-@pytest.mark.parametrize("vendor", ["triton"])
-def test_fp8_channel_gateup_and_down_match_reference(vendor, hidden_size):
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA required")
+@pytest.mark.parametrize(
+    "vendor,rows",
+    [
+        ("triton", "route_major"),
+        ("cutedsl", "expert_major"),
+        ("cutedsl", "route_major"),
+    ],
+)
+def test_fp8_channel_gateup_and_down_match_reference(vendor, rows, hidden_size):
+    _skip_unless_supported(vendor)
     device = torch.device("cuda")
     w13, w2, hidden, topk_ids = _case(device, hidden_size)
     quant_info, w13_eff, w2_eff = _quant_info(w13, w2, hidden_size=hidden_size)
 
     from sglang.srt.runtime_context import get_context
 
-    provider = select_provider_cls("route_major", "fp8_channel", vendor)(quant_info)
+    provider = select_provider_cls(rows, "fp8_channel", vendor)(quant_info)
     with get_context().override_server_args():
         state = provider.prepare(hidden, topk_ids, _TOPK)
         gateup = torch.empty(
@@ -113,6 +128,26 @@ def test_fp8_channel_gateup_and_down_match_reference(vendor, hidden_size):
     ref_down = torch.einsum("pi,phi->ph", act_pairs.float(), w2_eff[experts])
     got_down = _gather_pairs(down, pair_to_row, pair_idx).float()
     assert _rel_l2(got_down, ref_down) < 6e-2
+
+
+def test_fp8_channel_cutedsl_rejects_unaligned_widths():
+    """The row-scaled kernel stages one weight-row scale per 128-row tile."""
+    from sglang.srt.lora.moe.quant_info import MoeLoraFp8ChannelQuantInfo
+
+    hidden_size = 192
+    w13 = torch.zeros(_E, 2 * _I, hidden_size, dtype=torch.float8_e4m3fn)
+    w2 = torch.zeros(_E, hidden_size, _I, dtype=torch.float8_e4m3fn)
+    quant_info = MoeLoraFp8ChannelQuantInfo(
+        w13_weight=w13,
+        w13_scale=torch.ones(_E, 2 * _I, 1),
+        w2_weight=w2,
+        w2_scale=torch.ones(_E, hidden_size, 1),
+        num_local_experts=_E,
+        intermediate_size=_I,
+        hidden_size=hidden_size,
+    )
+    with pytest.raises(NotImplementedError, match="hidden_size % 128"):
+        select_provider_cls("route_major", "fp8_channel", "cutedsl")(quant_info)
 
 
 def test_fp8_channel_rejects_other_scale_layouts():

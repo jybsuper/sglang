@@ -34,7 +34,7 @@ from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
 QUANT_GROUP = 128
 
 
-class _CuteDslFp8Mixin(CuteDslTileMixin):
+class CuteDslFp8Mixin(CuteDslTileMixin):
     _DTYPE_TAG = "fp8"
     WIDE_EXPECTED_M_THRESHOLD = 32
 
@@ -118,7 +118,7 @@ class CuteDslFp8MaskedRowState(MaskedRowState, kw_only=True):
     act_quant_ready: bool = False
 
 
-class CuteDslFp8MaskedProvider(_CuteDslFp8Mixin, MaskedRowDomainProvider):
+class CuteDslFp8MaskedProvider(CuteDslFp8Mixin, MaskedRowDomainProvider):
     contract = MoeBaseProviderContract(
         key="cutedsl_fp8_masked",
         quant_info_cls=MoeLoraFp8QuantInfo,
@@ -299,7 +299,7 @@ class CuteDslFp8ContiguousRowState(ContiguousRowState, kw_only=True):
     gemm2_tiles: torch.Tensor
 
 
-class CuteDslFp8ContiguousProvider(_CuteDslFp8Mixin, ContiguousRowDomainProvider):
+class CuteDslFp8ContiguousProvider(CuteDslFp8Mixin, ContiguousRowDomainProvider):
     contract = MoeBaseProviderContract(
         key="cutedsl_fp8_contiguous",
         quant_info_cls=MoeLoraFp8QuantInfo,

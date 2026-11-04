@@ -199,12 +199,13 @@ def dispatch_fill_rows_contiguous_bf16(
 def _fill_rows_contiguous_fp8_kernel(
     input_ptr,  # bf16 [num_tokens, K] source rows
     out_ptr,  # fp8e4m3 [m_pad_ceiling, K] contiguous
-    scale_ptr,  # fp32 [m_pad_ceiling, K // 128] contiguous
+    scale_ptr,  # fp32 [m_pad_ceiling, GROUPS] contiguous
     topk_ids_ptr,  # [num_pairs]; < 0 = padding or EP-unrouted
     pair_to_row_ptr,  # [num_pairs] int32 finalized compact rows
     TOPK: tl.constexpr,
     K: tl.constexpr,
-    GROUPS: tl.constexpr,  # K // 128
+    GROUP: tl.constexpr,  # 128, or BLOCK_K for one scale per token
+    GROUPS: tl.constexpr,  # K // GROUP, or 1 per token
     BLOCK_K: tl.constexpr,
 ):
     # Quantize each token once, then fan out to its routed destinations.
@@ -213,10 +214,10 @@ def _fill_rows_contiguous_fp8_kernel(
     x = tl.load(input_ptr + token.to(tl.int64) * K + offs, mask=offs < K, other=0).to(
         tl.float32
     )
-    grouped = tl.reshape(x, (BLOCK_K // 128, 128))
+    grouped = tl.reshape(x, (BLOCK_K // GROUP, GROUP))
     q, scale = quantize_fp8_groups(grouped, GROUPS == 1)
     qf = tl.reshape(q, (BLOCK_K,)).to(out_ptr.dtype.element_ty)
-    goffs = tl.arange(0, BLOCK_K // 128)
+    goffs = tl.arange(0, BLOCK_K // GROUP)
     for j in range(TOPK):
         pair = token * TOPK + j
         expert = tl.load(topk_ids_ptr + pair)
@@ -233,14 +234,19 @@ def dispatch_fill_rows_contiguous_fp8(
     *,
     rows_fp8_out: torch.Tensor,
     scale_out: torch.Tensor,
+    per_token: bool = False,
 ) -> None:
-    """Quantize and copy rows using the finalized pair_to_row map."""
+    """Quantize and copy rows using the finalized pair_to_row map.
+
+    Scales are FP32 per group of 128 values, or one per token row.
+    """
     num_tokens, k = hidden_states.shape
     num_pairs = topk_ids.numel()
     if num_pairs == 0:
         return
     check_source_rows(hidden_states, topk_ids, num_pairs // num_tokens)
     check_fp8_width(k)
+    block_k = triton.next_power_of_2(k)
     _fill_rows_contiguous_fp8_kernel[(num_tokens,)](
         hidden_states,
         rows_fp8_out,
@@ -249,8 +255,9 @@ def dispatch_fill_rows_contiguous_fp8(
         pair_to_row,
         TOPK=num_pairs // num_tokens,
         K=k,
-        GROUPS=k // 128,
-        BLOCK_K=triton.next_power_of_2(k),
+        GROUP=block_k if per_token else 128,
+        GROUPS=1 if per_token else k // 128,
+        BLOCK_K=block_k,
     )
 
 
