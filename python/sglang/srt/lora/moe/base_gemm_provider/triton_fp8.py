@@ -131,9 +131,25 @@ class TritonFp8ChannelContiguousProvider(_TritonFp8Provider):
     _config_per_channel_quant = True
 
 
+_FP8_MAX = torch.finfo(torch.float8_e4m3fn).max
+
+
+def _routed_rows_scale(rows: torch.Tensor, pair_to_row: torch.Tensor) -> torch.Tensor:
+    """Dynamic per-tensor FP8 scale over the rows of routed pairs.
+
+    Rows of pairs without a local expert (pair_to_row -1) are never written,
+    so the launcher's scale over every row would fold stale data into them.
+    """
+    row_amax = torch.linalg.vector_norm(
+        rows, float("inf"), dim=1, dtype=torch.float32
+    )
+    amax = torch.where(pair_to_row >= 0, row_amax, 0.0).amax()
+    return (amax.clamp(min=1e-12) / _FP8_MAX).reshape(1)
+
+
 class TritonFp8TensorContiguousProvider(_TritonFp8Provider):
     """Per-expert weight scales; the launcher quantizes activations per tensor
-    with the checkpoint's static scale, or dynamically without one."""
+    with the checkpoint's static scale, or a dynamic one over the routed rows."""
 
     contract = MoeBaseProviderContract(
         key="triton_fp8_tensor_contiguous",
@@ -163,6 +179,9 @@ class TritonFp8TensorContiguousProvider(_TritonFp8Provider):
         act_out: torch.Tensor,
         out: torch.Tensor,
     ) -> None:
+        a_scale = self.quant_info.w2_input_scale
+        if a_scale is None:
+            a_scale = _routed_rows_scale(act_out, row_state.pair_to_row)
         self._invoke_fp8(
             act_out,
             self.quant_info.w2_weight,
@@ -171,5 +190,5 @@ class TritonFp8TensorContiguousProvider(_TritonFp8Provider):
             row_state,
             top_k=1,
             config=row_state.down_config or row_state.config,
-            a_scale=self.quant_info.w2_input_scale,
+            a_scale=a_scale,
         )

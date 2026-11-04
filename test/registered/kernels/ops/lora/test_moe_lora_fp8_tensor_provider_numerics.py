@@ -10,7 +10,7 @@ import torch
 from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
 from sglang.test.ci.ci_register import register_cuda_ci
 
-register_cuda_ci(est_time=15, stage="base-b-kernel-unit", runner_config="1-gpu-large")
+register_cuda_ci(est_time=20, stage="base-b-kernel-unit", runner_config="1-gpu-large")
 
 _E = 4
 _H = 512
@@ -41,6 +41,20 @@ def _case(device, hidden_size=_H):
     return w13, w2, hidden, topk_ids
 
 
+def _routes(topk_ids):
+    """(pair index, expert, token) of the pairs that have a local expert."""
+    flat_ids = topk_ids.flatten()
+    pair_idx = torch.nonzero(flat_ids >= 0, as_tuple=True)[0]
+    return pair_idx, flat_ids[pair_idx].long(), (pair_idx // _TOPK).long()
+
+
+def _act_pairs(num_pairs: int, device) -> torch.Tensor:
+    g = torch.Generator(device="cpu").manual_seed(11)
+    return (torch.randn(num_pairs, _I, generator=g) * 0.1).to(
+        device=device, dtype=torch.bfloat16
+    )
+
+
 def _quant_info(w13, w2, hidden, act_pairs, static: bool, hidden_size=_H):
     from sglang.srt.lora.moe.quant_info import MoeLoraFp8TensorQuantInfo
 
@@ -67,12 +81,42 @@ def _quant_info(w13, w2, hidden, act_pairs, static: bool, hidden_size=_H):
     )
 
 
-def _gather_pairs(rows, pair_to_row, pair_idx):
-    return rows.reshape(-1, rows.shape[-1])[pair_to_row[pair_idx].long()]
+def _run(quant_info, hidden, topk_ids, act_pairs, pair_idx, *, stale: float = 0.0):
+    """Run both GEMMs; activation rows of pairs without an expert hold `stale`."""
+    from sglang.srt.runtime_context import get_context
+
+    device = hidden.device
+    provider = select_provider_cls("route_major", "fp8_tensor", "triton")(quant_info)
+    with get_context().override_server_args():
+        state = provider.prepare(hidden, topk_ids, _TOPK)
+        gateup = torch.empty(
+            provider.gateup_out_shape(state), dtype=torch.bfloat16, device=device
+        )
+        provider.gateup(state, gateup)
+        rows = state.pair_to_row[pair_idx].long()
+        act = torch.full(
+            provider.act_out_shape(state), stale, dtype=torch.bfloat16, device=device
+        )
+        act.reshape(-1, _I)[rows] = act_pairs
+        down = torch.empty(
+            provider.down_out_shape(state), dtype=torch.bfloat16, device=device
+        )
+        provider.down(state, act, down)
+    return (
+        gateup.reshape(-1, gateup.shape[-1])[rows].float(),
+        down.reshape(-1, down.shape[-1])[rows].float(),
+    )
 
 
 def _rel_l2(a, b):
     return (a - b).norm() / b.norm().clamp(min=1e-12)
+
+
+def _references(hidden, act_pairs, w13_eff, w2_eff, experts, tokens):
+    return (
+        torch.einsum("ph,pnh->pn", hidden[tokens].float(), w13_eff[experts]),
+        torch.einsum("pi,phi->ph", act_pairs.float(), w2_eff[experts]),
+    )
 
 
 @pytest.mark.parametrize("hidden_size", [_H, 7168])
@@ -82,45 +126,41 @@ def test_fp8_tensor_gateup_and_down_match_reference(static, hidden_size):
         pytest.skip("CUDA required")
     device = torch.device("cuda")
     w13, w2, hidden, topk_ids = _case(device, hidden_size)
-    flat_ids = topk_ids.flatten()
-    pair_idx = torch.nonzero(flat_ids >= 0, as_tuple=True)[0]
-    experts = flat_ids[pair_idx].long()
-    tokens = (pair_idx // _TOPK).long()
-    g = torch.Generator(device="cpu").manual_seed(11)
-    act_pairs = (torch.randn(len(pair_idx), _I, generator=g) * 0.1).to(
-        device=device, dtype=torch.bfloat16
-    )
+    pair_idx, experts, tokens = _routes(topk_ids)
+    act_pairs = _act_pairs(len(pair_idx), device)
     quant_info, w13_eff, w2_eff = _quant_info(
         w13, w2, hidden, act_pairs, static, hidden_size=hidden_size
     )
-
-    from sglang.srt.runtime_context import get_context
-
-    provider = select_provider_cls("route_major", "fp8_tensor", "triton")(quant_info)
-    with get_context().override_server_args():
-        state = provider.prepare(hidden, topk_ids, _TOPK)
-        gateup = torch.empty(
-            provider.gateup_out_shape(state), dtype=torch.bfloat16, device=device
-        )
-        provider.gateup(state, gateup)
-    pair_to_row = state.pair_to_row
-
+    got_gateup, got_down = _run(quant_info, hidden, topk_ids, act_pairs, pair_idx)
+    ref_gateup, ref_down = _references(
+        hidden, act_pairs, w13_eff, w2_eff, experts, tokens
+    )
     # One activation scale per tensor: the coarsest FP8 quantization.
-    ref_gateup = torch.einsum("ph,pnh->pn", hidden[tokens].float(), w13_eff[experts])
-    got_gateup = _gather_pairs(gateup, pair_to_row, pair_idx).float()
     assert _rel_l2(got_gateup, ref_gateup) < 8e-2
+    assert _rel_l2(got_down, ref_down) < 8e-2
 
-    act = torch.zeros(
-        provider.act_out_shape(state), dtype=torch.bfloat16, device=device
+
+@pytest.mark.parametrize("stale", [float("nan"), 1e4])
+def test_fp8_tensor_dynamic_scale_skips_dropped_pairs(stale):
+    """EP drops pairs without a local expert: their activation rows are never
+    written and must not reach the dynamic per-tensor scale."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+    device = torch.device("cuda")
+    w13, w2, hidden, topk_ids = _case(device)
+    topk_ids[::2, 1] = -1
+    topk_ids[5] = -1
+    pair_idx, experts, tokens = _routes(topk_ids)
+    assert len(pair_idx) < topk_ids.numel()
+    act_pairs = _act_pairs(len(pair_idx), device)
+    quant_info, w13_eff, w2_eff = _quant_info(w13, w2, hidden, act_pairs, False)
+    got_gateup, got_down = _run(
+        quant_info, hidden, topk_ids, act_pairs, pair_idx, stale=stale
     )
-    act.reshape(-1, _I)[pair_to_row[pair_idx].long()] = act_pairs
-    down = torch.empty(
-        provider.down_out_shape(state), dtype=torch.bfloat16, device=device
+    ref_gateup, ref_down = _references(
+        hidden, act_pairs, w13_eff, w2_eff, experts, tokens
     )
-    with get_context().override_server_args():
-        provider.down(state, act, down)
-    ref_down = torch.einsum("pi,phi->ph", act_pairs.float(), w2_eff[experts])
-    got_down = _gather_pairs(down, pair_to_row, pair_idx).float()
+    assert _rel_l2(got_gateup, ref_gateup) < 8e-2
     assert _rel_l2(got_down, ref_down) < 8e-2
 
 
