@@ -6,12 +6,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import torch
+
 from sglang.srt.arg_groups.model_override_base import model_config_of, resolving_view
 from sglang.srt.arg_groups.overrides import declare_resolution, register_post_process
 from sglang.srt.environ import envs
 from sglang.srt.lora.lora_config import LoRAConfig, get_normalized_target_modules
 from sglang.srt.lora.lora_registry import LoRARef
-from sglang.srt.lora.moe.base_gemm_provider import VENDORS
+from sglang.srt.lora.moe.base_gemm_provider import default_vendor
 from sglang.srt.runtime_context import get_platform
 
 logger = logging.getLogger(__name__)
@@ -268,6 +270,13 @@ def _routed_expert_count(model_config: Any) -> int:
     return 0
 
 
+def _sm_major() -> int | None:
+    """The CUDA device's SM major, or None without a CUDA device."""
+    if not torch.cuda.is_available():
+        return None
+    return torch.cuda.get_device_capability()[0]
+
+
 @register_post_process
 def resolve_lora_moe_runner_backend(view: Any) -> dict:
     """Pick the family's default lora_* runner for expert-targeted v2 LoRA."""
@@ -293,7 +302,7 @@ def resolve_lora_moe_runner_backend(view: Any) -> dict:
             model_config.quantization,
         )
         return {}
-    backend = f"lora_{VENDORS[family][0]}"
+    backend = f"lora_{default_vendor(family, _sm_major())}"
     logger.info(
         "--moe-runner-backend auto -> %s: --lora-backend triton_v2 serves the %s "
         "MoE experts through the LoRA runner",

@@ -22,7 +22,19 @@ VENDORS = {
 }
 
 
-def resolve_vendor(family: str, vendor: str) -> str:
+# A vendor measured faster on an SM major takes the default there: on SM100
+# the row-scaled CuTeDSL provider beat Triton by 5-13% in every Beam
+# (501B-A23B-FP8, TP4) decode and prefill cell but d1, with identical
+# numerics. The SM90 row-scaled kernel waits for its end-to-end numbers.
+PREFERRED_VENDORS = {10: {"fp8_channel": "cutedsl"}}
+
+
+def default_vendor(family: str, sm_major: int | None = None) -> str:
+    """The family's default vendor on an SM major (None: the portable one)."""
+    return PREFERRED_VENDORS.get(sm_major, {}).get(family, VENDORS[family][0])
+
+
+def resolve_vendor(family: str, vendor: str, sm_major: int | None = None) -> str:
     """The family default serves a vendor without a provider for ``family``,
     except Marlin: only the lora_marlin backend prepares its tiles."""
     vendors = VENDORS[family]
@@ -34,14 +46,15 @@ def resolve_vendor(family: str, vendor: str) -> str:
             f"--moe-runner-backend lora_{vendor}; use "
             + " or ".join(f"lora_{v}" for v in vendors)
         )
+    default = default_vendor(family, sm_major)
     logger.info(
         "MoE LoRA base-GEMM vendor %r serves no %s layers; this layer "
         "family uses its default vendor %r",
         vendor,
         family,
-        vendors[0],
+        default,
     )
-    return vendors[0]
+    return default
 
 
 def select_provider_cls(

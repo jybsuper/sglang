@@ -6,7 +6,9 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
+from sglang.srt.arg_groups import lora_hook
 from sglang.srt.arg_groups.lora_hook import resolve_lora_moe_runner_backend
 from sglang.srt.arg_groups.model_override_base import ResolvedView
 from sglang.srt.lora.lora_registry import LoRARef
@@ -61,6 +63,7 @@ def _resolve(
     lora_backend="triton_v2",
     enable_lora=None,
     lora_target_modules=None,
+    sm_major=None,
 ):
     """Run the pass on a record whose ModelConfig is the memoized fixture."""
     model_config = SimpleNamespace(
@@ -80,7 +83,8 @@ def _resolve(
         lora_target_modules=lora_target_modules,
         _model_config=model_config,
     )
-    return resolve_lora_moe_runner_backend(ResolvedView(record))
+    with mock.patch.object(lora_hook, "_sm_major", return_value=sm_major):
+        return resolve_lora_moe_runner_backend(ResolvedView(record))
 
 
 class TestLoraMoeRunnerDefault(CustomTestCase):
@@ -109,6 +113,39 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
                     _resolve(lora_paths=[self.moe_adapter], **kwargs),
                     {"moe_runner_backend": expected},
                 )
+
+    def test_sm100_prefers_cutedsl_for_per_channel_fp8(self):
+        """The row-scaled CuTeDSL provider leads Triton on SM100 (Beam board);
+        other SM majors keep Triton until their numbers are in."""
+        channel = dict(
+            quantization="compressed-tensors",
+            hf_quant_config=_compressed_tensors(CHANNEL_FP8),
+        )
+        for kwargs, by_major in (
+            (channel, {10: "lora_cutedsl", 9: "lora_triton", None: "lora_triton"}),
+            (
+                dict(quantization="w8a8_fp8"),
+                {10: "lora_cutedsl", 9: "lora_triton", None: "lora_triton"},
+            ),
+            # Families with one proven default keep it on every SM major.
+            (dict(quantization="fp8"), {10: "lora_cutedsl", 9: "lora_cutedsl"}),
+            (dict(quantization="modelopt_fp4"), {10: "lora_marlin", 9: "lora_marlin"}),
+            (
+                dict(
+                    quantization="compressed-tensors",
+                    hf_quant_config=_compressed_tensors(TENSOR_FP8),
+                ),
+                {10: "lora_triton", 9: "lora_triton"},
+            ),
+        ):
+            for sm_major, expected in by_major.items():
+                with self.subTest(sm_major=sm_major, **kwargs):
+                    self.assertEqual(
+                        _resolve(
+                            lora_paths=[self.moe_adapter], sm_major=sm_major, **kwargs
+                        ),
+                        {"moe_runner_backend": expected},
+                    )
 
     def test_compressed_tensors_family_from_the_config_groups(self):
         cases = [

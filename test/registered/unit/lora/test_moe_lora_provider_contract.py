@@ -311,8 +311,16 @@ class TestVendorResolution(CustomTestCase):
     def test_family_default_serves_vendors_except_marlin(self):
         """The family default serves a vendor without a provider, except Marlin:
         only lora_marlin prepares its tiles, so no other backend gets them."""
-        from sglang.srt.lora.moe.base_gemm_provider import resolve_vendor
+        from sglang.srt.lora.moe.base_gemm_provider import (
+            default_vendor,
+            resolve_vendor,
+        )
 
+        self.assertEqual(default_vendor("fp8_channel"), "triton")
+        self.assertEqual(default_vendor("fp8_channel", 9), "triton")
+        self.assertEqual(default_vendor("fp8_channel", 10), "cutedsl")
+        self.assertEqual(default_vendor("nvfp4", 10), "marlin")
+        self.assertEqual(resolve_vendor("fp8_channel", "marlin", sm_major=10), "cutedsl")
         self.assertEqual(resolve_vendor("mxfp4", "marlin"), "marlin")
         self.assertEqual(resolve_vendor("mxfp4", "cutedsl"), "cutedsl")
         self.assertEqual(resolve_vendor("bf16", "marlin"), "cutedsl")

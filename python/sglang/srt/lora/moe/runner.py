@@ -143,7 +143,9 @@ class MoeLoraRunner:
         config = base_layer.moe_runner_config
         activation = ActivationFn.parse(config.activation)
         vendor = resolve_vendor(
-            family, get_moe_runner_backend().value.removeprefix("lora_")
+            family,
+            get_moe_runner_backend().value.removeprefix("lora_"),
+            sm_major=major,
         )
         plans = resolve_plans(
             architecture=architecture,
