@@ -147,6 +147,97 @@ class TestMxfp4ScaleStorage(CustomTestCase):
                 self.assertEqual(scale.dtype, dtype, backend)
 
 
+class TestCompressedTensorsFp8Admission(CustomTestCase):
+    """compressed-tensors FP8 experts bind through the scheme the layer carries;
+    the fp8 family reads the block scales the scheme registers."""
+
+    _BLOCK = dict(strategy="block", block_structure=[128, 128])
+    _GROUP_ACT = dict(strategy="group", group_size=128, dynamic=True)
+
+    @staticmethod
+    def _layer(weights, activations, params_dtype=torch.bfloat16):
+        from compressed_tensors.quantization import QuantizationArgs
+
+        from sglang.srt.layers.quantization.compressed_tensors.compressed_tensors import (
+            CompressedTensorsFusedMoEMethod,
+        )
+        from sglang.srt.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8_moe import (
+            CompressedTensorsW8A8Fp8MoE,
+        )
+
+        scheme = CompressedTensorsW8A8Fp8MoE(
+            QuantizationArgs(num_bits=8, type="float", **weights),
+            QuantizationArgs(num_bits=8, type="float", **activations),
+        )
+        layer = torch.nn.Module()
+        layer.quant_method = object.__new__(CompressedTensorsFusedMoEMethod)
+        layer.scheme = scheme
+        layer.moe_tp_size = 1
+        layer.params_dtype = params_dtype
+        layer.num_local_experts = 2
+        scheme.create_weights(
+            layer=layer,
+            num_experts=2,
+            hidden_size=256,
+            intermediate_size_per_partition=128,
+            params_dtype=params_dtype,
+        )
+        return layer
+
+    def test_block_scheme_binds_as_the_fp8_family(self):
+        from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        layer = self._layer(self._BLOCK, self._GROUP_ACT)
+        self.assertEqual(MoeLoraRunner._weight_family(layer), "fp8")
+        info = MoeLoraFp8QuantInfo.from_layer(layer)
+        self.assertIs(info.w13_scale, layer.w13_weight_scale)
+        self.assertIs(info.w2_scale, layer.w2_weight_scale)
+        self.assertEqual(info.block_shape, (128, 128))
+        self.assertEqual(tuple(info.w13_scale.shape), (2, 2, 2))
+        self.assertEqual(tuple(info.w2_scale.shape), (2, 2, 1))
+        self.assertEqual((info.hidden_size, info.intermediate_size), (256, 128))
+
+    def test_other_layouts_and_schemes_are_refused(self):
+        from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        with self.assertRaisesRegex(NotImplementedError, r"\[128, 128\]"):
+            MoeLoraFp8QuantInfo.from_layer(
+                self._layer(
+                    dict(strategy="block", block_structure=[64, 64]), self._GROUP_ACT
+                )
+            )
+        cases = {
+            "per_channel": (
+                dict(strategy="channel"),
+                dict(strategy="token", dynamic=True),
+                "per-channel",
+            ),
+            "per_tensor": (
+                dict(strategy="tensor"),
+                dict(strategy="tensor", dynamic=False),
+                "per-tensor",
+            ),
+            "fp16_activations": (
+                self._BLOCK,
+                self._GROUP_ACT,
+                "BF16 activations",
+                torch.float16,
+            ),
+        }
+        for name, (weights, activations, message, *dtype) in cases.items():
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(NotImplementedError, message),
+            ):
+                MoeLoraRunner._weight_family(self._layer(weights, activations, *dtype))
+        layer = self._layer(self._BLOCK, self._GROUP_ACT)
+        layer.scheme = object()
+        with self.assertRaisesRegex(NotImplementedError, "FP8 scheme only"):
+            MoeLoraRunner._weight_family(layer)
+
+
 class TestVendorResolution(CustomTestCase):
     def test_family_default_serves_vendors_except_marlin(self):
         """The family default serves a vendor without a provider, except Marlin:

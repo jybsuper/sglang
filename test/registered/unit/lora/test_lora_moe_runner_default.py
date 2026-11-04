@@ -18,6 +18,29 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 MOE_TARGETS = ["gate_proj", "up_proj", "down_proj"]
 ATTENTION_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
+# compressed-tensors (weights, input_activations) quantization args.
+BLOCK_FP8 = (
+    dict(strategy="block", block_structure=[128, 128]),
+    dict(strategy="group", group_size=128, dynamic=True),
+)
+CHANNEL_FP8 = (dict(strategy="channel"), dict(strategy="token", dynamic=True))
+TENSOR_FP8 = (dict(strategy="tensor"), dict(strategy="tensor", dynamic=False))
+
+
+def _compressed_tensors(*groups) -> dict:
+    """config.json quantization_config with one group per (weights, activations)."""
+    return {
+        "quant_method": "compressed-tensors",
+        "config_groups": {
+            f"group_{index}": {
+                "targets": ["Linear"],
+                "weights": {"type": "float", "num_bits": 8, **weights},
+                "input_activations": {"type": "float", "num_bits": 8, **activations},
+            }
+            for index, (weights, activations) in enumerate(groups)
+        },
+    }
+
 
 def _adapter(directory: str, name: str, target_modules) -> str:
     path = os.path.join(directory, name)
@@ -32,6 +55,7 @@ def _resolve(
     lora_paths,
     quantization=None,
     is_fp4_experts=False,
+    hf_quant_config=None,
     experts=128,
     moe_runner_backend="auto",
     lora_backend="triton_v2",
@@ -42,6 +66,7 @@ def _resolve(
     model_config = SimpleNamespace(
         quantization=quantization,
         is_fp4_experts=is_fp4_experts,
+        hf_quant_config=hf_quant_config or {},
         hf_text_config=SimpleNamespace(num_experts=experts),
         hf_config=SimpleNamespace(),
     )
@@ -82,6 +107,34 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
                 self.assertEqual(
                     _resolve(lora_paths=[self.moe_adapter], **kwargs),
                     {"moe_runner_backend": expected},
+                )
+
+    def test_compressed_tensors_family_from_the_config_groups(self):
+        cases = [
+            ("block", _compressed_tensors(BLOCK_FP8), "lora_cutedsl"),
+            # No provider serves these layouts yet.
+            ("channel", _compressed_tensors(CHANNEL_FP8), None),
+            ("tensor", _compressed_tensors(TENSOR_FP8), None),
+            # Mixed groups and non-FP8 weights stay auto.
+            ("mixed", _compressed_tensors(BLOCK_FP8, CHANNEL_FP8), None),
+            (
+                "int4",
+                _compressed_tensors(
+                    (dict(type="int", num_bits=4, strategy="group", group_size=128), {})
+                ),
+                None,
+            ),
+            ("unquantized_config", {}, None),
+        ]
+        for name, hf_quant_config, backend in cases:
+            with self.subTest(name):
+                self.assertEqual(
+                    _resolve(
+                        lora_paths=[self.moe_adapter],
+                        quantization="compressed-tensors",
+                        hf_quant_config=hf_quant_config,
+                    ),
+                    {"moe_runner_backend": backend} if backend else {},
                 )
 
     def test_unserved_quantization_stays_auto(self):

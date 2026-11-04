@@ -187,6 +187,10 @@ _LORA_MOE_FAMILIES = {
     "mxfp8": "mxfp8",
     "modelopt_fp4": "nvfp4",
 }
+# compressed-tensors 8-bit float weights by (strategy, dynamic activations).
+_COMPRESSED_TENSORS_FP8_FAMILIES = {
+    ("block", True): "fp8",
+}
 _EXPERT_COUNT_FIELDS = (
     "num_experts",
     "num_local_experts",
@@ -230,6 +234,27 @@ def _targets_routed_experts(cfg: Any) -> bool:
     return "all" in names or {"gate_up_proj", "down_proj"} <= names
 
 
+def _compressed_tensors_family(model_config: Any) -> str | None:
+    """The family of a compressed-tensors checkpoint from its config groups.
+
+    Each group quantizes the Linear layers it targets; FusedMoE experts
+    load as those projections. Groups that disagree, or that are not 8-bit
+    float, stay auto: layer attachment checks the exact scheme.
+    """
+    families = set()
+    for group in (model_config.hf_quant_config.get("config_groups") or {}).values():
+        weights = group.get("weights") or {}
+        if weights.get("type") != "float" or weights.get("num_bits") != 8:
+            return None
+        activations = group.get("input_activations") or {}
+        families.add(
+            _COMPRESSED_TENSORS_FP8_FAMILIES.get(
+                (weights.get("strategy"), bool(activations.get("dynamic")))
+            )
+        )
+    return families.pop() if len(families) == 1 else None
+
+
 def _routed_expert_count(model_config: Any) -> int:
     for config in (model_config.hf_text_config, model_config.hf_config):
         for field in _EXPERT_COUNT_FIELDS:
@@ -251,11 +276,12 @@ def resolve_lora_moe_runner_backend(view: Any) -> dict:
     model_config = model_config_of(view)
     if not _routed_expert_count(model_config) or not _targets_routed_experts(view):
         return {}
-    family = (
-        "mxfp4"
-        if model_config.is_fp4_experts
-        else _LORA_MOE_FAMILIES.get(model_config.quantization)
-    )
+    if model_config.is_fp4_experts:
+        family = "mxfp4"
+    elif model_config.quantization in ("compressed-tensors", "compressed_tensors"):
+        family = _compressed_tensors_family(model_config)
+    else:
+        family = _LORA_MOE_FAMILIES.get(model_config.quantization)
     if family is None:
         logger.info(
             "--moe-runner-backend stays auto: MoE LoRA has no base-GEMM provider "
@@ -300,11 +326,18 @@ def check_lora_moe_runner_args(server_args: Any):
         )
     _check_v2_lora_modes(cfg, f"--moe-runner-backend {backend}")
     # Layer attachment checks the specific weight layout within each scheme.
-    if cfg.quantization not in (None, "fp8", "mxfp8", "modelopt_fp4"):
+    if cfg.quantization not in (
+        None,
+        "fp8",
+        "mxfp8",
+        "modelopt_fp4",
+        "compressed-tensors",
+        "compressed_tensors",
+    ):
         raise ValueError(
             f"--moe-runner-backend {backend} supports unquantized BF16, 128-block "
-            "FP8 (with BF16 or MXFP4 experts), MXFP8 and ModelOpt NVFP4 MoE, got "
-            f"--quantization {cfg.quantization}"
+            "FP8 (sglang or compressed-tensors, with BF16 or MXFP4 experts), MXFP8 "
+            f"and ModelOpt NVFP4 MoE, got --quantization {cfg.quantization}"
         )
     if cfg.quantization == "modelopt_fp4" and backend not in (
         "lora_marlin",

@@ -223,6 +223,30 @@ class MoeLoraRunner:
 
         if isinstance(quant_method, Mxfp4MarlinMoEMethod):
             return "mxfp4"
+        from sglang.srt.layers.quantization.compressed_tensors.compressed_tensors import (
+            CompressedTensorsFusedMoEMethod,
+        )
+
+        if isinstance(quant_method, CompressedTensorsFusedMoEMethod):
+            from sglang.srt.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8_moe import (
+                CompressedTensorsW8A8Fp8MoE,
+            )
+
+            # compressed-tensors delegates the MoE method to the layer's scheme.
+            scheme = base_layer.scheme
+            if not isinstance(scheme, CompressedTensorsW8A8Fp8MoE):
+                raise NotImplementedError(
+                    "MoE LoRA on compressed-tensors supports the FP8 scheme only; "
+                    f"this layer's scheme is {type(scheme).__name__}"
+                )
+            if base_layer.params_dtype != torch.bfloat16:
+                raise NotImplementedError("FP8 MoE LoRA requires BF16 activations.")
+            if scheme.block_quant:
+                return "fp8"
+            raise NotImplementedError(
+                "MoE LoRA on compressed-tensors FP8 requires 128-block weight "
+                "quantization; per-channel and per-tensor layers are unsupported"
+            )
         raise NotImplementedError(
             "MoE LoRA supports unquantized BF16, 128-block FP8, MXFP8, MXFP4 and "
             f"NVFP4 MoE; this layer's quant method is {type(quant_method).__name__}"

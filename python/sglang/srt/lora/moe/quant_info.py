@@ -30,7 +30,7 @@ class MoeLoraBf16QuantInfo(msgspec.Struct, kw_only=True):
 
 
 class MoeLoraFp8QuantInfo(msgspec.Struct, kw_only=True):
-    """FP8 weights in standard layout, with FP32 inverse block scales."""
+    """FP8 weights in standard layout, with FP32 block dequantization scales."""
 
     w13_weight: torch.Tensor  # [E_local, S * I, H] float8_e4m3fn
     w13_scale: torch.Tensor  # [E_local, ceil(S*I/block_n), ceil(H/block_k)]
@@ -43,12 +43,24 @@ class MoeLoraFp8QuantInfo(msgspec.Struct, kw_only=True):
 
     @classmethod
     def from_layer(cls, base_layer: FusedMoE) -> MoeLoraFp8QuantInfo:
+        from sglang.srt.layers.quantization.fp8 import Fp8MoEMethod
+
+        if isinstance(base_layer.quant_method, Fp8MoEMethod):
+            w13_scale = base_layer.w13_weight_scale_inv
+            w2_scale = base_layer.w2_weight_scale_inv
+            block_shape = base_layer.quant_method.weight_block_size
+        else:
+            # compressed-tensors registers the same multipliers without the
+            # DeepSeek "_inv" suffix and keeps the block shape on the layer.
+            w13_scale = base_layer.w13_weight_scale
+            w2_scale = base_layer.w2_weight_scale
+            block_shape = base_layer.weight_block_size
         quant_info = cls(
             w13_weight=base_layer.w13_weight,
-            w13_scale=base_layer.w13_weight_scale_inv,
+            w13_scale=w13_scale,
             w2_weight=base_layer.w2_weight,
-            w2_scale=base_layer.w2_weight_scale_inv,
-            block_shape=tuple(base_layer.quant_method.weight_block_size),
+            w2_scale=w2_scale,
+            block_shape=tuple(block_shape),
             num_local_experts=int(base_layer.num_local_experts),
             intermediate_size=int(base_layer.w2_weight.shape[2]),
             hidden_size=int(base_layer.w2_weight.shape[1]),
