@@ -15,6 +15,7 @@ VENDORS = {
     "bf16": ("cutedsl", "triton"),
     "fp8": ("cutedsl", "triton"),
     "fp8_channel": ("triton", "cutedsl"),
+    "fp8_tensor": ("triton",),
     "nvfp4": ("marlin", "cutedsl"),
     "mxfp4": ("marlin", "cutedsl"),
     "mxfp8": ("cutedsl",),
@@ -94,6 +95,12 @@ def select_provider_cls(
             )
 
             return TritonFp8ChannelContiguousProvider
+        case "triton", "fp8_tensor":
+            from sglang.srt.lora.moe.base_gemm_provider.triton_fp8 import (
+                TritonFp8TensorContiguousProvider,
+            )
+
+            return TritonFp8TensorContiguousProvider
         case "cutedsl", "fp8_channel":
             from sglang.srt.lora.moe.base_gemm_provider.cutedsl_fp8_channel import (
                 CuteDslFp8ChannelContiguousProvider,

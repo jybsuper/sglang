@@ -1,7 +1,8 @@
 """Triton FP8 GEMMs with BF16 LoRA inputs/outputs.
 
 Block-scaled weights take group-128 activations; per-channel weights take
-per-token activations, quantized by the kernel launcher.
+per-token activations and per-tensor weights per-tensor activations, both
+quantized by the kernel launcher.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from sglang.srt.lora.moe.base_gemm_provider.triton_bf16 import (
 from sglang.srt.lora.moe.quant_info import (
     MoeLoraFp8ChannelQuantInfo,
     MoeLoraFp8QuantInfo,
+    MoeLoraFp8TensorQuantInfo,
 )
 
 
@@ -127,3 +129,47 @@ class TritonFp8ChannelContiguousProvider(_TritonFp8Provider):
     )
 
     _config_per_channel_quant = True
+
+
+class TritonFp8TensorContiguousProvider(_TritonFp8Provider):
+    """Per-expert weight scales; the launcher quantizes activations per tensor
+    with the checkpoint's static scale, or dynamically without one."""
+
+    contract = MoeBaseProviderContract(
+        key="triton_fp8_tensor_contiguous",
+        quant_info_cls=MoeLoraFp8TensorQuantInfo,
+        gate_first=True,
+        interleaved=False,
+        gate_up_output_dtype=torch.bfloat16,
+        lora_delta_dtype=torch.bfloat16,
+        lora_activation_dtype=torch.bfloat16,
+    )
+
+    def gateup(self, row_state: TritonRowState, out: torch.Tensor) -> None:
+        self._invoke_fp8(
+            row_state.hidden_states,
+            self.quant_info.w13_weight,
+            self.quant_info.w13_scale,
+            out,
+            row_state,
+            top_k=row_state.top_k,
+            config=row_state.config,
+            a_scale=self.quant_info.w13_input_scale,
+        )
+
+    def down(
+        self,
+        row_state: TritonRowState,
+        act_out: torch.Tensor,
+        out: torch.Tensor,
+    ) -> None:
+        self._invoke_fp8(
+            act_out,
+            self.quant_info.w2_weight,
+            self.quant_info.w2_scale,
+            out,
+            row_state,
+            top_k=1,
+            config=row_state.down_config or row_state.config,
+            a_scale=self.quant_info.w2_input_scale,
+        )

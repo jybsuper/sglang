@@ -248,13 +248,11 @@ class MoeLoraRunner:
             _require_bf16_activations(base_layer)
             if scheme.block_quant:
                 return "fp8"
-            # The scheme pairs per-channel weights with dynamic per-token activations.
+            # The scheme pairs per-channel weights with dynamic per-token
+            # activations, and per-tensor weights with per-tensor activations.
             if scheme.weight_quant.strategy == QuantizationStrategy.CHANNEL:
                 return "fp8_channel"
-            raise NotImplementedError(
-                "MoE LoRA on compressed-tensors FP8 requires 128-block or "
-                "per-channel weight quantization; per-tensor layers are unsupported"
-            )
+            return "fp8_tensor"
         from sglang.srt.layers.quantization.w8a8_fp8 import W8A8FP8MoEMethod
 
         if isinstance(quant_method, W8A8FP8MoEMethod):

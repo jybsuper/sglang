@@ -237,8 +237,41 @@ class TestCompressedTensorsFp8Admission(CustomTestCase):
         with self.assertRaisesRegex(NotImplementedError, "BF16 activations"):
             MoeLoraRunner._weight_family(layer)
 
+    def test_tensor_scheme_binds_as_the_fp8_tensor_family(self):
+        from sglang.srt.lora.moe.quant_info import MoeLoraFp8TensorQuantInfo
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        for dynamic in (False, True):
+            with self.subTest(dynamic_activations=dynamic):
+                layer = self._layer(
+                    dict(strategy="tensor"), dict(strategy="tensor", dynamic=dynamic)
+                )
+                self.assertEqual(MoeLoraRunner._weight_family(layer), "fp8_tensor")
+                # The runner binds after process_weights_after_loading folded the
+                # gate/up scales and the input scales to one value each.
+                layer.w13_weight_scale = torch.nn.Parameter(
+                    layer.w13_weight_scale.max(dim=1).values, requires_grad=False
+                )
+                if not dynamic:
+                    layer.w13_input_scale = torch.nn.Parameter(
+                        layer.w13_input_scale.max(), requires_grad=False
+                    )
+                    layer.w2_input_scale = torch.nn.Parameter(
+                        layer.w2_input_scale.max(), requires_grad=False
+                    )
+                info = MoeLoraFp8TensorQuantInfo.from_layer(layer)
+                self.assertEqual(tuple(info.w13_scale.shape), (2,))
+                self.assertIs(info.w2_scale, layer.w2_weight_scale)
+                self.assertEqual(
+                    (info.w13_input_scale is None, info.w2_input_scale is None),
+                    (dynamic, dynamic),
+                )
+
     def test_other_layouts_and_schemes_are_refused(self):
-        from sglang.srt.lora.moe.quant_info import MoeLoraFp8QuantInfo
+        from sglang.srt.lora.moe.quant_info import (
+            MoeLoraFp8QuantInfo,
+            MoeLoraFp8TensorQuantInfo,
+        )
         from sglang.srt.lora.moe.runner import MoeLoraRunner
 
         with self.assertRaisesRegex(NotImplementedError, r"\[128, 128\]"):
@@ -247,12 +280,14 @@ class TestCompressedTensorsFp8Admission(CustomTestCase):
                     dict(strategy="block", block_structure=[64, 64]), self._GROUP_ACT
                 )
             )
+        # Unfolded gate/up scales mean the weights were not processed yet.
+        with self.assertRaisesRegex(ValueError, r"w13_scale must be fp32 \[2\]"):
+            MoeLoraFp8TensorQuantInfo.from_layer(
+                self._layer(
+                    dict(strategy="tensor"), dict(strategy="tensor", dynamic=True)
+                )
+            )
         cases = {
-            "per_tensor": (
-                dict(strategy="tensor"),
-                dict(strategy="tensor", dynamic=False),
-                "per-tensor",
-            ),
             "fp16_activations": (
                 self._BLOCK,
                 self._GROUP_ACT,
@@ -284,6 +319,7 @@ class TestVendorResolution(CustomTestCase):
         self.assertEqual(resolve_vendor("mxfp8", "marlin"), "cutedsl")
         self.assertEqual(resolve_vendor("fp8_channel", "marlin"), "triton")
         self.assertEqual(resolve_vendor("fp8_channel", "cutedsl"), "cutedsl")
+        self.assertEqual(resolve_vendor("fp8_tensor", "cutedsl"), "triton")
         with self.assertRaisesRegex(
             NotImplementedError, "lora_triton; use lora_marlin or lora_cutedsl$"
         ):

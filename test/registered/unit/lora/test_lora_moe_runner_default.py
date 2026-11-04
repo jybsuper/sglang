@@ -114,8 +114,14 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
         cases = [
             ("block", _compressed_tensors(BLOCK_FP8), "lora_cutedsl"),
             ("channel", _compressed_tensors(CHANNEL_FP8), "lora_triton"),
-            # No provider serves per-tensor layers yet.
-            ("tensor", _compressed_tensors(TENSOR_FP8), None),
+            ("tensor", _compressed_tensors(TENSOR_FP8), "lora_triton"),
+            (
+                "tensor_dynamic",
+                _compressed_tensors(
+                    (dict(strategy="tensor"), dict(strategy="tensor", dynamic=True))
+                ),
+                "lora_triton",
+            ),
             # Mixed groups and non-FP8 weights stay auto.
             ("mixed", _compressed_tensors(BLOCK_FP8, CHANNEL_FP8), None),
             (

@@ -143,6 +143,57 @@ class MoeLoraFp8ChannelQuantInfo(msgspec.Struct, kw_only=True):
         return quant_info
 
 
+class MoeLoraFp8TensorQuantInfo(msgspec.Struct, kw_only=True):
+    """FP8 weights in standard layout with one FP32 scale per expert;
+    activations quantize per tensor at GEMM time, with the checkpoint's
+    static scale when it has one (compressed-tensors TENSOR)."""
+
+    w13_weight: torch.Tensor  # [E_local, S * I, H] float8_e4m3fn
+    w13_scale: torch.Tensor  # [E_local]
+    w2_weight: torch.Tensor  # [E_local, H, I] float8_e4m3fn
+    w2_scale: torch.Tensor  # [E_local]
+    w13_input_scale: torch.Tensor | None  # one value, or None for dynamic
+    w2_input_scale: torch.Tensor | None
+    num_local_experts: int
+    intermediate_size: int
+    hidden_size: int
+
+    @classmethod
+    def from_layer(cls, base_layer: FusedMoE) -> MoeLoraFp8TensorQuantInfo:
+        quant_info = cls(
+            w13_weight=base_layer.w13_weight,
+            w13_scale=base_layer.w13_weight_scale,
+            w2_weight=base_layer.w2_weight,
+            w2_scale=base_layer.w2_weight_scale,
+            w13_input_scale=base_layer.w13_input_scale,
+            w2_input_scale=base_layer.w2_input_scale,
+            num_local_experts=int(base_layer.num_local_experts),
+            intermediate_size=int(base_layer.w2_weight.shape[2]),
+            hidden_size=int(base_layer.w2_weight.shape[1]),
+        )
+        experts = quant_info.num_local_experts
+        for name, scale in (
+            ("w13_scale", quant_info.w13_scale),
+            ("w2_scale", quant_info.w2_scale),
+        ):
+            # The scheme folds the gate and up scales into one per expert
+            # after loading; the runner binds after that.
+            if scale.dtype != torch.float32 or tuple(scale.shape) != (experts,):
+                raise ValueError(
+                    f"{name} must be fp32 [{experts}], got {scale.dtype} "
+                    f"{tuple(scale.shape)}"
+                )
+        for name, scale in (
+            ("w13_input_scale", quant_info.w13_input_scale),
+            ("w2_input_scale", quant_info.w2_input_scale),
+        ):
+            if scale is not None and scale.numel() != 1:
+                raise ValueError(
+                    f"{name} must hold one value, got {tuple(scale.shape)}"
+                )
+        return quant_info
+
+
 class MoeLoraMxQuantInfo(msgspec.Struct, kw_only=True):
     """MX block-scaled weights: E4M3 or packed E2M1 pairs with E8M0 scales per 32.
 
@@ -266,6 +317,7 @@ StandardLayoutQuantInfo = (
     MoeLoraBf16QuantInfo
     | MoeLoraFp8QuantInfo
     | MoeLoraFp8ChannelQuantInfo
+    | MoeLoraFp8TensorQuantInfo
     | MoeLoraMxQuantInfo
 )
 
