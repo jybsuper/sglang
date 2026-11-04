@@ -248,7 +248,8 @@ def _quant_rows_kernel(
     live = rows >= 0
     if tl.max(live.to(tl.int32)) == 0:
         return
-    rows = tl.where(live, rows, 0)
+    # Slab rows times the row stride pass 2**31 on large masked batches.
+    rows = tl.where(live, rows, 0).to(tl.int64)
     col0 = tl.program_id(1) * BLOCK_K
     cols = col0 + tl.arange(0, BLOCK_K)
     x = tl.load(

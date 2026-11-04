@@ -383,5 +383,48 @@ def test_fused_activation_quant_matches_row_quantizer(fmt):
     assert torch.equal(fused.scales, separate.scales)
 
 
+def test_triton_row_quantizer_addresses_rows_past_2_31_elements():
+    """Row offsets are int64. With int32 ones, a Beam TP4 decode batch of 16k
+    tokens (256 slabs x 16384 rows x 640) quantized experts 205-255 wrong."""
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA device")
+    from sglang.kernels.ops.lora.moe.quant_blockscaled import (
+        BlockScaledRows,
+        quantize_rows,
+    )
+
+    device = torch.device("cuda")
+    k, vec = 128, 32
+    rows = 2**31 // k + 2048  # the last rows' offsets pass 2**31 elements
+    if torch.cuda.mem_get_info(device)[0] < 8 * 2**30:
+        pytest.skip("needs 8 GiB of free device memory")
+    x = torch.zeros((rows, k), dtype=torch.bfloat16, device=device)
+    generator = torch.Generator(device="cpu").manual_seed(3)
+    pattern = (torch.randn(k, generator=generator) * 0.3).to(torch.bfloat16)
+    probes = torch.tensor(
+        [0, 2**31 // k - 1, 2**31 // k, rows - 1], dtype=torch.int32, device=device
+    )
+    x[probes.long()] = pattern.to(device)
+    out = torch.empty((rows, k), dtype=torch.float8_e4m3fn, device=device)
+    row_atoms = -(-rows // 128)  # k // vec = 4 groups: one atom column
+    sf = torch.zeros(row_atoms * 512, dtype=torch.uint8, device=device)
+    target = BlockScaledRows(data=out, scales=sf, sf_vec_size=vec, rows_per_slab=rows)
+    quantize_rows(x, target, probes)
+    torch.cuda.synchronize()
+
+    codes = out.view(torch.uint8)[probes.long()]
+    assert codes[0].any()
+    assert torch.equal(codes, codes[:1].expand_as(codes))
+
+    def scale_bytes(row: int) -> torch.Tensor:
+        base = (row // 128) * 512 + (row % 32) * 16 + (row // 32 % 4) * 4
+        return sf[base : base + 4]
+
+    reference = scale_bytes(0)
+    assert reference.any()
+    for row in probes.tolist()[1:]:
+        assert torch.equal(scale_bytes(row), reference), row
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
