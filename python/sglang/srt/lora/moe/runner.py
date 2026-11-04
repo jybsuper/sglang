@@ -259,8 +259,8 @@ class MoeLoraRunner:
             _require_bf16_activations(base_layer)
             return "fp8_channel"
         raise NotImplementedError(
-            "MoE LoRA supports unquantized BF16, 128-block or per-channel FP8, "
-            "MXFP8, MXFP4 and NVFP4 MoE; this layer's quant method is "
+            "MoE LoRA supports unquantized BF16, 128-block, per-channel or "
+            "per-tensor FP8, MXFP8, MXFP4 and NVFP4 MoE; this layer's quant method is "
             f"{type(quant_method).__name__}"
         )
 
