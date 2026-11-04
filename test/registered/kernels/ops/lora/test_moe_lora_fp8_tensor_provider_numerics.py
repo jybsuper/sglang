@@ -18,12 +18,21 @@ _I = 512
 _TOPK = 2
 _T = 32
 _FMAX = torch.finfo(torch.float8_e4m3fn).max
+# Static checkpoint scales sit below this batch's range, so the provider
+# saturates at them: a dynamic scale would not.
+_STATIC_RANGE = 0.4
 
 
 def _tensor_quant(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Per-expert fp8 quant; returns (fp8 weight, fp32 scale [E])."""
     scale = weight.float().abs().amax(dim=(1, 2)).clamp(min=1e-6) / _FMAX
     return (weight.float() / scale[:, None, None]).to(torch.float8_e4m3fn), scale
+
+
+def _fake_quant(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """Round x through fp8 at one scale, saturating as the quantizer does."""
+    q = (x.float() / scale).clamp(-_FMAX, _FMAX).to(torch.float8_e4m3fn)
+    return q.float() * scale
 
 
 def _case(device, hidden_size=_H):
@@ -60,9 +69,10 @@ def _quant_info(w13, w2, hidden, act_pairs, static: bool, hidden_size=_H):
 
     w13_q, w13_s = _tensor_quant(w13)
     w2_q, w2_s = _tensor_quant(w2)
-    # A static checkpoint scale covers the activations it was calibrated on.
-    a13 = (hidden.float().abs().amax() / _FMAX).reshape(()) if static else None
-    a2 = (act_pairs.float().abs().amax() / _FMAX).reshape(()) if static else None
+    a13 = a2 = None
+    if static:
+        a13 = (hidden.float().abs().amax() * _STATIC_RANGE / _FMAX).reshape(())
+        a2 = (act_pairs.float().abs().amax() * _STATIC_RANGE / _FMAX).reshape(())
     info = MoeLoraFp8TensorQuantInfo(
         w13_weight=w13_q,
         w13_scale=w13_s,
@@ -120,8 +130,7 @@ def _references(hidden, act_pairs, w13_eff, w2_eff, experts, tokens):
 
 
 @pytest.mark.parametrize("hidden_size", [_H, 7168])
-@pytest.mark.parametrize("static", [True, False])
-def test_fp8_tensor_gateup_and_down_match_reference(static, hidden_size):
+def test_fp8_tensor_dynamic_scales_match_reference(hidden_size):
     if not torch.cuda.is_available():
         pytest.skip("CUDA required")
     device = torch.device("cuda")
@@ -129,7 +138,7 @@ def test_fp8_tensor_gateup_and_down_match_reference(static, hidden_size):
     pair_idx, experts, tokens = _routes(topk_ids)
     act_pairs = _act_pairs(len(pair_idx), device)
     quant_info, w13_eff, w2_eff = _quant_info(
-        w13, w2, hidden, act_pairs, static, hidden_size=hidden_size
+        w13, w2, hidden, act_pairs, False, hidden_size=hidden_size
     )
     got_gateup, got_down = _run(quant_info, hidden, topk_ids, act_pairs, pair_idx)
     ref_gateup, ref_down = _references(
@@ -138,6 +147,37 @@ def test_fp8_tensor_gateup_and_down_match_reference(static, hidden_size):
     # One activation scale per tensor: the coarsest FP8 quantization.
     assert _rel_l2(got_gateup, ref_gateup) < 8e-2
     assert _rel_l2(got_down, ref_down) < 8e-2
+
+
+@pytest.mark.parametrize("hidden_size", [_H, 7168])
+def test_fp8_tensor_static_scales_saturate_at_the_checkpoint(hidden_size):
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+    device = torch.device("cuda")
+    w13, w2, hidden, topk_ids = _case(device, hidden_size)
+    pair_idx, experts, tokens = _routes(topk_ids)
+    act_pairs = _act_pairs(len(pair_idx), device)
+    quant_info, w13_eff, w2_eff = _quant_info(
+        w13, w2, hidden, act_pairs, True, hidden_size=hidden_size
+    )
+    got_gateup, got_down = _run(quant_info, hidden, topk_ids, act_pairs, pair_idx)
+    # The reference rounds and saturates the activations at the static scales.
+    ref_gateup, ref_down = _references(
+        _fake_quant(hidden, quant_info.w13_input_scale),
+        _fake_quant(act_pairs, quant_info.w2_input_scale),
+        w13_eff,
+        w2_eff,
+        experts,
+        tokens,
+    )
+    assert _rel_l2(got_gateup, ref_gateup) < 1e-2
+    assert _rel_l2(got_down, ref_down) < 1e-2
+    # Saturation keeps the result away from the unclipped (dynamic) one.
+    dyn_gateup, dyn_down = _references(
+        hidden, act_pairs, w13_eff, w2_eff, experts, tokens
+    )
+    assert _rel_l2(got_gateup, dyn_gateup) > 5e-2
+    assert _rel_l2(got_down, dyn_down) > 5e-2
 
 
 @pytest.mark.parametrize("stale", [float("nan"), 1e4])
