@@ -172,8 +172,14 @@ def _fp8_rowwise_kernel_class_for(device: torch.device):
         )
 
         return GroupedGemmKernelSm100Fp8Rowwise
+    if major == 9:
+        from sglang.kernels.ops.lora.moe.cutedsl.kernel_sm90_fp8_rowwise import (
+            GroupedGemmKernelSm90Fp8Rowwise,
+        )
+
+        return GroupedGemmKernelSm90Fp8Rowwise
     raise NotImplementedError(
-        f"the row-scaled FP8 grouped GEMM needs SM100+; device is sm{major}x"
+        f"the row-scaled FP8 grouped GEMM needs SM90+; device is sm{major}x"
     )
 
 

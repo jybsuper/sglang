@@ -11,7 +11,7 @@ from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=20, stage="base-b-kernel-unit", runner_config="1-gpu-large")
-# The row-scaled CuTeDSL kernel is SM100-only: cover it in per-PR CI on Blackwell.
+# Also exercise the Blackwell row-scaled kernel in per-PR CI.
 register_cuda_ci(est_time=45, stage="base-b-kernel-unit", runner_config="4-gpu-b200")
 
 _E = 4
@@ -24,8 +24,8 @@ _T = 32
 def _skip_unless_supported(vendor):
     if not torch.cuda.is_available():
         pytest.skip("CUDA required")
-    if vendor == "cutedsl" and torch.cuda.get_device_capability()[0] < 10:
-        pytest.skip("the row-scaled FP8 CuTeDSL provider needs SM100+")
+    if vendor == "cutedsl" and torch.cuda.get_device_capability()[0] < 9:
+        pytest.skip("the row-scaled FP8 CuTeDSL provider needs SM90+")
 
 
 def _channel_quant(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
