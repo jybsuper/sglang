@@ -7,10 +7,7 @@ from typing import Optional
 import torch
 from transformers import BaseImageProcessor, BatchFeature
 
-from sglang.srt.managers.schedule_batch import (
-    MultimodalDataItem,
-    MultimodalProcessorOutput,
-)
+from sglang.srt.managers.req_types import MultimodalDataItem, MultimodalProcessorOutput
 from sglang.srt.multimodal.cache import (
     CONTENT_HASH_PREFIX,
     resolve_multimodal_item_hash,

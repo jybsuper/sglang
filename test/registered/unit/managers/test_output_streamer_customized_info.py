@@ -978,7 +978,9 @@ class TestOutputStreamerIndexerTopk(unittest.TestCase):
             ),
             (
                 f"{streamer}.get_observability",
-                SimpleNamespace(enable_request_time_stats_logging=False),
+                SimpleNamespace(
+                    enable_metrics=False, enable_request_time_stats_logging=False
+                ),
             ),
             # to_payload imports the capturer lazily from its owning module.
             (
@@ -1008,10 +1010,11 @@ class TestOutputStreamerIndexerTopk(unittest.TestCase):
                 streamer = Streamer(
                     send_to_detokenizer=SimpleNamespace(send_output=outputs.append),
                     tree_cache=None,
-                    server_args=SimpleNamespace(),
+                    server_args=SimpleNamespace(enable_lmcache=False),
                     is_generation=True,
                     spec_algorithm=SpeculativeAlgorithm.NONE,
                     disaggregation_mode=DisaggregationMode.NULL,
+                    skip_tokenizer_init=False,
                     enable_hicache_storage=lambda: False,
                 )
                 req = _FakeReq("r0", array("q", [10]), finished=True)

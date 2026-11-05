@@ -23,7 +23,6 @@ from unittest.mock import Mock
 
 from sglang.srt.lora.lora_registry import LoRARegistry
 from sglang.srt.managers.io_struct import (
-    LoadLoRAAdapterFromTensorsReqInput,
     LoadLoRAAdapterReqInput,
     LoRAUpdateOutput,
     UnloadLoRAAdapterReqInput,
@@ -67,19 +66,18 @@ def _manager(ranks):
     manager.lora_registry = LoRARegistry([])
     manager.pending_lora_unloads = {}
     manager.lora_ref_cache = {}
+    # sglang-miles: adapters staged by a deferred-publish weight-update session
+    manager._pending_lora_publications = {}
     manager.update_lora_adapter_communicator = ranks
     return manager
 
 
 async def _load(manager, name, from_tensors, pinned=False):
-    if from_tensors:
-        request = LoadLoRAAdapterFromTensorsReqInput(
-            lora_name=name,
-            config_dict={},
-            serialized_named_tensors=[b""],
-            pinned=pinned,
-        )
-        return await manager.load_lora_adapter_from_tensors(request)
+    # sglang-miles has no load-from-tensors request: streamed adapters are
+    # registered through register_lora_adapter and are never LRU-evicted (the
+    # cap rejects them instead; see test/registered/rl/test_lora_load_from_tensor.py),
+    # so only the path-loaded, reloadable flow exercises the LRU unload here.
+    assert not from_tensors
     request = LoadLoRAAdapterReqInput(
         lora_name=name, lora_path=f"/{name}", pinned=pinned
     )
@@ -91,7 +89,7 @@ class TestLoRALRUUnload(CustomTestCase):
         with get_context().override_server_args(
             enable_lora=True, dp_size=1, max_loaded_loras=MAX_LOADED_LORAS
         ):
-            for from_tensors in (False, True):
+            for from_tensors in (False,):
                 with self.subTest(from_tensors=from_tensors):
                     asyncio.run(scenario(from_tensors))
 
