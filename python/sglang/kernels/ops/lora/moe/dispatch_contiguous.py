@@ -275,6 +275,7 @@ def _fill_rows_contiguous_blockscaled_kernel(
     k_atoms,
     global_scale,
     TOPK: tl.constexpr,
+    TOPK_P2: tl.constexpr,
     K: tl.constexpr,
     BLOCK_K: tl.constexpr,
     VEC: tl.constexpr,
@@ -283,12 +284,17 @@ def _fill_rows_contiguous_blockscaled_kernel(
     PACK_E2M1: tl.constexpr,
     NVFP4: tl.constexpr,
 ):
-    # Quantize one column chunk of a token once, then fan it out to the
-    # token's routed destinations. Chunks divide K, so every lane is live.
+    # Quantize one column chunk of a token once and store it to every routed
+    # row in one tile. Chunks divide K, so every lane is live; the token's
+    # destinations load as one vector (-1 marks a pair without an expert).
     token = tl.program_id(0)
     col0 = tl.program_id(1) * BLOCK_K
     offs = col0 + tl.arange(0, BLOCK_K)
     x = tl.load(input_ptr + token.to(tl.int64) * K + offs)
+    lanes = tl.arange(0, TOPK_P2)
+    dsts = tl.load(
+        pair_to_row_ptr + token.to(tl.int64) * TOPK + lanes, mask=lanes < TOPK, other=-1
+    )
     codes, sf_bytes = quantize_tile(
         x.to(tl.float32)[None, :],
         global_scale,
@@ -298,27 +304,22 @@ def _fill_rows_contiguous_blockscaled_kernel(
         PACK_E2M1,
         NVFP4,
     )
-    for j in range(TOPK):
-        pair = token * TOPK + j
-        expert = tl.load(topk_ids_ptr + pair)
-        if expert >= 0:
-            dst = tl.load(pair_to_row_ptr + pair).to(tl.int64)
-            store_quantized_rows(
-                codes,
-                sf_bytes,
-                dst + tl.zeros((1,), tl.int64),
-                tl.arange(0, 1) == 0,
-                col0,
-                K,
-                out_ptr,
-                stride_out_row,
-                sf_ptr,
-                rows_per_slab,
-                row_atoms,
-                k_atoms,
-                VEC,
-                PACK_E2M1,
-            )
+    store_quantized_rows(
+        tl.broadcast_to(codes, (TOPK_P2, codes.shape[1])),
+        tl.broadcast_to(sf_bytes, (TOPK_P2, sf_bytes.shape[1])),
+        dsts.to(tl.int64),
+        dsts >= 0,
+        col0,
+        K,
+        out_ptr,
+        stride_out_row,
+        sf_ptr,
+        rows_per_slab,
+        row_atoms,
+        k_atoms,
+        VEC,
+        PACK_E2M1,
+    )
 
 
 def dispatch_fill_rows_contiguous_blockscaled(
@@ -336,13 +337,15 @@ def dispatch_fill_rows_contiguous_blockscaled(
     check_source_rows(hidden_states, topk_ids, num_pairs // num_tokens)
     assert k == rows_out.k and k % 128 == 0
     block_k = quant_column_chunk(k)
+    top_k = num_pairs // num_tokens
     _fill_rows_contiguous_blockscaled_kernel[(num_tokens, k // block_k)](
         hidden_states,
         rows_out.data,
         rows_out.scales,
         topk_ids.view(-1),
         pair_to_row,
-        TOPK=num_pairs // num_tokens,
+        TOPK=top_k,
+        TOPK_P2=max(2, triton.next_power_of_2(top_k)),
         K=k,
         BLOCK_K=block_k,
         num_warps=4,
