@@ -22,11 +22,15 @@ VENDORS = {
 }
 
 
-# A vendor measured faster on an SM major takes the default there: on SM100
-# the row-scaled CuTeDSL provider beat Triton by 5-13% in every Beam
-# (501B-A23B-FP8, TP4) decode and prefill cell but d1, with identical
-# numerics. The SM90 row-scaled kernel waits for its end-to-end numbers.
-PREFERRED_VENDORS = {10: {"fp8_channel": "cutedsl"}}
+# A vendor measured faster on an SM major takes the default there, with
+# identical numerics in both cases. SM100: the row-scaled CuTeDSL provider
+# beat Triton by 5-13% in every Beam (501B-A23B-FP8, TP4) decode and prefill
+# cell but d1. SM90: +5% at 32 decode streams, level at one stream and
+# 512-token prefill, -2% at 2k-token prefill (Qwen3-235B-A22B-FP8-dynamic,
+# TP4 on H200), taken for the decode win. Other majors keep Triton: the
+# row-scaled kernels exist for SM90 and SM100 only.
+_CUTEDSL_PER_CHANNEL = {"fp8_channel": "cutedsl"}
+PREFERRED_VENDORS = {9: _CUTEDSL_PER_CHANNEL, 10: _CUTEDSL_PER_CHANNEL}
 
 
 def default_vendor(family: str, sm_major: int | None = None) -> str:

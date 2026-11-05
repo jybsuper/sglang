@@ -317,8 +317,9 @@ class TestVendorResolution(CustomTestCase):
         )
 
         self.assertEqual(default_vendor("fp8_channel"), "triton")
-        self.assertEqual(default_vendor("fp8_channel", 9), "triton")
+        self.assertEqual(default_vendor("fp8_channel", 9), "cutedsl")
         self.assertEqual(default_vendor("fp8_channel", 10), "cutedsl")
+        self.assertEqual(default_vendor("fp8_channel", 12), "triton")
         self.assertEqual(default_vendor("nvfp4", 10), "marlin")
         self.assertEqual(resolve_vendor("fp8_channel", "marlin", sm_major=10), "cutedsl")
         self.assertEqual(resolve_vendor("mxfp4", "marlin"), "marlin")

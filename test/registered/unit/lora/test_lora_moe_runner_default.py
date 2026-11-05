@@ -114,18 +114,21 @@ class TestLoraMoeRunnerDefault(CustomTestCase):
                     {"moe_runner_backend": expected},
                 )
 
-    def test_sm100_prefers_cutedsl_for_per_channel_fp8(self):
-        """The row-scaled CuTeDSL provider leads Triton on SM100 (Beam board);
-        other SM majors keep Triton until their numbers are in."""
+    def test_sm90_and_sm100_prefer_cutedsl_for_per_channel_fp8(self):
+        """The row-scaled CuTeDSL provider leads Triton on SM100 (Beam board)
+        and at batched decode on SM90; other majors and no device keep Triton."""
         channel = dict(
             quantization="compressed-tensors",
             hf_quant_config=_compressed_tensors(CHANNEL_FP8),
         )
         for kwargs, by_major in (
-            (channel, {10: "lora_cutedsl", 9: "lora_triton", None: "lora_triton"}),
+            (
+                channel,
+                {10: "lora_cutedsl", 9: "lora_cutedsl", 12: "lora_triton", None: "lora_triton"},
+            ),
             (
                 dict(quantization="w8a8_fp8"),
-                {10: "lora_cutedsl", 9: "lora_triton", None: "lora_triton"},
+                {10: "lora_cutedsl", 9: "lora_cutedsl", 12: "lora_triton", None: "lora_triton"},
             ),
             # Families with one proven default keep it on every SM major.
             (dict(quantization="fp8"), {10: "lora_cutedsl", 9: "lora_cutedsl"}),
