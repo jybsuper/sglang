@@ -23,6 +23,7 @@ from sglang.srt.lora.moe.base_gemm_provider.base import (
     MoeBaseProvider,
 )
 from sglang.srt.lora.moe.plan import (
+    BFamily,
     ActFamily,
     AFamily,
     ASpec,
@@ -73,6 +74,10 @@ class MoeLoraBatch(msgspec.Struct, kw_only=True):
     @property
     def max_loras(self) -> int:
         return self.gate_up_lora_a.shape[0]
+
+
+def _epilogue_down_b(plan: MoePlan) -> bool:
+    return plan.down_b is not None and plan.down_b.family is BFamily.EPILOGUE
 
 
 class MoeLoraRunner:
@@ -180,6 +185,10 @@ class MoeLoraRunner:
         )
         for sel in plans.values():
             runner.validate_plan(sel.plan, base_gemm_rows=sel.base_gemm_rows)
+            if _epilogue_down_b(sel.plan):
+                runner.providers[sel.base_gemm_rows].enable_epilogue_down_lora(
+                    physical_rank
+                )
         runner.plans = dict(plans)
         return runner
 
@@ -342,6 +351,13 @@ class MoeLoraRunner:
                 f"provider exposes {provider.gate_up_slices} gate/up slices "
                 f"but is_gated={self.is_gated} needs {expected_slices}"
             )
+        if _epilogue_down_b(plan) and not getattr(
+            provider, "supports_epilogue_down_lora", False
+        ):
+            raise ValueError(
+                f"the plan fuses down-B into the base GEMM epilogue, which "
+                f"{provider.contract.key} does not implement"
+            )
 
     def run(
         self,
@@ -452,7 +468,13 @@ class MoeLoraRunner:
         name: str,
         *,
         pair_to_row: torch.Tensor | None = None,
+        output: torch.Tensor | None = None,
+        output_rows: torch.Tensor | None = None,
+        row_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """``output`` replaces the pair-major bridge buffer: with
+        ``output_rows`` the grouped kernel stores pair p at row output_rows[p]
+        of its slot's plane (a 3-D output) and scales rows by ``row_scale``."""
         if spec.family is AFamily.TOKEN_GROUPED:
             route = routes.shared_token
             if route is None:
@@ -470,12 +492,17 @@ class MoeLoraRunner:
         if spec.family is AFamily.TOKEN_DENSE:
             # One bridge plane per resident slot; per-row B indexes the planes.
             shape = (route.max_loras, num_output_rows, weight.shape[1])
-        output = self.workspace.tensor(
-            f"{name}:output",
-            shape,
-            dtype=self.lora_delta_dtype,
-            device=input.device,
-        )
+        if output is None:
+            output = self.workspace.tensor(
+                f"{name}:output",
+                shape,
+                dtype=self.lora_delta_dtype,
+                device=input.device,
+            )
+        elif spec.family is not AFamily.GROUPED:
+            raise NotImplementedError(
+                f"only the grouped A family writes a placed bridge, not {spec.family.value}"
+            )
         config = launch_config.for_a(spec.site)
         pair_input = spec.site is Site.DOWN
         match spec.family.value:
@@ -516,6 +543,8 @@ class MoeLoraRunner:
                     pair_to_row=pair_to_row,
                     partial=partial,
                     counters=counters,
+                    output_rows=output_rows,
+                    row_scale=row_scale,
                 )
             case "per_row":
                 per_row_lora_a(
@@ -765,7 +794,7 @@ class MoeLoraRunner:
     ]:
         state = _LoraStageState()
 
-        def down_a() -> None:
+        def down_a(**placed) -> None:
             state.rank = self._run_a(
                 launch_config,
                 plan.down_a,
@@ -774,6 +803,7 @@ class MoeLoraRunner:
                 routes,
                 "down_a",
                 pair_to_row=down_a_gather,
+                **placed,
             )
 
         def down_b() -> None:
@@ -809,6 +839,33 @@ class MoeLoraRunner:
             provider.down(base_gemm_state, act_out, down_out)
             return down_out
 
+        if _epilogue_down_b(plan):
+            # The down A kernel places the bridge in the provider's row order,
+            # one plane per slot, pre-scaled for the alpha epilogue; the base
+            # GEMM adds slot x expert weights times those rows per tile.
+            weights = batch.down_lora_b.flatten(0, 1)
+            planes = provider.epilogue_down_lora_planes(
+                base_gemm_state,
+                self.workspace,
+                max_loras=batch.max_loras,
+                rank=weights.shape[-1],
+            )
+            if down_a_gather is None:
+                raise ValueError("the epilogue down-B needs provider-ordered rows")
+            down_a(
+                output=planes,
+                output_rows=down_a_gather,
+                row_scale=provider.epilogue_down_lora_row_scale(),
+            )
+            down_out = provider.down_output(base_gemm_state, self.workspace)
+            provider.down(
+                base_gemm_state,
+                act_out,
+                down_out,
+                lora=(weights, planes, self._slots_used(batch)),
+            )
+            return down_out, state.rank, None
+
         if plan.down_overlap is DownOverlap.NONE:
             down_a()
             if plan.down_b_into_base:
@@ -843,6 +900,21 @@ class MoeLoraRunner:
             )
 
         return down_out, state.rank, state.delta
+
+    def _slots_used(self, batch: MoeLoraBatch) -> torch.Tensor:
+        """int32 [1]: the resident slots the batch addresses (max slot + 1),
+        once per forward and mapping, replayed inside graphs."""
+        mapping = batch.token_lora_mapping
+
+        def build():
+            slots = self.workspace.tensor(
+                "lora:slots_used", (1,), dtype=torch.int32, device=mapping.device
+            )
+            slots.copy_(mapping.max().view(1))
+            slots.add_(1)
+            return slots
+
+        return self.workspace.route(mapping, ("slots_used",), build)
 
     def _allocate_output(
         self,
@@ -891,7 +963,7 @@ class MoeLoraRunner:
                 output,
                 lora_delta=(
                     None
-                    if plan.down_b_into_base
+                    if plan.down_b_into_base or _epilogue_down_b(plan)
                     else down_delta.view(num_tokens, self.top_k, self.hidden_size)
                 ),
             )

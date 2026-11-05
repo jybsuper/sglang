@@ -156,7 +156,10 @@ class MoeBaseProvider:
         row_state,
         act_out: torch.Tensor,
         out: torch.Tensor,
+        lora: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> None:
+        """``lora`` (down-B weights, bridge planes, slots) is only passed to
+        providers that set ``supports_epilogue_down_lora``."""
         raise NotImplementedError
 
     def down_output(self, row_state, workspace: LoraWorkspace) -> torch.Tensor:

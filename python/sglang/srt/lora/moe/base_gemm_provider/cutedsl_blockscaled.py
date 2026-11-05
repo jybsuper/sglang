@@ -83,6 +83,11 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         self._alpha = {"gemm1": None, "gemm2": None}
         self._alpha_rows_per_half = {"gemm1": 1, "gemm2": 1}
         self._act_scale = {"gemm1": None, "gemm2": None}
+        # The epilogue down-LoRA: compiled on request for one rank.
+        self._epilogue_lora_rank = 0
+        self._epilogue_lora_k = 0
+        self._epilogue_row_scale = None
+        self._lora_dummies = None
 
     def _stage_weight(self, stage: str) -> torch.Tensor:
         if stage == "gemm1":
@@ -156,8 +161,17 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
         row_state,
         schedule: torch.Tensor,
         tiles: torch.Tensor,
+        lora: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> None:
-        call = self._compiled[row_state.token_width][stage]
+        """``lora`` = (weights [slots * E, N, rank], planes, slots int32 [1])
+        selects the stage's epilogue-LoRA build; the plain build takes unread
+        dummies in those slots."""
+        call = self._compiled[row_state.token_width][
+            f"{stage}:lora" if lora is not None else stage
+        ]
+        lora_w, lora_p, lora_slots = (
+            lora if lora is not None else self._lora_dummy_operands(a_q.device)
+        )
         # Runtime wrapping must match the compiled argument's MLIR type.
         dyn = self._as_dynamic_cute_tensor
         call.compiled_fn(
@@ -167,11 +181,86 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             dyn(call.sf_weights, leading_dim=0),
             dyn(self._rows_arg(c), leading_dim=2),
             dyn(self._alpha_arg(stage), leading_dim=1),
+            dyn(lora_w, leading_dim=2),
+            dyn(lora_p, leading_dim=2),
+            dyn(lora_slots, leading_dim=0),
             dyn(self._group_arg(row_state), leading_dim=0),
             dyn(schedule, leading_dim=0),
             dyn(tiles, leading_dim=0),
             self._stream(a_q.device),
         )
+
+    def _lora_dummy_operands(self, device: torch.device) -> tuple:
+        if self._lora_dummies is None:
+            self._lora_dummies = (
+                torch.zeros((1, 16, 16), dtype=torch.bfloat16, device=device),
+                torch.zeros((1, 16, 16), dtype=torch.bfloat16, device=device),
+                torch.zeros((1,), dtype=torch.int32, device=device),
+            )
+        return self._lora_dummies
+
+    # The epilogue down-LoRA: the down GEMM adds ``down_lora_b @ bridge`` per
+    # (slot, expert) tile before its alpha epilogue; the bridge arrives in
+    # the provider's own row order on one plane per slot.
+    supports_epilogue_down_lora = True
+
+    def enable_epilogue_down_lora(self, rank: int) -> None:
+        """Compile the down stage with the epilogue LoRA for ``rank`` (a
+        multiple of 8: the weight rows are TMA tiles; the MMA K pads to 16)."""
+        if rank % 8:
+            raise ValueError(
+                f"the epilogue down-LoRA takes ranks that are multiples of 8, got {rank}"
+            )
+        if self._epilogue_lora_rank == rank:
+            return
+        lora_k = -(-rank // 16) * 16
+        for token_width, config in self._tile_configs.items():
+            self._compile_stage(token_width, "gemm2", config, lora_k=lora_k)
+        torch.cuda.synchronize(self._w13.device)
+        self._epilogue_lora_rank, self._epilogue_lora_k = rank, lora_k
+
+    def epilogue_down_lora_rank(self) -> int:
+        return self._epilogue_lora_rank
+
+    def epilogue_down_lora_row_scale(self) -> torch.Tensor | None:
+        """Per-expert factor the bridge rows carry so the alpha epilogue
+        restores the delta: 1 / alpha[expert] for NVFP4, nothing for MX."""
+        alpha = self._alpha["gemm2"]
+        if alpha is None:
+            return None
+        if self._epilogue_row_scale is None:
+            self._epilogue_row_scale = (1.0 / alpha.reshape(-1)).contiguous()
+        return self._epilogue_row_scale
+
+    def epilogue_down_lora_planes(
+        self, row_state, workspace, *, max_loras: int, rank: int
+    ) -> torch.Tensor:
+        """Zeroed BF16 bridge planes [max_loras, rows, rank] over the provider's
+        down-input rows (every row of every slot, so unrouted and padded
+        rows add nothing)."""
+        rows = self._rows_arg(row_state.act_q)
+        shape = (max_loras, rows.shape[0] * rows.shape[1], -(-rank // 16) * 16)
+        planes = prepare_buffer(
+            workspace,
+            "down_epilogue:planes",
+            shape,
+            dtype=torch.bfloat16,
+            device=rows.device,
+        )
+        planes.zero_()
+        return planes
+
+    def _epilogue_lora_operands(self, row_state, lora: tuple) -> tuple:
+        """Reshape the planes to the kernel's (plane, rows, rank) view: one
+        plane per slot for flat rows, per (slot, expert) slab for masked rows."""
+        weights, planes, slots = lora
+        rows_per_plane = self._rows_arg(row_state.act_q).shape[1]
+        if weights.shape[0] != planes.shape[0] * self.quant_info.num_local_experts:
+            raise ValueError(
+                "the epilogue down-LoRA takes one weight plane per (slot, expert): "
+                f"got weights {tuple(weights.shape)} for {planes.shape[0]} slots"
+            )
+        return weights, planes.view(-1, rows_per_plane, planes.shape[-1]), slots
 
     def _alpha_arg(self, stage: str) -> torch.Tensor:
         alpha = self._alpha[stage]
@@ -190,6 +279,22 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             alpha_rows_per_half=self._alpha_rows_per_half[stage],
         )
 
+    def _lora_dummy_kwargs(
+        self, lora_k: int, planes_per_slot: int, n: int, rows: int, device
+    ) -> dict:
+        """Zero epilogue-LoRA operands of one slot for a compile-time build;
+        the weights' rank extent is dynamic, so the padded K is the build."""
+        if not lora_k:
+            return {}
+        experts = self.quant_info.num_local_experts
+        return dict(
+            lora_w=torch.zeros((experts, n, lora_k), dtype=torch.bfloat16, device=device),
+            lora_planes=torch.zeros(
+                (planes_per_slot, rows, lora_k), dtype=torch.bfloat16, device=device
+            ),
+            lora_slots=torch.zeros((1,), dtype=torch.int32, device=device),
+        )
+
     def gateup(self, row_state, out: torch.Tensor) -> None:
         self._launch(
             "gemm1",
@@ -201,7 +306,16 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             row_state.gemm1_tiles,
         )
 
-    def down(self, row_state, act_out: torch.Tensor, out: torch.Tensor) -> None:
+    def down(
+        self,
+        row_state,
+        act_out: torch.Tensor,
+        out: torch.Tensor,
+        lora: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+    ) -> None:
+        """``lora`` = (down_lora_b [slots * E, hidden, rank], bridge planes from
+        epilogue_down_lora_planes, slots int32 [1]) adds the down-LoRA delta
+        inside the GEMM."""
         if not row_state.act_quant_ready:
             # Fused-B activation bypasses act_with_delta: quantize separately.
             self._quantize(
@@ -211,6 +325,13 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
                 row_state.act_sf,
                 row_state.pair_to_row,
             )
+        if lora is not None:
+            if self._epilogue_lora_rank != lora[0].shape[-1]:
+                raise ValueError(
+                    f"the epilogue down-LoRA was compiled for rank "
+                    f"{self._epilogue_lora_rank}, not {lora[0].shape[-1]}"
+                )
+            lora = self._epilogue_lora_operands(row_state, lora)
         self._launch(
             "gemm2",
             row_state.act_q,
@@ -219,6 +340,7 @@ class _CuteDslBlockScaledMixin(CuteDslTileMixin):
             row_state,
             row_state.gemm2_schedule,
             row_state.gemm2_tiles,
+            lora=lora,
         )
 
 
@@ -279,7 +401,7 @@ class _CuteDslBlockScaledMaskedProvider(
         self._schedule_capacities = dual_stage_schedule_capacities_masked
         self._init_tiles(quant_info)
 
-    def _prepare_dummy(self, stage: str, config):
+    def _prepare_dummy(self, stage: str, config, lora_k: int = 0):
         weight, weight_sf = self._stage_weight(stage), self._stage_scale(stage)
         device = weight.device
         experts, n, k_store = weight.shape
@@ -304,6 +426,7 @@ class _CuteDslBlockScaledMaskedProvider(
             dummy_masked,
             config=config,
             **self._stage_kwargs(stage),
+            **self._lora_dummy_kwargs(lora_k, experts, n, 256, device),
         )
 
     @staticmethod
@@ -488,7 +611,7 @@ class _CuteDslBlockScaledContiguousProvider(
     def _admit_tile_width(self, token_width: int) -> None:
         self._validate_tile_geometry(token_width, self._m_alignment)
 
-    def _prepare_dummy(self, stage: str, config):
+    def _prepare_dummy(self, stage: str, config, lora_k: int = 0):
         weight, weight_sf = self._stage_weight(stage), self._stage_scale(stage)
         device = weight.device
         num_experts, n, k_store = weight.shape
@@ -509,6 +632,7 @@ class _CuteDslBlockScaledContiguousProvider(
             dummy_seg,
             config=config,
             **self._stage_kwargs(stage),
+            **self._lora_dummy_kwargs(lora_k, 1, n, 256, device),
         )
 
     @staticmethod

@@ -212,6 +212,9 @@ def _grouped_gemm_blockscaled_swap_ab(
     sf_weights: cute.Tensor,  # flat uint8 scale atoms over (n_out, k, expert)
     c: cute.Tensor,  # physical output (expert, m_max, n_out) bf16
     alpha: cute.Tensor,  # fp32 (expert, halves) epilogue scales; unread unless use_alpha
+    lora_w: cute.Tensor,  # bf16 (slot * experts + expert, n_out, rank); unread unless lora_k
+    lora_p: cute.Tensor,  # bf16 (plane, rows, rank) bridge planes; unread unless lora_k
+    lora_slots: cute.Tensor,  # int32 [1]: resident adapter slots to apply
     group_m: cute.Tensor,
     direct_schedule: cute.Tensor,
     schedule_tiles: cute.Tensor,
@@ -222,6 +225,7 @@ def _grouped_gemm_blockscaled_swap_ab(
     sf_dtype: cutlass.Constexpr = cutlass.Float8E8M0FNU,
     use_alpha: cutlass.Constexpr = False,
     alpha_rows_per_half: cutlass.Constexpr = 1,
+    lora_experts: cutlass.Constexpr = 1,
 ):
     # SFA follows weights (kernel A); SFB follows tokens (kernel B).
     weight_mke = _blockscaled_operand_mke(b, ab_dtype)
@@ -233,6 +237,13 @@ def _grouped_gemm_blockscaled_swap_ab(
     sfb_tokens = cute.make_tensor(
         cute.recast_ptr(sf_tokens.iterator, dtype=sf_dtype), sf_tokens.layout
     )
+    # The LoRA weights follow kernel A (hidden rows); the planes follow kernel B.
+    lora_w_mke = cute.make_tensor(
+        lora_w.iterator, cute.select(lora_w.layout, mode=[1, 2, 0])
+    )
+    lora_p_nke = cute.make_tensor(
+        lora_p.iterator, cute.select(lora_p.layout, mode=[1, 2, 0])
+    )
     gemm_op(
         weight_mke,
         token_nke,
@@ -240,6 +251,9 @@ def _grouped_gemm_blockscaled_swap_ab(
         sfb_tokens,
         output_mne,
         alpha,
+        lora_w_mke,
+        lora_p_nke,
+        lora_slots,
         group_m,
         direct_schedule,
         schedule_tiles,
@@ -248,7 +262,43 @@ def _grouped_gemm_blockscaled_swap_ab(
         epilogue_op,
         use_alpha,
         alpha_rows_per_half,
+        lora_experts,
     )
+
+
+def _epilogue_lora_operands(
+    lora_w: torch.Tensor | None,
+    lora_planes: torch.Tensor | None,
+    lora_slots: torch.Tensor | None,
+    device,
+) -> tuple[tuple, tuple, int]:
+    """(cute operands, their owners, lora_k): the real BF16 operands, or
+    unread 3-D dummies for a kernel built without the epilogue LoRA."""
+    if lora_w is None:
+        lora_w = torch.zeros((1, 16, 16), dtype=torch.bfloat16, device=device)
+        lora_planes = torch.zeros((1, 16, 16), dtype=torch.bfloat16, device=device)
+        lora_slots = torch.zeros((1,), dtype=torch.int32, device=device)
+        lora_k = 0
+    else:
+        if lora_w.dtype != torch.bfloat16 or lora_planes.dtype != torch.bfloat16:
+            raise ValueError("the epilogue LoRA operands must be BF16")
+        # TMA reads the weights' rank columns (16-byte row strides) and
+        # zero-fills the planes' padded K beyond them.
+        rank, lora_k = lora_w.shape[-1], lora_planes.shape[-1]
+        if rank % 8 or lora_k % 16 or not rank <= lora_k < rank + 16:
+            raise ValueError(
+                "the epilogue LoRA takes weights of a rank that is a multiple of 8 "
+                "and planes padded to the next multiple of 16; got "
+                f"{tuple(lora_w.shape)} and {tuple(lora_planes.shape)}"
+            )
+        if lora_slots.dtype != torch.int32 or lora_slots.numel() != 1:
+            raise ValueError("lora_slots is one int32 device scalar")
+    args = (
+        as_dynamic_cute_tensor(lora_w, leading_dim=2),
+        as_dynamic_cute_tensor(lora_planes, leading_dim=2),
+        as_dynamic_cute_tensor(lora_slots, leading_dim=0),
+    )
+    return args, (lora_w, lora_planes, lora_slots), lora_k
 
 
 def _blockscaled_kernel_class_for(device: torch.device):
@@ -292,6 +342,7 @@ class PreparedGroupedGemm(msgspec.Struct, kw_only=True):
     schedule_tiles_owner: torch.Tensor
     stream: cuda.CUstream
     alpha_owner: torch.Tensor | None = None
+    lora_owner: tuple | None = None
 
     def launch(self) -> None:
         self.compiled_fn(
@@ -648,7 +699,14 @@ def prepare_masked_blockscaled(
     alpha_rows_per_half: int = 1,
     direct_schedule: torch.Tensor | None = None,
     schedule_tiles: torch.Tensor | None = None,
+    lora_w: torch.Tensor | None = None,  # bf16 [slots * E, N, rank]
+    lora_planes: torch.Tensor | None = None,  # bf16 [slots * E, m_max, rank]
+    lora_slots: torch.Tensor | None = None,  # int32 [1]
 ) -> PreparedGroupedGemm:
+    """``lora_w``/``lora_planes``/``lora_slots`` add the down-LoRA inside the
+    epilogue: tile (expert, rows) accumulates ``lora_w[slot * E + expert] @
+    lora_planes[slot * E + expert, rows]^T`` for the first ``lora_slots[0]``
+    slots before the alpha epilogue."""
     ab_dtype, sf_dtype = _blockscaled_dtypes(a.dtype, sf_vec_size)
     experts, m_max, k_store = a.shape
     n = b.shape[1]
@@ -660,6 +718,9 @@ def prepare_masked_blockscaled(
         rows=n,
         rows_per_half=alpha_rows_per_half,
         config=config,
+    )
+    lora_args, lora_owner, lora_k = _epilogue_lora_operands(
+        lora_w, lora_planes, lora_slots, a.device
     )
     prepared = _compile_prepared(
         kernel_cls=_blockscaled_kernel_class_for(a.device),
@@ -675,15 +736,23 @@ def prepare_masked_blockscaled(
             as_dynamic_cute_tensor(sf_weights, leading_dim=0),
             as_dynamic_cute_tensor(c, leading_dim=2),
             alpha_arg,
+            *lora_args,
         ),
         group_m_arg=as_dynamic_cute_tensor(masked_m, leading_dim=0),
         direct_schedule=direct_schedule,
         schedule_tiles=schedule_tiles,
         device=a.device,
-        kernel_kwargs=dict(sf_vec_size=sf_vec_size, sf_dtype=sf_dtype),
-        wrapper_constexprs=(ab_dtype, sf_dtype, use_alpha, alpha_rows_per_half),
+        kernel_kwargs=dict(sf_vec_size=sf_vec_size, sf_dtype=sf_dtype, lora_k=lora_k),
+        wrapper_constexprs=(
+            ab_dtype,
+            sf_dtype,
+            use_alpha,
+            alpha_rows_per_half,
+            experts,
+        ),
     )
     prepared.alpha_owner = alpha_owner
+    prepared.lora_owner = lora_owner
     return prepared
 
 
@@ -701,8 +770,13 @@ def prepare_contiguous_blockscaled(
     alpha_rows_per_half: int = 1,
     direct_schedule: torch.Tensor | None = None,
     schedule_tiles: torch.Tensor | None = None,
+    lora_w: torch.Tensor | None = None,  # bf16 [slots * E, N, rank]
+    lora_planes: torch.Tensor | None = None,  # bf16 [slots, M_ceil, rank]
+    lora_slots: torch.Tensor | None = None,  # int32 [1]
 ) -> PreparedGroupedGemm:
-    """Use seg_offsets in the group_m slot to address flat expert segments."""
+    """Use seg_offsets in the group_m slot to address flat expert segments.
+    The epilogue LoRA operands are as in prepare_masked_blockscaled with one
+    flat bridge plane per slot."""
     ab_dtype, sf_dtype = _blockscaled_dtypes(a.dtype, sf_vec_size)
     m_ceil, k_store = a.shape
     experts, n, _ = b.shape
@@ -714,6 +788,9 @@ def prepare_contiguous_blockscaled(
         rows=n,
         rows_per_half=alpha_rows_per_half,
         config=config,
+    )
+    lora_args, lora_owner, lora_k = _epilogue_lora_operands(
+        lora_w, lora_planes, lora_slots, a.device
     )
     prepared = _compile_prepared(
         kernel_cls=_blockscaled_kernel_class_for(a.device),
@@ -729,13 +806,21 @@ def prepare_contiguous_blockscaled(
             as_dynamic_cute_tensor(sf_weights, leading_dim=0),
             as_dynamic_cute_tensor(c.unsqueeze(0), leading_dim=2),
             alpha_arg,
+            *lora_args,
         ),
         group_m_arg=as_dynamic_cute_tensor(seg_offsets, leading_dim=0),
         direct_schedule=direct_schedule,
         schedule_tiles=schedule_tiles,
         device=a.device,
-        kernel_kwargs=dict(sf_vec_size=sf_vec_size, sf_dtype=sf_dtype),
-        wrapper_constexprs=(ab_dtype, sf_dtype, use_alpha, alpha_rows_per_half),
+        kernel_kwargs=dict(sf_vec_size=sf_vec_size, sf_dtype=sf_dtype, lora_k=lora_k),
+        wrapper_constexprs=(
+            ab_dtype,
+            sf_dtype,
+            use_alpha,
+            alpha_rows_per_half,
+            experts,
+        ),
     )
     prepared.alpha_owner = alpha_owner
+    prepared.lora_owner = lora_owner
     return prepared

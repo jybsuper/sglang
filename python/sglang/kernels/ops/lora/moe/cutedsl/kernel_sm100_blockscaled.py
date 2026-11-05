@@ -162,6 +162,8 @@ class GroupedGemmKernelSm100BlockScaled:
         contiguous_segments: bool = False,
         sf_vec_size: int = 32,
         sf_dtype: Type[cutlass.Numeric] = cutlass.Float8E8M0FNU,
+        lora_k: int = 0,
+        lora_stages: int = 4,
     ):
         self.acc_dtype: Type[cutlass.Numeric] = acc_dtype
         self.use_2cta_instrs = use_2cta_instrs
@@ -175,6 +177,13 @@ class GroupedGemmKernelSm100BlockScaled:
         self.contiguous_segments = contiguous_segments
         self.sf_vec_size = sf_vec_size
         self.sf_dtype: Type[cutlass.Numeric] = sf_dtype
+        # Epilogue LoRA: one BF16 rank-``lora_k`` MMA per adapter slot into the
+        # accumulator after the K loop, operands through ``lora_stages`` TMA
+        # stages; 0 compiles none of it.
+        if lora_k % 16:
+            raise ValueError(f"the epilogue LoRA rank must be a multiple of 16, got {lora_k}")
+        self.lora_k = lora_k
+        self.lora_stages = lora_stages
         if contiguous_segments and not swap_ab:
             raise ValueError("contiguous_segments requires swap_ab")
         if cluster_shape_mn != (1, 1) or use_2cta_instrs:
@@ -265,6 +274,34 @@ class GroupedGemmKernelSm100BlockScaled:
 
         self.smem_capacity = utils.get_smem_capacity_in_bytes()
 
+        # The LoRA operands are K-major BF16 tiles of the same M x N as the
+        # block-scaled MMA, so their MMA shares the TMEM accumulator layout.
+        lora_bytes = 0
+        self.tiled_mma_lora = tiled_mma
+        self.lora_mma_tiler = self.mma_tiler
+        if self.lora_k:
+            self.tiled_mma_lora = utils.sm100.make_trivial_tiled_mma(
+                cutlass.BFloat16,
+                cutlass.BFloat16,
+                tcgen05.OperandMajorMode.K,
+                tcgen05.OperandMajorMode.K,
+                self.acc_dtype,
+                self.cta_group,
+                self.mma_tiler[:2],
+            )
+            self.lora_mma_tiler = (self.mma_tiler[0], self.mma_tiler[1], self.lora_k)
+            lw_one = utils.sm100.make_smem_layout_a(
+                self.tiled_mma_lora, self.lora_mma_tiler, cutlass.BFloat16, 1
+            )
+            lp_one = utils.sm100.make_smem_layout_b(
+                self.tiled_mma_lora, self.lora_mma_tiler, cutlass.BFloat16, 1
+            )
+            self.lora_stage_bytes = cute.size_in_bytes(
+                cutlass.BFloat16, lw_one
+            ) + cute.size_in_bytes(cutlass.BFloat16, lp_one)
+            # Plus alignment slack for the two staged buffers.
+            lora_bytes = self.lora_stages * self.lora_stage_bytes + 2048
+
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -276,6 +313,7 @@ class GroupedGemmKernelSm100BlockScaled:
             self.smem_capacity,
             self.occupancy,
             c_smem_layout,
+            lora_bytes,
         )
 
         self.a_smem_layout_staged = utils.sm100.make_smem_layout_a(
@@ -294,6 +332,21 @@ class GroupedGemmKernelSm100BlockScaled:
         self.c_smem_layout_staged = utils.sm100.make_smem_layout_epi(
             self.c_dtype, self.c_layout, self.epi_tile, self.num_c_stage
         )
+        self.lw_smem_layout_staged = self.a_smem_layout_staged
+        self.lp_smem_layout_staged = self.b_smem_layout_staged
+        if self.lora_k:
+            self.lw_smem_layout_staged = utils.sm100.make_smem_layout_a(
+                self.tiled_mma_lora,
+                self.lora_mma_tiler,
+                cutlass.BFloat16,
+                self.lora_stages,
+            )
+            self.lp_smem_layout_staged = utils.sm100.make_smem_layout_b(
+                self.tiled_mma_lora,
+                self.lora_mma_tiler,
+                cutlass.BFloat16,
+                self.lora_stages,
+            )
 
         # The accumulator stages plus both scale-factor copies fit in TMEM.
         self.num_tmem_alloc_cols = cute.arch.get_max_tmem_alloc_cols(self.arch)
@@ -307,6 +360,9 @@ class GroupedGemmKernelSm100BlockScaled:
         sfb: cute.Tensor,
         c: cute.Tensor,
         alpha: cute.Tensor,
+        lora_w: cute.Tensor,
+        lora_p: cute.Tensor,
+        lora_slots: cute.Tensor,
         group_m: cute.Tensor,
         direct_schedule: cute.Tensor,
         schedule_tiles: cute.Tensor,
@@ -315,7 +371,13 @@ class GroupedGemmKernelSm100BlockScaled:
         epilogue_op: cutlass.Constexpr = lambda x: x,
         use_alpha: cutlass.Constexpr = False,
         alpha_rows_per_half: cutlass.Constexpr = 1,
+        lora_experts: cutlass.Constexpr = 1,
     ):
+        """``lora_w`` (hidden, rank, slot * lora_experts + expert) BF16 weights
+        and ``lora_p`` (rows, rank, plane) BF16 bridge planes, one plane per
+        slot (flat rows) or per (slot, expert) slab, add
+        ``lora_w @ lora_p^T`` to each tile for the first ``lora_slots[0]``
+        slots when the kernel was built with ``lora_k``; unread otherwise."""
         self.a_dtype: Type[cutlass.Numeric] = a.element_type
         self.b_dtype: Type[cutlass.Numeric] = b.element_type
         self.c_dtype: Type[cutlass.Numeric] = c.element_type
@@ -400,6 +462,33 @@ class GroupedGemmKernelSm100BlockScaled:
             internal_type=cutlass.Int16,
         )
 
+        # Without lora_k the LoRA atoms alias the A/B atoms and stay unread.
+        tma_atom_lw, tma_tensor_lw = tma_atom_a, tma_tensor_a
+        tma_atom_lp, tma_tensor_lp = tma_atom_b, tma_tensor_b
+        if cutlass.const_expr(self.lora_k > 0):
+            lw_smem_layout = cute.slice_(
+                self.lw_smem_layout_staged, (None, None, None, 0)
+            )
+            tma_atom_lw, tma_tensor_lw = cute.nvgpu.make_tiled_tma_atom_A(
+                a_op,
+                lora_w,
+                lw_smem_layout,
+                self.lora_mma_tiler,
+                self.tiled_mma_lora,
+                self.cluster_layout_vmnk.shape,
+            )
+            lp_smem_layout = cute.slice_(
+                self.lp_smem_layout_staged, (None, None, None, 0)
+            )
+            tma_atom_lp, tma_tensor_lp = cute.nvgpu.make_tiled_tma_atom_B(
+                b_op,
+                lora_p,
+                lp_smem_layout,
+                self.lora_mma_tiler,
+                self.tiled_mma_lora,
+                self.cluster_layout_vmnk.shape,
+            )
+
         a_copy_size = cute.size_in_bytes(self.a_dtype, a_smem_layout)
         b_copy_size = cute.size_in_bytes(self.b_dtype, b_smem_layout)
         sfa_copy_size = cute.size_in_bytes(self.sf_dtype, sfa_smem_layout)
@@ -425,6 +514,7 @@ class GroupedGemmKernelSm100BlockScaled:
         self.kernel(
             tiled_mma,
             tiled_mma_sfb,
+            self.tiled_mma_lora,
             tma_atom_a,
             tma_tensor_a,
             tma_atom_b,
@@ -435,7 +525,12 @@ class GroupedGemmKernelSm100BlockScaled:
             tma_tensor_sfb,
             tma_atom_c,
             tma_tensor_c,
+            tma_atom_lw,
+            tma_tensor_lw,
+            tma_atom_lp,
+            tma_tensor_lp,
             alpha,
+            lora_slots,
             group_m,
             direct_schedule,
             schedule_tiles,
@@ -445,12 +540,15 @@ class GroupedGemmKernelSm100BlockScaled:
             self.b_smem_layout_staged,
             self.sfa_smem_layout_staged,
             self.sfb_smem_layout_staged,
+            self.lw_smem_layout_staged,
+            self.lp_smem_layout_staged,
             self.c_smem_layout_staged,
             self.epi_tile,
             self.tile_sched_params,
             epilogue_op,
             use_alpha,
             alpha_rows_per_half,
+            lora_experts,
         ).launch(
             grid=grid,
             block=[self.threads_per_cta, 1, 1],
@@ -464,6 +562,7 @@ class GroupedGemmKernelSm100BlockScaled:
         self,
         tiled_mma: cute.TiledMma,
         tiled_mma_sfb: cute.TiledMma,
+        tiled_mma_lora: cute.TiledMma,
         tma_atom_a: cute.CopyAtom,
         mA_mkl: cute.Tensor,
         tma_atom_b: cute.CopyAtom,
@@ -474,7 +573,12 @@ class GroupedGemmKernelSm100BlockScaled:
         mSFB_nkl: cute.Tensor,
         tma_atom_c: cute.CopyAtom,
         mC_mnl: cute.Tensor,
+        tma_atom_lw: cute.CopyAtom,
+        mLW_mkl: cute.Tensor,
+        tma_atom_lp: cute.CopyAtom,
+        mLP_nkl: cute.Tensor,
         alpha: cute.Tensor,
+        lora_slots: cute.Tensor,
         group_m: cute.Tensor,
         direct_schedule: cute.Tensor,
         schedule_tiles: cute.Tensor,
@@ -484,12 +588,15 @@ class GroupedGemmKernelSm100BlockScaled:
         b_smem_layout_staged: cute.ComposedLayout,
         sfa_smem_layout_staged: cute.Layout,
         sfb_smem_layout_staged: cute.Layout,
+        lw_smem_layout_staged: cute.ComposedLayout,
+        lp_smem_layout_staged: cute.ComposedLayout,
         c_smem_layout_staged: cute.ComposedLayout,
         epi_tile: cute.Tile,
         tile_sched_params: MoESchedulerParams,
         epilogue_op: cutlass.Constexpr,
         use_alpha: cutlass.Constexpr,
         alpha_rows_per_half: cutlass.Constexpr,
+        lora_experts: cutlass.Constexpr,
     ):
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
@@ -500,6 +607,9 @@ class GroupedGemmKernelSm100BlockScaled:
             cpasync.prefetch_descriptor(tma_atom_sfa)
             cpasync.prefetch_descriptor(tma_atom_sfb)
             cpasync.prefetch_descriptor(tma_atom_c)
+            if cutlass.const_expr(self.lora_k > 0):
+                cpasync.prefetch_descriptor(tma_atom_lw)
+                cpasync.prefetch_descriptor(tma_atom_lp)
 
         use_2cta_instrs = cute.size(tiled_mma.thr_id.shape) == 2
 
@@ -522,6 +632,9 @@ class GroupedGemmKernelSm100BlockScaled:
             ab_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_ab_stage * 2]
             acc_full_mbar_ptr: cute.struct.MemRange[
                 cutlass.Int64, self.num_acc_stage * 2
+            ]
+            lora_full_mbar_ptr: cute.struct.MemRange[
+                cutlass.Int64, self.lora_stages * 2
             ]
             tmem_dealloc_mbar: cutlass.Int64
             tmem_holding_buf: cutlass.Int32
@@ -559,6 +672,20 @@ class GroupedGemmKernelSm100BlockScaled:
             cta_layout_vmnk=cluster_layout_vmnk,
             defer_sync=True,
         )
+
+        if cutlass.const_expr(self.lora_k > 0):
+            # One stage per (tile, slot): the TMA warp fills, the MMA warp frees.
+            lora_producer, lora_consumer = pipeline.PipelineTmaUmma.create(
+                barrier_storage=storage.lora_full_mbar_ptr.data_ptr(),
+                num_stages=self.lora_stages,
+                producer_group=pipeline.CooperativeGroup(pipeline.Agent.Thread),
+                consumer_group=pipeline.CooperativeGroup(
+                    pipeline.Agent.Thread, num_tma_producer
+                ),
+                tx_count=self.lora_stage_bytes,
+                cta_layout_vmnk=cluster_layout_vmnk,
+                defer_sync=True,
+            ).make_participants()
 
         tmem_alloc_barrier = pipeline.NamedBarrier(
             barrier_id=self.tmem_alloc_sync_bar_id,
@@ -600,6 +727,20 @@ class GroupedGemmKernelSm100BlockScaled:
             layout=sfb_smem_layout_staged,
             byte_alignment=128,
         )
+        if cutlass.const_expr(self.lora_k > 0):
+            # (MMA, MMA_M, MMA_K, STAGE) weights and (MMA, MMA_N, MMA_K, STAGE) planes
+            sLW = smem.allocate_tensor(
+                element_type=cutlass.BFloat16,
+                layout=lw_smem_layout_staged.outer,
+                byte_alignment=1024,
+                swizzle=lw_smem_layout_staged.inner,
+            )
+            sLP = smem.allocate_tensor(
+                element_type=cutlass.BFloat16,
+                layout=lp_smem_layout_staged.outer,
+                byte_alignment=1024,
+                swizzle=lp_smem_layout_staged.inner,
+            )
 
         # (bM, bK, RestM, RestK, RestL)
         gA_mkl = cute.local_tile(
@@ -686,6 +827,38 @@ class GroupedGemmKernelSm100BlockScaled:
         tCrA = tiled_mma.make_fragment_A(sA)
         # (MMA, MMA_N, MMA_K, STAGE)
         tCrB = tiled_mma.make_fragment_B(sB)
+        if cutlass.const_expr(self.lora_k > 0):
+            # (bM, bK, RestM, RestK, RestL) weights; (bN, bK, RestN, RestK, RestL) planes
+            gLW_mkl = cute.local_tile(
+                mLW_mkl,
+                cute.slice_(self.lora_mma_tiler, (None, 0, None)),
+                (None, None, None),
+            )
+            gLP_nkl = cute.local_tile(
+                mLP_nkl,
+                cute.slice_(self.lora_mma_tiler, (0, None, None)),
+                (None, None, None),
+            )
+            thr_mma_lora = tiled_mma_lora.get_slice(mma_tile_coord_v)
+            tCgLW = thr_mma_lora.partition_A(gLW_mkl)
+            tCgLP = thr_mma_lora.partition_B(gLP_nkl)
+            tLWsLW, tLWgLW = cpasync.tma_partition(
+                tma_atom_lw,
+                block_in_cluster_coord_vmnk[2],
+                a_cta_layout,
+                cute.group_modes(sLW, 0, 3),
+                cute.group_modes(tCgLW, 0, 3),
+            )
+            tLPsLP, tLPgLP = cpasync.tma_partition(
+                tma_atom_lp,
+                block_in_cluster_coord_vmnk[1],
+                b_cta_layout,
+                cute.group_modes(sLP, 0, 3),
+                cute.group_modes(tCgLP, 0, 3),
+            )
+            # (MMA, MMA_M, MMA_K, STAGE) and (MMA, MMA_N, MMA_K, STAGE)
+            tCrLW = tiled_mma_lora.make_fragment_A(sLW)
+            tCrLP = tiled_mma_lora.make_fragment_B(sLP)
         # (MMA, MMA_M, MMA_N)
         acc_shape = tiled_mma.partition_shape_C(self.mma_tiler[:2])
         # (MMA, MMA_M, MMA_N, STAGE)
@@ -747,6 +920,32 @@ class GroupedGemmKernelSm100BlockScaled:
                     )
                 ]
 
+                if cutlass.const_expr(self.lora_k > 0):
+                    # The tile's LoRA operands go out before its K loads so they
+                    # land during the mainloop: one stage per slot, weights of
+                    # (slot, expert) and the slot's bridge plane. The stages
+                    # free up as the MMA warp finishes earlier tiles, which
+                    # never waits on a load issued after this point.
+                    num_slots = lora_slots[0]
+                    for slot in cutlass.range(0, num_slots, 1, unroll=1):
+                        lora_handle = lora_producer.acquire_and_advance()
+                        weight_l = slot * lora_experts + work_tile.expert_idx
+                        plane_l = slot
+                        if cutlass.const_expr(not self.contiguous_segments):
+                            plane_l = weight_l
+                        cute.copy(
+                            tma_atom_lw,
+                            tLWgLW[(None, mma_tile_coord_mnl[0], 0, weight_l)],
+                            tLWsLW[(None, lora_handle.index)],
+                            tma_bar_ptr=lora_handle.barrier,
+                        )
+                        cute.copy(
+                            tma_atom_lp,
+                            tLPgLP[(None, mma_tile_coord_mnl[1], 0, plane_l)],
+                            tLPsLP[(None, lora_handle.index)],
+                            tma_bar_ptr=lora_handle.barrier,
+                        )
+
                 ab_producer.reset()
                 peek_ab_empty_status = ab_producer.try_acquire()
 
@@ -785,6 +984,8 @@ class GroupedGemmKernelSm100BlockScaled:
                 work_tile = tile_sched.advance_to_next_work()
 
             ab_producer.tail()
+            if cutlass.const_expr(self.lora_k > 0):
+                lora_producer.tail()
 
         if warp_idx == self.mma_warp_id:
             tmem.wait_for_alloc()
@@ -833,6 +1034,8 @@ class GroupedGemmKernelSm100BlockScaled:
             acc_producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.num_acc_stage
             )
+            if cutlass.const_expr(self.lora_k > 0):
+                tiled_mma_lora.set(tcgen05.Field.ACCUMULATE, True)
 
             while work_tile.is_valid_tile:
                 # (MMA, MMA_M, MMA_N)
@@ -898,6 +1101,22 @@ class GroupedGemmKernelSm100BlockScaled:
                         peek_ab_full_status = cutlass.Boolean(1)
                         if handle.count + 1 < work_tile.k_tile_cnt:
                             peek_ab_full_status = ab_consumer.try_wait()
+
+                if cutlass.const_expr(self.lora_k > 0):
+                    # One rank-K BF16 MMA per slot into the same accumulator.
+                    num_slots = lora_slots[0]
+                    for slot in cutlass.range(0, num_slots, 1, unroll=1):
+                        if is_leader_cta:
+                            lora_handle = lora_consumer.wait_and_advance()
+                            lora_crd = (None, None, None, lora_handle.index)
+                            cute.gemm(
+                                tiled_mma_lora,
+                                tCtAcc,
+                                tCrLW[lora_crd],
+                                tCrLP[lora_crd],
+                                tCtAcc,
+                            )
+                            lora_handle.release()
 
                 if is_leader_cta:
                     acc_pipeline.producer_commit(acc_producer_state)
@@ -1035,6 +1254,7 @@ class GroupedGemmKernelSm100BlockScaled:
         smem_capacity: int,
         occupancy: int,
         c_smem_layout: cute.Layout,
+        reserved_bytes: int = 0,
     ) -> Tuple[int, int, int]:
         num_acc_stage = 1 if mma_tiler_mnk[1] == 256 else 2
         num_c_stage = 2
@@ -1058,7 +1278,7 @@ class GroupedGemmKernelSm100BlockScaled:
             + cute.size_in_bytes(sf_dtype, sfa_smem_layout_staged_one)
             + cute.size_in_bytes(sf_dtype, sfb_smem_layout_staged_one)
         )
-        mbar_helpers_bytes = 1024
+        mbar_helpers_bytes = 1024 + reserved_bytes
 
         c_bytes_per_stage = cute.size_in_bytes(c_dtype, c_smem_layout)
         c_bytes = c_bytes_per_stage * num_c_stage

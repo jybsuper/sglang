@@ -108,6 +108,7 @@ class CuteDslTileMixin:
         tile_set = self._merge_table_tiles(tile_set)
 
         self._compiled: dict[int, dict[str, CuteDslStageCall]] = {}
+        self._tile_configs: dict[int, GroupedGemmConfig] = {}
         for token_width, persistent_clusters in tile_set:
             self._admit_tile_width(token_width)
             config = GroupedGemmConfig(
@@ -118,6 +119,7 @@ class CuteDslTileMixin:
                 mma_inst_tile_k=self.MMA_INST_TILE_K,
                 persistent_clusters=persistent_clusters,
             )
+            self._tile_configs[token_width] = config
             self._compiled[token_width] = {}
             self._compile_stage(token_width, "gemm1", config)
             self._compile_stage(token_width, "gemm2", config)
@@ -168,7 +170,11 @@ class CuteDslTileMixin:
         """Compile-time arguments beyond the operand geometry."""
         return ()
 
-    def _compile_stage(self, token_width: int, stage: str, config) -> None:
+    def _compile_stage(
+        self, token_width: int, stage: str, config, *, lora_k: int = 0
+    ) -> None:
+        """``lora_k`` > 0 compiles the stage with the rank-``lora_k`` epilogue
+        LoRA (block-scaled providers only) under the call key ``<stage>:lora``."""
         weight = self._stage_weight(stage)
         device = weight.device
         key = (
@@ -181,15 +187,19 @@ class CuteDslTileMixin:
             weight.shape[1],
             weight.shape[2],
             *self._stage_constexprs(stage),
+            lora_k,
         )
         compiled_fn = _COMPILE_CACHE.get(key)
         if compiled_fn is None:
-            prepared = self._prepare_dummy(stage, config)
+            prepared = self._prepare_dummy(
+                stage, config, **({"lora_k": lora_k} if lora_k else {})
+            )
             # Load the module before graph capture with a zero-tile launch.
             prepared.launch()
             compiled_fn = prepared.compiled_fn
             _COMPILE_CACHE[key] = compiled_fn
-        self._compiled[token_width][stage] = CuteDslStageCall(
+        call_key = f"{stage}:lora" if lora_k else stage
+        self._compiled[token_width][call_key] = CuteDslStageCall(
             compiled_fn=compiled_fn,
             b_arg=self._as_dynamic_cute_tensor(weight, leading_dim=2),
             sf_weights=self._stage_scale(stage),

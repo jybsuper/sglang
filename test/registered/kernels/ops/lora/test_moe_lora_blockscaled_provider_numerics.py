@@ -13,7 +13,14 @@ from sglang.kernels.ops.lora.moe.activation import ActivationFn
 from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
 from sglang.srt.layers.moe.topk import StandardTopKOutput
 from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
-from sglang.srt.lora.moe.plan import resolve_plans
+from sglang.srt.lora.moe.plan import (
+    BFamily,
+    BSpec,
+    DownOverlap,
+    SelectedPlan,
+    Site,
+    resolve_plans,
+)
 from sglang.srt.lora.moe.runner import MoeLoraBatch, MoeLoraRunner
 from sglang.srt.lora.utils import Phase
 from sglang.srt.runtime_context import get_context
@@ -404,6 +411,200 @@ def test_blockscaled_shared_outer_plans_match_reference(
     graph.replay()
     torch.cuda.synchronize()
     assert _rel_l2(captured.float(), reference(mapping)) < _RUNNER_TOL
+
+
+@pytest.mark.parametrize("family", ["mxfp8", "mxfp4", "nvfp4"])
+@pytest.mark.parametrize("rank", [16, 8])
+def test_blockscaled_per_expert_epilogue_down_b_matches_separate_b(
+    monkeypatch: pytest.MonkeyPatch, family: str, rank: int
+) -> None:
+    """The sm100 per-expert prefill row with its down-B fused into the base
+    GEMM epilogue, against the same row with the separate grouped down-B and
+    against the FP32 reference, with nonzero adapters over mixed slots, base
+    tokens and an EP hole. Zero down-B weights make both paths bitwise equal
+    (the epilogue adds exact zeros); the epilogue path also replays under a
+    prefill CUDA graph over changed slots, routing and inputs.
+    """
+    _skip_unless_sm100()
+    from dataclasses import replace
+
+    device = torch.device("cuda")
+    monkeypatch.setattr(
+        MoeLoraRunner, "_allocate_output", _standalone_output_allocation
+    )
+    g = torch.Generator(device="cpu").manual_seed(31)
+
+    def rand(*shape, scale=0.05):
+        return (torch.randn(*shape, generator=g) * scale).to(torch.bfloat16).to(device)
+
+    tokens, slots = 40, 2
+    quant_info, w13_eff, w2_eff, elem = _quant_info(
+        family, rand(_E, 2 * _I, _H), rand(_E, _H, _I)
+    )
+    selected = resolve_plans(
+        architecture="sm100",
+        is_shared_outer=False,
+        physical_rank=rank,
+        activation=ActivationFn.SILU,
+        hidden_size=_H,
+        num_local_experts=_E,
+        quant_family=family,
+        vendor="cutedsl",
+    )[Phase.PREFILL]
+    assert selected.base_gemm_rows == "route_major"
+    separate_plan = replace(
+        selected.plan,
+        down_b=BSpec(Site.DOWN, BFamily.GROUPED),
+        down_overlap=DownOverlap.NONE,
+    )
+    epilogue_plan = replace(
+        selected.plan,
+        down_b=BSpec(Site.DOWN, BFamily.EPILOGUE),
+        down_overlap=DownOverlap.NONE,
+    )
+    provider = select_provider_cls("route_major", family, "cutedsl")(quant_info)
+    provider.enable_epilogue_down_lora(rank)
+    runner = MoeLoraRunner(
+        providers={"route_major": provider},
+        top_k=_TOPK,
+        routed_scaling_factor=_ROUTED_SCALING,
+        activation=ActivationFn.SILU,
+    )
+    for plan in (separate_plan, epilogue_plan):
+        runner.validate_plan(plan, base_gemm_rows="route_major")
+
+    def select(plan):
+        runner.plans = {
+            Phase.PREFILL: SelectedPlan(
+                name="test", base_gemm_rows="route_major", plan=plan, tiles=selected.tiles
+            )
+        }
+
+    hidden = rand(tokens, _H, scale=0.5)
+    topk_ids = torch.stack(
+        [torch.randperm(_E, generator=g)[:_TOPK] for _ in range(tokens)]
+    ).to(device=device, dtype=torch.int32)
+    topk_ids[3, 1] = -1  # an EP hole on an adapter token
+    weights = torch.tensor([0.65, 0.35], device=device).repeat(tokens, 1)
+    gate_up_a = rand(slots, _E, 2 * rank, _H, scale=0.1)
+    gate_up_b = rand(slots, _E, 2 * _I, rank, scale=0.1)
+    down_a = rand(slots, _E, rank, _I, scale=0.1)
+    down_b = rand(slots, _E, _H, rank, scale=0.1)
+    # Slots 0, 1 and the base path (-1) in turn.
+    mapping = ((torch.arange(tokens, device=device) + 1) % 3 - 1).to(torch.int32)
+
+    def reference(mapping, down_b):
+        pair_tokens = torch.arange(tokens, device=device).repeat_interleave(_TOPK)
+        experts = topk_ids.flatten().long()
+        routed = (experts >= 0).float()[:, None]
+        experts = experts.clamp(min=0)
+        slot = mapping[pair_tokens].long()
+        adapted = (slot >= 0).float()[:, None]
+        slot = slot.clamp(min=0)
+        inputs = hidden.float()[pair_tokens]
+        inputs_q = _quant_activation(inputs, elem, "gemm1")
+        gate_up = _bf16(torch.einsum("ph,pnh->pn", inputs_q, w13_eff[experts]))
+        bridge = _bf16(
+            torch.einsum("ph,prh->pr", inputs, gate_up_a.float()[slot, experts])
+        )
+        inner = gate_up_b.float()[slot, experts]
+        delta = torch.cat(
+            [
+                torch.einsum(
+                    "pir,pr->pi",
+                    inner[:, s * _I : (s + 1) * _I],
+                    bridge[:, s * rank : (s + 1) * rank],
+                )
+                for s in range(2)
+            ],
+            dim=1,
+        )
+        # The prefill row's fused LoRA-B activation adds the delta in FP32.
+        gate_up = gate_up + adapted * delta
+        act = _bf16(F.silu(gate_up[:, :_I]) * gate_up[:, _I:])
+        act_q = _quant_activation(act, elem, "gemm2")
+        base = torch.einsum("pi,phi->ph", act_q, w2_eff[experts])
+        down_rank = _bf16(
+            torch.einsum("pi,pri->pr", act, down_a.float()[slot, experts])
+        )
+        delta_d = torch.einsum("pr,phr->ph", down_rank, down_b.float()[slot, experts])
+        # Unrounded base + delta: the separate path rounds both to BF16 first,
+        # the epilogue path rounds their FP32 sum once.
+        pairs = (base + adapted * delta_d) * routed
+        return (pairs.view(tokens, _TOPK, _H) * weights[..., None]).sum(
+            1
+        ) * _ROUTED_SCALING
+
+    dispatch = StandardDispatchOutput(
+        hidden_states=hidden,
+        hidden_states_scale=None,
+        topk_output=StandardTopKOutput(
+            topk_weights=weights,
+            topk_ids=topk_ids,
+            router_logits=torch.zeros((tokens, _E), device=device),
+        ),
+    )
+
+    def batch_for(down_b):
+        return MoeLoraBatch(
+            gate_up_lora_a=gate_up_a,
+            gate_up_lora_b=gate_up_b,
+            down_lora_a=down_a,
+            down_lora_b=down_b,
+            token_lora_mapping=mapping,
+            is_prefill=True,
+        )
+
+    def forward(batch):
+        with get_context().override_server_args():
+            out = runner.run(dispatch, batch).hidden_states
+        torch.cuda.synchronize()
+        return out
+
+    select(separate_plan)
+    separate = forward(batch_for(down_b))
+    select(epilogue_plan)
+    fused = forward(batch_for(down_b))
+    ref = reference(mapping, down_b)
+    err_separate = _rel_l2(separate.float(), ref)
+    err_fused = _rel_l2(fused.float(), ref)
+    assert err_separate < _RUNNER_TOL and err_fused < _RUNNER_TOL, (err_separate, err_fused)
+    # The two paths agree to BF16 rounding of the down rows and the LoRA
+    # math is present (not bypassed within tolerance).
+    assert _rel_l2(fused.float(), separate.float()) < 4e-3
+    assert _rel_l2(reference(torch.full_like(mapping, -1), down_b), ref) > 0.1
+
+    # Zero down-B: the epilogue adds exact zeros, so both paths coincide.
+    zero_b = torch.zeros_like(down_b)
+    select(separate_plan)
+    separate_zero = forward(batch_for(zero_b))
+    select(epilogue_plan)
+    fused_zero = forward(batch_for(zero_b))
+    assert torch.equal(separate_zero, fused_zero)
+
+    # Prefill graph replay of the epilogue path.
+    batch = batch_for(down_b)
+    batch.use_cuda_graph = True
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(2):
+            forward(batch)
+    torch.cuda.synchronize()
+    runner.workspace.routes.clear()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        with get_context().override_server_args():
+            captured = runner.run(dispatch, batch).hidden_states
+    graph.replay()
+    torch.cuda.synchronize()
+    assert _rel_l2(captured.float(), ref) < _RUNNER_TOL
+    mapping.copy_(mapping.roll(1))
+    topk_ids.copy_(topk_ids.flip(1))
+    hidden.mul_(-0.5)
+    graph.replay()
+    torch.cuda.synchronize()
+    assert _rel_l2(captured.float(), reference(mapping, down_b)) < _RUNNER_TOL
 
 
 def test_block_scaled_admission():
