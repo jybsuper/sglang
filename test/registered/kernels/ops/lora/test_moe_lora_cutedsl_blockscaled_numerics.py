@@ -7,6 +7,8 @@ quantizer; the scale atoms follow the tcgen05 128x4 block order.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 import torch
 
@@ -730,3 +732,276 @@ def test_blockscaled_epilogue_lora_matches_references(fmt, rows_mode):
     slot0 = live[slot_rows[live] == 0]
     assert torch.equal(c_first[slot1], c_base[slot1])
     assert torch.equal(c_first[slot0], c_fused[slot0])
+
+
+def _wait_bounded(seconds: float) -> None:
+    """Wait for the current stream with a deadline: a deadlock between the
+    kernel's warps would otherwise hang the process."""
+    done = torch.cuda.Event()
+    done.record()
+    deadline = time.monotonic() + seconds
+    while not done.query():
+        if time.monotonic() > deadline:
+            pytest.fail(
+                f"the block-scaled GEMM did not finish within {seconds:.0f} s "
+                "(LoRA pipeline deadlock?)"
+            )
+        time.sleep(0.005)
+
+
+class _EpilogueDownProblem:
+    """A down GEMM over four experts (one empty, one partial tile) on two
+    persistent CTAs, every row carrying one of eight adapter slots or none,
+    with the operands the down A kernel would place for any set of resident
+    slots."""
+
+    capacity = 8
+
+    def __init__(self, fmt: str, rows_mode: str) -> None:
+        from sglang.kernels.ops.lora.moe.cutedsl.api import (
+            GroupedGemmConfig,
+            prepare_contiguous_blockscaled,
+            prepare_masked_blockscaled,
+        )
+        from sglang.kernels.ops.lora.moe.cutedsl.schedule_builder import (
+            build_dual_stage_schedules_contiguous,
+            build_dual_stage_schedules_masked,
+        )
+        from sglang.kernels.ops.lora.moe.quant_blockscaled import pack_scale_atoms
+
+        vec = FORMATS[fmt]["vec"]
+        device = torch.device("cuda")
+        g = torch.Generator(device="cpu").manual_seed(13)
+        experts, n, k, m_max, rank = 4, 256, 512, 256, 16
+        self.experts, self.n, self.rank = experts, n, rank
+        weights = (torch.randn(experts, n, k, generator=g) * 0.05).to(device)
+        tokens = (torch.randn(experts, m_max, k, generator=g) * 0.5).to(device)
+        w_gs = torch.full((experts,), 0.01, device=device)
+        t_gs = torch.full((experts,), 0.1, device=device)
+        w_data, w_sf, self.w_deq = _quantize(fmt, weights, w_gs)
+        sf_weights = pack_scale_atoms(w_sf)
+        alpha = None
+        self.alpha_values = torch.ones(experts, device=device, dtype=torch.float64)
+        if fmt == "nvfp4":
+            alpha = (w_gs * t_gs).reshape(experts, 1).contiguous()
+            self.alpha_values = alpha.reshape(-1).double()
+        # Eight output tiles over two CTAs: each reuses its LoRA stages across tiles.
+        config = GroupedGemmConfig(mma_tiler_mn=(128, 128), persistent_clusters=2)
+        masked_m = torch.tensor([200, 0, 128, 7], dtype=torch.int32, device=device)
+        self.lora_w = (
+            torch.randn(self.capacity, experts, n, rank, generator=g) * 0.2
+        ).to(device=device, dtype=torch.bfloat16)
+        bridge = (torch.randn(experts, m_max, rank, generator=g) * 0.5).to(device)
+        # Rows cycle through the eight slots and the base path.
+        row_slot = (torch.arange(m_max) % (self.capacity + 1) - 1).to(device)
+        common = dict(
+            config=config, sf_vec_size=vec, alpha=alpha, alpha_rows_per_half=1 << 30
+        )
+        if rows_mode == "masked":
+            t_data, t_sf, t_deq = _quantize(fmt, tokens, t_gs)
+            sf_tokens = pack_scale_atoms(t_sf)
+            schedule, tiles, _, _ = build_dual_stage_schedules_masked(
+                masked_m,
+                m_max=m_max,
+                token_width=128,
+                n_gemm1=n,
+                n_gemm2=n,
+                output_width=128,
+                cluster_shape_mn=(1, 1),
+                use_2cta_instrs=False,
+            )
+            self.expert_of_row = torch.arange(experts, device=device).repeat_interleave(
+                m_max
+            )
+            self.slot_rows = row_slot.repeat(experts)
+            self.bridge_rows = bridge.reshape(-1, rank)
+            self.rows_deq = t_deq.reshape(-1, k)
+            self.live = torch.cat(
+                [
+                    torch.arange(e * m_max, e * m_max + int(masked_m[e]), device=device)
+                    for e in range(experts)
+                ]
+            )
+            # One plane per (slot, expert) slab of m_max rows.
+            self.planes_per_slot, self.rows_per_plane = experts, m_max
+
+            def prepare(lora):
+                c = torch.zeros(
+                    (experts, m_max, n), dtype=torch.bfloat16, device=device
+                )
+                prepared = prepare_masked_blockscaled(
+                    t_data,
+                    w_data,
+                    sf_tokens,
+                    sf_weights,
+                    c,
+                    masked_m,
+                    direct_schedule=schedule,
+                    schedule_tiles=tiles,
+                    **common,
+                    **lora,
+                )
+                return c.reshape(-1, n), prepared
+
+        else:
+            seg_offsets = torch.zeros(experts + 1, dtype=torch.int32, device=device)
+            seg_offsets[1:] = torch.cumsum(((masked_m + 127) // 128) * 128, 0)
+            m_ceil = int(seg_offsets[-1])
+            flat = torch.zeros((m_ceil, k), device=device)
+            self.expert_of_row = torch.zeros(m_ceil, dtype=torch.long, device=device)
+            self.slot_rows = torch.full((m_ceil,), -1, dtype=torch.long, device=device)
+            self.bridge_rows = torch.zeros((m_ceil, rank), device=device)
+            live = []
+            for e in range(experts):
+                start, rows = int(seg_offsets[e]), int(masked_m[e])
+                flat[start : start + rows] = tokens[e, :rows]
+                self.expert_of_row[start : start + rows] = e
+                self.slot_rows[start : start + rows] = row_slot[:rows]
+                self.bridge_rows[start : start + rows] = bridge[e, :rows]
+                live.append(torch.arange(start, start + rows, device=device))
+            self.live = torch.cat(live)
+            f_data, f_sf, f_deq = _quantize(fmt, flat.unsqueeze(0), t_gs[:1])
+            f_data, self.rows_deq = f_data[0], f_deq[0]
+            sf_tokens = pack_scale_atoms(f_sf)
+            schedule, tiles, _, _ = build_dual_stage_schedules_contiguous(
+                masked_m,
+                m_pad_ceiling=m_ceil,
+                max_expert_rows=m_max,
+                m_alignment=128,
+                token_width=128,
+                n_gemm1=n,
+                n_gemm2=n,
+                output_width=128,
+                cluster_shape_mn=(1, 1),
+                use_2cta_instrs=False,
+            )
+            # One plane per slot over the flat rows.
+            self.planes_per_slot, self.rows_per_plane = 1, m_ceil
+
+            def prepare(lora):
+                c = torch.zeros((m_ceil, n), dtype=torch.bfloat16, device=device)
+                prepared = prepare_contiguous_blockscaled(
+                    f_data,
+                    w_data,
+                    sf_tokens,
+                    sf_weights,
+                    c,
+                    seg_offsets,
+                    direct_schedule=schedule,
+                    schedule_tiles=tiles,
+                    **common,
+                    **lora,
+                )
+                return c, prepared
+
+        self._prepare = prepare
+        self.device = device
+
+    def operands(self, placement: list) -> dict:
+        """Operands for ``len(placement)`` resident slots: position ``p``
+        carries slot ``placement[p]``'s rows (bridge over the row's expert
+        alpha, rounded once) and weights, or slot ``p``'s weights and no
+        rows for ``None``."""
+        resident = len(placement)
+        weights = torch.empty(
+            (resident, self.experts, self.n, self.rank),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        planes = torch.zeros(
+            (resident, self.planes_per_slot * self.rows_per_plane, self.rank),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        for p, s in enumerate(placement):
+            weights[p] = self.lora_w[p if s is None else s]
+            if s is None:
+                continue
+            mask = self.slot_rows == s
+            scaled = (
+                self.bridge_rows[mask]
+                / self.alpha_values[self.expert_of_row[mask]].float()[:, None]
+            )
+            planes[p, mask] = scaled.to(torch.bfloat16)
+        return dict(
+            lora_w=weights.reshape(-1, self.n, self.rank),
+            lora_planes=planes.reshape(-1, self.rows_per_plane, self.rank),
+            lora_slots=torch.tensor([resident], dtype=torch.int32, device=self.device),
+        )
+
+    def run(self, lora: dict | None = None) -> torch.Tensor:
+        c, prepared = self._prepare(lora or {})
+        prepared.launch()
+        _wait_bounded(60.0)
+        return c
+
+    def target(self, placement: list) -> torch.Tensor:
+        """FP64 ``A @ W^T`` plus each placed row's ``bridge @ B_slot[e]^T``."""
+        base = torch.einsum(
+            "rk,rnk->rn",
+            self.rows_deq.double(),
+            self.w_deq[self.expert_of_row].double(),
+        )
+        placed = torch.zeros_like(self.slot_rows, dtype=torch.bool)
+        for s in placement:
+            if s is not None:
+                placed |= self.slot_rows == s
+        w_rows = self.lora_w[self.slot_rows.clamp(min=0), self.expert_of_row].double()
+        delta = torch.einsum("rq,rnq->rn", self.bridge_rows.double(), w_rows)
+        return base + delta * placed.double()[:, None]
+
+
+# Resident slots as the pool presents them (position -> slot of the rows it
+# carries, None = a resident adapter without rows): bounds below, at and
+# above the kernel's four TMA stages, one adapter alone in slot 4 or 7,
+# mixed slots, all eight, unused trailing slots, and residents without rows.
+_SLOT_PLACEMENTS = {
+    "one": [0],
+    "three": [0, 1, 2],
+    "four": [0, 1, 2, 3],
+    "five": [0, 1, 2, 3, 4],
+    "eight": [0, 1, 2, 3, 4, 5, 6, 7],
+    "slot4_alone": [None, None, None, None, 4],
+    "slot7_alone": [None, None, None, None, None, None, None, 7],
+    "mixed": [None, 1, None, None, 4, None, None, 7],
+    "trailing": [0, 1, None, None, None, None, None, None],
+    "no_rows": [None] * 8,
+}
+
+
+@pytest.mark.parametrize("fmt", sorted(FORMATS))
+@pytest.mark.parametrize("rows_mode", ["masked", "contiguous"])
+def test_blockscaled_epilogue_lora_slot_bounds(fmt, rows_mode):
+    """The epilogue LoRA over every resident-slot bound of an eight-slot pool
+    (the kernel streams the slots through four TMA stages, so bounds past
+    four reuse a stage within the tile). A row's result depends only on its
+    own slot: bitwise the result of the same adapter served alone from slot
+    0, base rows and rows of residents without rows stay base rows, and every
+    bound lands on the FP64 target."""
+    _skip_unless_sm100()
+    problem = _EpilogueDownProblem(fmt, rows_mode)
+    live, slot_rows = problem.live, problem.slot_rows
+    c_base = problem.run()
+    alone = {}
+    for s in range(problem.capacity):
+        alone[s] = problem.run(problem.operands([s]))
+        assert _rel_l2(alone[s].double()[live], problem.target([s])[live]) < 1.5e-2, (
+            fmt,
+            rows_mode,
+            s,
+        )
+        rows = live[slot_rows[live] == s]
+        assert not torch.equal(alone[s][rows], c_base[rows]), (fmt, rows_mode, s)
+    for name, placement in _SLOT_PLACEMENTS.items():
+        c = problem.run(problem.operands(placement))
+        expected = c_base.clone()
+        for s in placement:
+            if s is not None:
+                rows = slot_rows == s
+                expected[rows] = alone[s][rows]
+        assert torch.equal(c[live], expected[live]), (fmt, rows_mode, name)
+        assert _rel_l2(c.double()[live], problem.target(placement)[live]) < 1.5e-2, (
+            fmt,
+            rows_mode,
+            name,
+        )

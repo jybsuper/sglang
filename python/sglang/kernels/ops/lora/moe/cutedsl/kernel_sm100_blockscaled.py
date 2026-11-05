@@ -920,32 +920,6 @@ class GroupedGemmKernelSm100BlockScaled:
                     )
                 ]
 
-                if cutlass.const_expr(self.lora_k > 0):
-                    # The tile's LoRA operands go out before its K loads so they
-                    # land during the mainloop: one stage per slot, weights of
-                    # (slot, expert) and the slot's bridge plane. The stages
-                    # free up as the MMA warp finishes earlier tiles, which
-                    # never waits on a load issued after this point.
-                    num_slots = lora_slots[0]
-                    for slot in cutlass.range(0, num_slots, 1, unroll=1):
-                        lora_handle = lora_producer.acquire_and_advance()
-                        weight_l = slot * lora_experts + work_tile.expert_idx
-                        plane_l = slot
-                        if cutlass.const_expr(not self.contiguous_segments):
-                            plane_l = weight_l
-                        cute.copy(
-                            tma_atom_lw,
-                            tLWgLW[(None, mma_tile_coord_mnl[0], 0, weight_l)],
-                            tLWsLW[(None, lora_handle.index)],
-                            tma_bar_ptr=lora_handle.barrier,
-                        )
-                        cute.copy(
-                            tma_atom_lp,
-                            tLPgLP[(None, mma_tile_coord_mnl[1], 0, plane_l)],
-                            tLPsLP[(None, lora_handle.index)],
-                            tma_bar_ptr=lora_handle.barrier,
-                        )
-
                 ab_producer.reset()
                 peek_ab_empty_status = ab_producer.try_acquire()
 
@@ -980,6 +954,34 @@ class GroupedGemmKernelSm100BlockScaled:
                     peek_ab_empty_status = cutlass.Boolean(1)
                     if handle.count + 1 < work_tile.k_tile_cnt:
                         peek_ab_empty_status = ab_producer.try_acquire()
+
+                if cutlass.const_expr(self.lora_k > 0):
+                    # The tile's LoRA operands follow its K loads, one stage per
+                    # slot: weights of (slot, expert) and the slot's bridge
+                    # plane. The MMA warp frees a stage after the tile's K loop
+                    # and the slot's MMA, so a slot count past the stage count
+                    # only waits on loads already in flight; issued ahead of the
+                    # K loads, that wait would need this tile's K loop first and
+                    # the two warps would deadlock.
+                    num_slots = lora_slots[0]
+                    for slot in cutlass.range(0, num_slots, 1, unroll=1):
+                        lora_handle = lora_producer.acquire_and_advance()
+                        weight_l = slot * lora_experts + work_tile.expert_idx
+                        plane_l = slot
+                        if cutlass.const_expr(not self.contiguous_segments):
+                            plane_l = weight_l
+                        cute.copy(
+                            tma_atom_lw,
+                            tLWgLW[(None, mma_tile_coord_mnl[0], 0, weight_l)],
+                            tLWsLW[(None, lora_handle.index)],
+                            tma_bar_ptr=lora_handle.barrier,
+                        )
+                        cute.copy(
+                            tma_atom_lp,
+                            tLPgLP[(None, mma_tile_coord_mnl[1], 0, plane_l)],
+                            tLPsLP[(None, lora_handle.index)],
+                            tma_bar_ptr=lora_handle.barrier,
+                        )
 
                 work_tile = tile_sched.advance_to_next_work()
 
