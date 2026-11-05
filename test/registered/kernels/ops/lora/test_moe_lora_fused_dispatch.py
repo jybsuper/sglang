@@ -141,9 +141,10 @@ def test_sentinel_pairs_are_skipped() -> None:
 
 
 @pytest.mark.parametrize("hidden", [128, 1536, 7168])
-@pytest.mark.parametrize("domain", ["masked", "contiguous"])
+@pytest.mark.parametrize("domain", ["masked", "contiguous", "contiguous_fold"])
 @pytest.mark.parametrize("captured", [False, True])
 def test_fp8_row_movers_match_upstream_quant(hidden, domain, captured) -> None:
+    # contiguous_fold: the layout leaves slots in the map and the fill finalizes it.
     from sglang.kernels.ops.lora.moe.dispatch_contiguous import (
         contiguous_m_pad_ceiling,
         dispatch_fill_rows_contiguous_fp8,
@@ -186,6 +187,7 @@ def test_fp8_row_movers_match_upstream_quant(hidden, domain, captured) -> None:
                 scale_out=scales,
             )
         else:
+            fold = domain == "contiguous_fold"
             dispatch_layout_contiguous(
                 x,
                 ids,
@@ -195,9 +197,15 @@ def test_fp8_row_movers_match_upstream_quant(hidden, domain, captured) -> None:
                 seg_counts_out=counts,
                 seg_offsets_out=offsets,
                 pair_to_row_out=mapping,
+                finalize=not fold,
             )
             dispatch_fill_rows_contiguous_fp8(
-                x, ids, mapping, rows_fp8_out=rows, scale_out=scales
+                x,
+                ids,
+                mapping,
+                rows_fp8_out=rows,
+                scale_out=scales,
+                seg_offsets=offsets if fold else None,
             )
 
     if captured:

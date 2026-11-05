@@ -352,7 +352,7 @@ class CuteDslFp8ChannelContiguousProvider(
         workspace=None,
     ) -> CuteDslFp8ChannelContiguousRowState:
         base = super().prepare(
-            hidden_states, topk_ids, top_k, workspace, fill_rows=False
+            hidden_states, topk_ids, top_k, workspace, fill_rows=False, finalize=False
         )
         num_experts = self.quant_info.num_local_experts
         hidden = hidden_states.size(1)
@@ -378,6 +378,7 @@ class CuteDslFp8ChannelContiguousProvider(
             rows_fp8_out=rows_fp8,
             scale_out=sf_rows,
             per_token=True,
+            seg_offsets=base.seg_offsets,
         )
         # Distinct top-k experts bound each expert to one row per token.
         max_expert_rows = max(int(hidden_states.size(0)), 1)
