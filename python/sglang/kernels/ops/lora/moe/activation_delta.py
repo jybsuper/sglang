@@ -160,7 +160,11 @@ def _act_delta_kernel(
             )
             gvec = tl.arange(0, BLOCK_SIZE // QG)
             goffs = start // QG + gvec
-            n_groups = inter // QG
+            if WHOLE_ROW:
+                # The block spans the row, so its single group is the row's scale.
+                n_groups = 1
+            else:
+                n_groups = inter // QG
             tl.store(
                 act_s_ptr + dst_row * n_groups + goffs,
                 scale,
@@ -185,7 +189,8 @@ def act_delta(
     """Add pair-major LoRA deltas and activate either provider row layout.
 
     ``act_quant`` also writes the activation as FP8 groups (fp8 rows, fp32
-    scales, group) or as block-scaled rows for the down GEMM.
+    scales, group) or as block-scaled rows for the down GEMM; a group equal to
+    the intermediate size quantizes whole rows, one scale per row.
     """
     ActivationFn.parse(activation)
     num_pairs = topk_ids.numel()
@@ -196,13 +201,20 @@ def act_delta(
     inter = act_out_rows.shape[-1]
     num_slices = gateup_rows.shape[-1] // inter
     blockscaled = act_quant_args(None)
+    block_size, whole_row = 512, False
     if isinstance(act_quant, BlockScaledRows):
         assert act_quant.k == inter and inter % 128 == 0
         act_q, act_s, group = act_quant.data, act_quant.scales, 0
         blockscaled = act_quant_args(act_quant)
     elif act_quant is not None:
         act_q, act_s, group = act_quant
-        assert inter % group == 0 and 512 % group == 0
+        whole_row = group == inter
+        if whole_row:
+            # One block covers the row; the masked tail quantizes as zeros.
+            block_size = max(block_size, triton.next_power_of_2(inter))
+            group = block_size
+        else:
+            assert inter % group == 0 and block_size % group == 0
     else:
         act_q, act_s, group = act_out_rows, act_out_rows, 0
     _act_delta_kernel[(num_pairs,)](
@@ -222,7 +234,7 @@ def act_delta(
         GATE_FIRST=gate_first,
         INTERLEAVED=interleaved,
         QUANT_GROUP=group,
-        WHOLE_ROW=inter == group,
-        BLOCK_SIZE=512,
+        WHOLE_ROW=whole_row,
+        BLOCK_SIZE=block_size,
         **blockscaled,
     )

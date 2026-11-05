@@ -130,6 +130,40 @@ def test_fp8_channel_gateup_and_down_match_reference(vendor, rows, hidden_size):
     assert _rel_l2(got_down, ref_down) < 6e-2
 
 
+@pytest.mark.parametrize("rows", ["expert_major", "route_major"])
+def test_fp8_channel_cutedsl_fused_act_quant_matches_separate(rows):
+    """Activation writes the per-row FP8 operands the down GEMM reads; they
+    equal the separate quantizer's (the fused-B activation path) bitwise."""
+    _skip_unless_supported("cutedsl")
+    from sglang.srt.runtime_context import get_context
+
+    device = torch.device("cuda")
+    w13, w2, hidden, topk_ids = _case(device)
+    quant_info, _, _ = _quant_info(w13, w2)
+    provider = select_provider_cls(rows, "fp8_channel", "cutedsl")(quant_info)
+    with get_context().override_server_args():
+        state = provider.prepare(hidden, topk_ids, _TOPK)
+        gateup = torch.empty(
+            provider.gateup_out_shape(state), dtype=torch.bfloat16, device=device
+        )
+        provider.gateup(state, gateup)
+        act = torch.zeros(
+            provider.act_out_shape(state), dtype=torch.bfloat16, device=device
+        )
+        lora_in = torch.zeros(_T, _TOPK, _I, dtype=torch.bfloat16, device=device)
+        provider.act_with_delta(state, gateup, None, topk_ids, act, lora_in)
+        assert state.act_quant_ready
+        fused_q, fused_s = state.act_fp8.clone(), state.act_scale.clone()
+        state.act_quant_ready = False
+        separate_q, separate_s = provider._down_operands(state, act)
+    pair_rows = state.pair_to_row[topk_ids.flatten() >= 0].long()
+    assert torch.equal(
+        fused_q.view(-1, _I)[pair_rows].view(torch.uint8),
+        separate_q.view(-1, _I)[pair_rows].view(torch.uint8),
+    )
+    assert torch.equal(fused_s.view(-1)[pair_rows], separate_s.view(-1)[pair_rows])
+
+
 def test_fp8_channel_cutedsl_rejects_unaligned_widths():
     """The row-scaled kernel stages one weight-row scale per 128-row tile."""
     from sglang.srt.lora.moe.quant_info import MoeLoraFp8ChannelQuantInfo

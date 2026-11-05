@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import torch
 
+from sglang.kernels.ops.lora.moe.activation_delta import act_delta
 from sglang.kernels.ops.lora.moe.dispatch_contiguous import (
     dispatch_fill_rows_contiguous_fp8,
 )
@@ -62,6 +63,37 @@ class CuteDslFp8ChannelMixin(CuteDslFp8Mixin):
         self._sf_w13 = quant_info.w13_scale.flatten(1).contiguous()
         self._sf_w2 = quant_info.w2_scale.flatten(1).contiguous()
 
+    def act_with_delta(
+        self,
+        row_state,
+        gateup_out: torch.Tensor,
+        gate_up_delta: torch.Tensor | None,
+        topk_ids: torch.Tensor,
+        act_out: torch.Tensor,
+        activation_lora_input: torch.Tensor,
+        *,
+        activation: str = "silu",
+    ) -> None:
+        # One scale per row, written while activating: no separate quant pass.
+        act_delta(
+            gateup_out,
+            gate_up_delta,
+            act_out,
+            activation_lora_input,
+            row_state.pair_to_row,
+            topk_ids,
+            num_local_experts=self.num_local_experts,
+            gate_first=self.contract.gate_first,
+            interleaved=self.contract.interleaved,
+            activation=activation,
+            act_quant=(
+                row_state.act_fp8,
+                row_state.act_scale,
+                self.quant_info.intermediate_size,
+            ),
+        )
+        row_state.act_quant_ready = True
+
     def _launch(
         self,
         stage: str,
@@ -98,6 +130,7 @@ class CuteDslFp8ChannelMaskedRowState(MaskedRowState, kw_only=True):
     gemm2_tiles: torch.Tensor
     act_fp8: torch.Tensor  # [E_local, m_max, inter]
     act_scale: torch.Tensor  # [E_local, m_max]
+    act_quant_ready: bool = False
 
 
 class CuteDslFp8ChannelMaskedProvider(CuteDslFp8ChannelMixin, MaskedRowDomainProvider):
@@ -225,12 +258,14 @@ class CuteDslFp8ChannelMaskedProvider(CuteDslFp8ChannelMixin, MaskedRowDomainPro
     def _down_operands(
         self, row_state: CuteDslFp8ChannelMaskedRowState, act_out: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        quantize_rows_per_token_fp8(
-            act_out,
-            q_out=row_state.act_fp8,
-            scale_out=row_state.act_scale,
-            masked_m=row_state.masked_m,
-        )
+        if not row_state.act_quant_ready:
+            # Fused-B activation stays BF16.
+            quantize_rows_per_token_fp8(
+                act_out,
+                q_out=row_state.act_fp8,
+                scale_out=row_state.act_scale,
+                masked_m=row_state.masked_m,
+            )
         return row_state.act_fp8, row_state.act_scale
 
 
@@ -243,6 +278,7 @@ class CuteDslFp8ChannelContiguousRowState(ContiguousRowState, kw_only=True):
     gemm2_tiles: torch.Tensor
     act_fp8: torch.Tensor  # [m_pad_ceiling, inter]
     act_scale: torch.Tensor  # [m_pad_ceiling]
+    act_quant_ready: bool = False
 
 
 class CuteDslFp8ChannelContiguousProvider(
@@ -389,7 +425,9 @@ class CuteDslFp8ChannelContiguousProvider(
     def _down_operands(
         self, row_state: CuteDslFp8ChannelContiguousRowState, act_out: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        quantize_rows_per_token_fp8(
-            act_out, q_out=row_state.act_fp8, scale_out=row_state.act_scale
-        )
+        if not row_state.act_quant_ready:
+            # Fused-B activation stays BF16.
+            quantize_rows_per_token_fp8(
+                act_out, q_out=row_state.act_fp8, scale_out=row_state.act_scale
+            )
         return row_state.act_fp8, row_state.act_scale

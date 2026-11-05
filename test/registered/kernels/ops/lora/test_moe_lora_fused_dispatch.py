@@ -245,16 +245,27 @@ def test_fp8_row_movers_match_upstream_quant(hidden, domain, captured) -> None:
 
 
 @pytest.mark.parametrize(
-    "inter,with_delta", [(128, False), (128, True), (384, True), (1152, False)]
+    "inter,group,with_delta",
+    [
+        (128, 128, False),
+        (128, 128, True),
+        (384, 128, True),
+        (1152, 128, False),
+        # Whole rows: one scale per row, including rows narrower or wider than
+        # the kernel's 512-wide block.
+        (384, 384, True),
+        (640, 640, False),
+    ],
 )
-def test_fused_act_quant_matches_unfused(inter, with_delta):
+def test_fused_act_quant_matches_unfused(inter, group, with_delta):
+    from sglang.kernels.ops.lora.moe.fp8_quant import quantize_rows_per_token_fp8
     from sglang.kernels.ops.quantization.fp8_kernel import (
         sglang_per_token_group_quant_fp8,
     )
 
     torch.manual_seed(0)
     device = torch.device("cuda")
-    num_tokens, top_k, num_experts, group = 7, 3, 8, 128
+    num_tokens, top_k, num_experts = 7, 3, 8
     num_pairs = num_tokens * top_k
     gateup = torch.randn(num_pairs, 2 * inter, dtype=torch.bfloat16, device=device)
     delta = (
@@ -293,7 +304,13 @@ def test_fused_act_quant_matches_unfused(inter, with_delta):
     assert torch.equal(fused_act, ref_act)
     assert torch.equal(fused_pairs, ref_pairs)
 
-    ref_q, ref_s = sglang_per_token_group_quant_fp8(ref_act, group)
+    if group == inter:
+        ref_q = torch.empty_like(act_q)
+        ref_s = torch.empty(num_pairs, dtype=torch.float32, device=device)
+        quantize_rows_per_token_fp8(ref_act, q_out=ref_q, scale_out=ref_s)
+        ref_s = ref_s.view(num_pairs, 1)
+    else:
+        ref_q, ref_s = sglang_per_token_group_quant_fp8(ref_act, group)
     valid_rows = (topk_ids.flatten() >= 0).nonzero(as_tuple=True)[0]
     assert torch.equal(act_s[valid_rows], ref_s[valid_rows])
     assert torch.equal(
