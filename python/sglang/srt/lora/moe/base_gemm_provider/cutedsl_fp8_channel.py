@@ -426,8 +426,11 @@ class CuteDslFp8ChannelContiguousProvider(
         self, row_state: CuteDslFp8ChannelContiguousRowState, act_out: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not row_state.act_quant_ready:
-            # Fused-B activation stays BF16.
+            # Fused-B activation stays BF16; the segment total bounds the rows.
             quantize_rows_per_token_fp8(
-                act_out, q_out=row_state.act_fp8, scale_out=row_state.act_scale
+                act_out,
+                q_out=row_state.act_fp8,
+                scale_out=row_state.act_scale,
+                live_rows=row_state.seg_offsets[self.quant_info.num_local_experts :],
             )
         return row_state.act_fp8, row_state.act_scale

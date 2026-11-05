@@ -244,6 +244,50 @@ def test_fp8_row_movers_match_upstream_quant(hidden, domain, captured) -> None:
         assert bool(torch.all(flat_scales[unused] == -777))
 
 
+@pytest.mark.parametrize("k", [384, 640, 2048])
+@pytest.mark.parametrize("layout", ["flat", "masked"])
+def test_per_token_row_quantizer_matches_upstream(k, layout) -> None:
+    """Several rows per program; rows past the live bound stay untouched."""
+    from sglang.kernels.ops.lora.moe.fp8_quant import quantize_rows_per_token_fp8
+    from sglang.kernels.ops.quantization.fp8_kernel import (
+        sglang_per_token_group_quant_fp8,
+    )
+
+    device = torch.device("cuda")
+    num_slabs, m_max = 6, 40  # 240 rows: whole programs of rows, a partial last one
+    num_rows = num_slabs * m_max
+    x = _rand_hidden(num_rows, k, seed=9).to(device)
+    x[2].zero_()
+    x[3, ::64] = 32
+    q = torch.empty(num_rows, k, dtype=torch.float8_e4m3fn, device=device)
+    q.fill_(0.25)
+    s = torch.full((num_rows,), -777.0, dtype=torch.float32, device=device)
+    row = torch.arange(num_rows, device=device)
+    if layout == "masked":
+        masked_m = torch.tensor([40, 0, 7, 33, 1, 40], dtype=torch.int32, device=device)
+        quantize_rows_per_token_fp8(
+            x.view(num_slabs, m_max, k),
+            q_out=q.view(num_slabs, m_max, k),
+            scale_out=s.view(num_slabs, m_max),
+            masked_m=masked_m,
+        )
+        live = row % m_max < masked_m.repeat_interleave(m_max)
+    else:
+        live_rows = torch.tensor([131], dtype=torch.int32, device=device)
+        quantize_rows_per_token_fp8(x, q_out=q, scale_out=s, live_rows=live_rows)
+        live = row < 131
+    ref_q, ref_s = sglang_per_token_group_quant_fp8(x, k)
+    ref_s = ref_s.view(-1)
+    # Upstream's per-token kernel saturates the codes of an all-zero row; the
+    # row quantizer writes zero codes for it (its scale is zero either way).
+    nonzero = live & ref_s.ne(0)
+    assert torch.equal(q[nonzero].view(torch.uint8), ref_q[nonzero].view(torch.uint8))
+    assert torch.equal(s[live], ref_s[live])
+    assert bool(torch.all(q[live & ~nonzero].float() == 0))
+    assert bool(torch.all(q[~live].float() == 0.25))
+    assert bool(torch.all(s[~live] == -777))
+
+
 @pytest.mark.parametrize(
     "inter,group,with_delta",
     [
