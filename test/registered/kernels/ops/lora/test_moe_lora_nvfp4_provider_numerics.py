@@ -12,16 +12,21 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from sglang.kernels.ops.lora.moe.activation import ActivationFn
 from sglang.srt.layers.moe.token_dispatcher.standard import StandardDispatchOutput
 from sglang.srt.layers.moe.topk import StandardTopKOutput
 from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
-from sglang.srt.lora.moe.plan import ActivationFn, AFamily, BFamily, resolve_plans
+from sglang.srt.lora.moe.plan import AFamily, BFamily, resolve_plans
 from sglang.srt.lora.moe.runner import MoeLoraBatch, MoeLoraRunner
 from sglang.srt.lora.utils import Phase, architecture_for_capability
 from sglang.srt.runtime_context import get_context
 from sglang.test.ci.ci_register import register_cuda_ci
 
-register_cuda_ci(est_time=60, stage="base-b-kernel-unit", runner_config="1-gpu-large")
+register_cuda_ci(est_time=20, stage="base-b-kernel-unit", runner_config="1-gpu-large")
+# The H100 pool skips the sm100 shared-outer NVFP4 decode plan row (skipped elsewhere); the B200 pool runs it per PR.
+# The test runs on one GPU: 4-gpu-b200 is the kernel lane's only SM100 pool, so
+# its four GPUs are allocation granularity, not multi-GPU coverage.
+register_cuda_ci(est_time=25, stage="base-b-kernel-unit", runner_config="4-gpu-b200")
 
 _E = 4
 _H = 256
@@ -201,7 +206,7 @@ def test_nvfp4_marlin_gateup_and_down_match_reference(slices, intermediate):
                 activation="relu2",
             )
             # Padding must be cleared even when its reusable storage is poisoned.
-            state.padded_intermediate[:, intermediate:].fill_(float("nan"))
+            state.padded_act[:, intermediate:].fill_(float("nan"))
             provider.down(state, act, down)
             down_delta = delta(a2, b2, act_pairs.flatten(0, 1).float()).to(
                 torch.bfloat16
@@ -245,7 +250,7 @@ def test_nvfp4_marlin_gateup_and_down_match_reference(slices, intermediate):
 def test_nvfp4_shared_outer_decode_plan_matches_reference(
     monkeypatch: pytest.MonkeyPatch, slices: int
 ) -> None:
-    """Run the sm100 ``decode.shared.nvfp4`` row end to end: token_dense gate/up-A
+    """Run the sm100 ``decode.shared.marlin`` row end to end: token_dense gate/up-A
     planes selected by per_row B, Marlin base GEMMs, per_row down-A, and the
     shared one-pass finalize. Eager first, then a graph replayed with changed
     adapter slots, routing, and inputs.
@@ -254,7 +259,7 @@ def test_nvfp4_shared_outer_decode_plan_matches_reference(
     device = torch.device("cuda")
     major = torch.cuda.get_device_capability(device)[0]
     if major != 10:
-        pytest.skip("decode.shared.nvfp4 is an sm100 plan row")
+        pytest.skip("decode.shared.marlin is an sm100 plan row")
     monkeypatch.setattr(
         MoeLoraRunner, "_allocate_output", _standalone_output_allocation
     )
@@ -277,12 +282,13 @@ def test_nvfp4_shared_outer_decode_plan_matches_reference(
         hidden_size=_H,
         num_local_experts=_E,
         quant_family="nvfp4",
+        vendor="marlin",
     )[Phase.DECODE]
     assert (
         selected.name,
         selected.plan.gate_up_a.family,
         selected.plan.gate_up_b.family,
-    ) == ("decode.shared.nvfp4", AFamily.TOKEN_DENSE, BFamily.PER_ROW)
+    ) == ("decode.shared.marlin", AFamily.TOKEN_DENSE, BFamily.PER_ROW)
     provider = select_provider_cls(selected.base_gemm_rows, "nvfp4", "marlin")(
         quant_info
     )

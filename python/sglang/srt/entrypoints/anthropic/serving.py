@@ -527,6 +527,7 @@ def convert_to_chat_completion_request(
         "model": anthropic_request.model,
         "max_tokens": anthropic_request.max_tokens,
         "stream": anthropic_request.stream or False,
+        "cache_salt": anthropic_request.cache_salt,
         **anthropic_request.pd_routing_kwargs(),
     }
 
@@ -569,15 +570,17 @@ def convert_to_chat_completion_request(
         # because the local backend has no auto-throttle equivalent.
         # Anything other than ``disabled`` enables reasoning.
         enabled = anthropic_request.thinking.type != "disabled"
-        if anthropic_request.thinking.display == "omitted":
-            # Anthropic 4.7 spec: keep reasoning ON but hide reasoning
-            # text from the client. The OpenAI streaming pipeline has
-            # no equivalent suppress knob — log so operators can see
-            # the request, then proceed with normal reasoning emission.
+        display = anthropic_request.thinking.display
+        if display in ("omitted", "updates"):
+            # Anthropic 4.7 spec: keep reasoning ON but hide or summarize the
+            # reasoning text. The OpenAI streaming pipeline has no equivalent
+            # knob — log so operators can see the request, then proceed with
+            # normal reasoning emission.
             logger.warning(
-                "Anthropic thinking.display='omitted' is accepted for "
+                "Anthropic thinking.display=%r is accepted for "
                 "SDK compatibility but reasoning text will still be "
-                "emitted to the client"
+                "emitted to the client",
+                display,
             )
         if apply_reasoning_enabled is None:
             raise ValueError(

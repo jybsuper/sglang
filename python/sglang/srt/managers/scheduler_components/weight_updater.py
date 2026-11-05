@@ -17,7 +17,7 @@ from sglang.srt.constants import (
     GPU_MEMORY_TYPE_KV_CACHE,
     GPU_MEMORY_TYPE_WEIGHTS,
 )
-from sglang.srt.disaggregation.utils import DisaggregationMode
+from sglang.srt.disaggregation.mode import DisaggregationMode
 from sglang.srt.managers.io_struct import (
     BeginWeightUpdateReqInput,
     BeginWeightUpdateReqOutput,
@@ -425,9 +425,23 @@ class SchedulerWeightUpdaterManager:
                 message="a weight-update session is already open; "
                 "call end_weight_update() first",
             )
+        from sglang.srt.model_executor.model_runner_components.weight_updater import (
+            _unsupported_derived_weight_cache_error,
+        )
+
+        runners = self._select_runners(recv_req.selector)
+        # Restoring packed weights already mutates storage. Check every runner
+        # before touching any of them, including sessions used by P2P/RDMA
+        # writers which bypass update_weights_from_tensor/distributed.
+        for _, runner in runners:
+            error = _unsupported_derived_weight_cache_error(
+                runner.weight_updater.get_model()
+            )
+            if error is not None:
+                return BeginWeightUpdateReqOutput(success=False, message=error)
         self._lora_stash = {}
         if recv_req.sync_base:
-            for _, runner in self._select_runners(recv_req.selector):
+            for _, runner in runners:
                 runner.weight_updater.begin_weight_update()
         # peers write the weights over RDMA, outside the engine's streams; an in_place pause leaves the last
         # overlapped forward running

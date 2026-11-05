@@ -34,7 +34,7 @@ if _is_cuda:
         is_mxfp4_marlin_weights,
         marlin_moe_use_atomic_add,
     )
-    from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import (
+    from sglang.srt.layers.moe.moe_runner.triton_utils.moe_align_block_size import (
         moe_align_block_size,
     )
     from sglang.srt.layers.quantization.marlin_utils import marlin_make_workspace

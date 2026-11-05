@@ -23,12 +23,7 @@ import torch
 from PIL import Image
 from transformers import BaseImageProcessor
 
-from sglang.srt.managers.schedule_batch import (
-    Modality,
-    MultimodalDataItem,
-    MultimodalInputFormat,
-    MultimodalProcessorOutput,
-)
+from sglang.srt.managers.req_types import MultimodalDataItem, MultimodalProcessorOutput
 from sglang.srt.multimodal.cache import (
     MultimodalPreprocessCache,
     PreprocessFingerprintProvider,
@@ -38,6 +33,7 @@ from sglang.srt.multimodal.multimodal_processor_mixin import (
     MultimodalProcessorMixin,
     _tokenizer_of,
 )
+from sglang.srt.multimodal.modality import Modality, MultimodalInputFormat
 from sglang.srt.multimodal.processors.hash_executor import MultimodalHashExecutor
 from sglang.srt.multimodal.processors.processor_config import MultimodalProcessorConfig
 from sglang.srt.multimodal.serving_preprocessing import (
@@ -239,6 +235,12 @@ class BaseMultimodalProcessor(MultimodalProcessorMixin, ABC):
     # Artifact-based processors may keep their prompt/M-RoPE fast path even
     # when artifact retention is disabled.
     uses_media_artifacts_without_cache = False
+    # Processors opt out only when their preprocessing is not thread-safe. The
+    # worker pool gives each thread its own `copy.deepcopy` of the HF processor
+    # and injects it, and the single function it runs --
+    # `process_and_combine_mm_data` -- resolves that clone instead of
+    # `self._processor`, so isolation does not depend on the subclass.
+    supports_mm_processor_concurrency = True
     # Placeholder tokens that the loader matches per modality; a processor without
     # them reads media its own way, so callers cannot tell which media it reads.
     mm_tokens: Optional[MultimodalSpecialTokens] = None

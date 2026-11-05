@@ -34,8 +34,13 @@ class KvWeightVersionRecord(msgspec.Struct):
             and model_runner.server_args.enable_prefill_weight_versions
             and forward_batch.out_cache_loc is not None
         ):
+            slot_indices = forward_batch.out_cache_loc_virtual
+            if slot_indices is None:
+                slot_indices = forward_batch.origin_out_cache_loc
+            if slot_indices is None:
+                slot_indices = forward_batch.out_cache_loc
             return cls.capture(
-                slot_indices=forward_batch.out_cache_loc,
+                slot_indices=slot_indices,
                 version=get_serving().weight_version,
             )
         return None
@@ -91,7 +96,7 @@ class KvWeightVersionTracker:
 
     def __init__(
         self, *, num_slots: int, device: str, req_to_token_pool: ReqToTokenPool
-    ):
+    ) -> None:
         self._slot_version_ids = torch.full(
             (num_slots,), _UNWRITTEN_VERSION_ID, dtype=torch.int32, device=device
         )
@@ -104,6 +109,13 @@ class KvWeightVersionTracker:
 
     def fill_req_prefill_weight_versions(self, req: Req) -> None:
         num_prompt_tokens = len(req.origin_input_ids)
+        if (spans := req.prefill_weight_versions) is not None:
+            assert (spans[-1].end if spans else 0) == num_prompt_tokens, (
+                "Recorded prefill weight versions do not match the prompt length"
+            )
+            assert not spans or spans[0].start == 0
+            return
+
         assert req.kv.kv_committed_len >= num_prompt_tokens, (
             f"prefill finished with {req.kv.kv_committed_len} committed KV tokens "
             f"for a {num_prompt_tokens}-token prompt"
@@ -142,7 +154,7 @@ class KvWeightVersionTracker:
 
 
 class _StringInterner:
-    def __init__(self):
+    def __init__(self) -> None:
         self._str_by_id: List[str] = []
         self._id_by_str: Dict[str, int] = {}
 

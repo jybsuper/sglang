@@ -6,7 +6,6 @@ from typing import Optional
 
 import requests
 
-from sglang.srt.utils import kill_process_tree
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.test_utils import (
     DEFAULT_MODEL_NAME_FOR_TEST_MLA,
@@ -14,6 +13,7 @@ from sglang.test.test_utils import (
     DEFAULT_URL_FOR_TEST,
     CustomTestCase,
     popen_launch_server,
+    terminate_and_kill_process_tree,
 )
 
 register_cuda_ci(est_time=180, stage="nightly", runner_config="2-gpu-large")
@@ -87,7 +87,8 @@ class TestWeightVersionSpans(CustomTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        kill_process_tree(cls.process.pid)
+        if hasattr(cls, "process") and cls.process is not None:
+            terminate_and_kill_process_tree(cls.process)
 
     def _generate(
         self,

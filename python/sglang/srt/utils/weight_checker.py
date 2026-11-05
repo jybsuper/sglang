@@ -240,7 +240,16 @@ class WeightChecker:
         return info.model_dump()
 
     def _compute_raw_checksum(self, names: Optional[List[str]], *, role: str) -> Dict:
-        params = dict(self._get_model().named_parameters())
+        params = {
+            name: tensor
+            for name, tensor in self._model_state()
+            if not _is_non_persistent_buffer_name(name)
+        }
+        if names is not None and (missing := sorted(set(names) - params.keys())):
+            raise ValueError(
+                f"raw_checksum names unavailable on {role} runner "
+                f"at {self._placement}: {missing}"
+            )
         checksums = {
             name: _sha256_tensor(params[name].data)
             for name in (params if names is None else names)

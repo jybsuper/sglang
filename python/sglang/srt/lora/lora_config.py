@@ -15,7 +15,7 @@
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional, Union
 
 from huggingface_hub import snapshot_download
 
@@ -106,3 +106,18 @@ class LoRAConfig:
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse added_tokens.json: {e}")
             return None
+
+
+def get_normalized_target_modules(
+    target_modules: Union[str, Iterable[str]],
+    base_model=None,
+) -> set[str]:
+    """Map LoRA target module names to the normalized (fused) weight names.
+
+    The implementation lives in ``sglang.srt.lora.utils`` (it knows the fused
+    member slots and the per-model ``get_lora_target_module_name`` hooks);
+    imported lazily because that module imports this one.
+    """
+    from sglang.srt.lora.utils import get_normalized_target_modules as _impl
+
+    return _impl(target_modules, base_model)

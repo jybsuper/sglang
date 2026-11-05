@@ -54,7 +54,9 @@ class ContiguousRowDomainProvider(MoeBaseProvider):
         workspace: LoraWorkspace | None = None,
         *,
         fill_rows: bool = True,
+        finalize: bool = True,
     ) -> ContiguousRowState:
+        # A subclass filling its own rows may finalize the map in that fill.
         num_pairs = topk_ids.numel()
         num_experts = self.quant_info.num_local_experts
         m_pad_ceiling = contiguous_m_pad_ceiling(
@@ -115,6 +117,7 @@ class ContiguousRowDomainProvider(MoeBaseProvider):
             seg_counts_out=seg_counts,
             seg_offsets_out=seg_offsets,
             pair_to_row_out=pair_to_row,
+            finalize=finalize or fill_rows,
         )
         if hidden_compact is not None:
             dispatch_fill_rows_contiguous_bf16(

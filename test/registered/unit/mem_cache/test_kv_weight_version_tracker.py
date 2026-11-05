@@ -107,19 +107,15 @@ class TestKvWeightVersionTracker(CustomTestCase):
             [WeightVersionSpan(version="v0", start=0, end=1)],
         )
 
-    def test_unified_swa_virtual_slots_above_the_static_quota_keep_their_versions(
+    def test_swa_full_allocator_slots_above_wrapper_capacity_keep_their_versions(
         self,
     ) -> None:
-        """Legal virtual slots above the static token quota remain addressable by the tracker."""
-        from sglang.srt.mem_cache.allocator.unified_hybrid_swa import (
-            UnifiedSWATokenToKVPoolAllocator,
-        )
+        """The SWA tracker covers the full allocator's address range."""
+        from sglang.srt.mem_cache.allocator.swa import SWATokenToKVPoolAllocator
 
         for page_size in (1, 4):
             with self.subTest(page_size=page_size):
-                allocator = UnifiedSWATokenToKVPoolAllocator.__new__(
-                    UnifiedSWATokenToKVPoolAllocator
-                )
+                allocator = SWATokenToKVPoolAllocator.__new__(SWATokenToKVPoolAllocator)
                 allocator._size_full = 8
                 allocator.page_size = page_size
                 allocator.device = "cpu"
@@ -323,6 +319,7 @@ class TestFillReqPrefillWeightVersions(CustomTestCase):
         req = _ReqStub(num_prompt_tokens=2, kv_committed_len=2)
         table.fill_req_prefill_weight_versions(req)
         table.record(slot_indices=_slots(4, 5), version="v1")
+        req.prefill_weight_versions = None
 
         table.fill_req_prefill_weight_versions(req)
 
@@ -330,6 +327,19 @@ class TestFillReqPrefillWeightVersions(CustomTestCase):
             req.prefill_weight_versions,
             [WeightVersionSpan(version="v1", start=0, end=2)],
         )
+
+    def test_decode_reuses_prompt_spans_without_reading_released_slots(self):
+        """Repeated extend processing retains spans after prompt slots are released."""
+        table = _table(slots_of_req=[4, 5])
+        table.record(slot_indices=_slots(4, 5), version="v0")
+        req = _ReqStub(num_prompt_tokens=2, kv_committed_len=2)
+        table.fill_req_prefill_weight_versions(req)
+        spans = req.prefill_weight_versions
+        req.kv.kv_committed_len = 0
+
+        table.fill_req_prefill_weight_versions(req)
+
+        self.assertIs(req.prefill_weight_versions, spans)
 
 
 if __name__ == "__main__":

@@ -6,12 +6,14 @@ from __future__ import annotations
 import logging
 from typing import Any, List
 
-from sglang.srt.arg_groups.overrides import (
-    declare_resolution,
-    resolving_view,
-)
+import torch
+
+from sglang.srt.arg_groups.model_override_base import model_config_of, resolving_view
+from sglang.srt.arg_groups.overrides import declare_resolution, register_post_process
 from sglang.srt.environ import envs
+from sglang.srt.lora.lora_config import LoRAConfig, get_normalized_target_modules
 from sglang.srt.lora.lora_registry import LoRARef
+from sglang.srt.lora.moe.base_gemm_provider import default_vendor
 from sglang.srt.runtime_context import get_platform
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,6 @@ logger = logging.getLogger(__name__)
 def _check_v2_lora_modes(cfg: Any, option: str):
     for unsupported, mode in (
         (cfg.attn_dp_size > 1, "DP-attention with --attn-dp-size > 1"),
-        (cfg.enable_pdmux, "PD-multiplexing"),
         (cfg.enable_two_batch_overlap, "two-batch overlap"),
         # Both reach the legacy kv_b correction kernels with V2 batch metadata.
         (envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get(), "SGLANG_EXPERIMENTAL_LORA_OPTI"),
@@ -181,6 +182,137 @@ def check_lora_server_args(server_args: Any):
     check_lora_moe_runner_args(server_args)
 
 
+# ModelConfig.quantization (resolved from the checkpoint) -> MoE LoRA weight
+# family; FP8 configs that carry MXFP4 experts are the mxfp4 family.
+_LORA_MOE_FAMILIES = {
+    None: "bf16",
+    "fp8": "fp8",
+    "mxfp8": "mxfp8",
+    "modelopt_fp4": "nvfp4",
+    "w8a8_fp8": "fp8_channel",
+}
+# compressed-tensors 8-bit float weights by (strategy, dynamic activations).
+_COMPRESSED_TENSORS_FP8_FAMILIES = {
+    ("block", True): "fp8",
+    ("channel", True): "fp8_channel",
+    ("tensor", False): "fp8_tensor",
+    ("tensor", True): "fp8_tensor",
+}
+_EXPERT_COUNT_FIELDS = (
+    "num_experts",
+    "num_local_experts",
+    "n_routed_experts",
+    "moe_num_experts",
+)
+
+
+def _lora_enabled(cfg: Any) -> bool:
+    return bool(cfg.enable_lora) or (cfg.enable_lora is None and bool(cfg.lora_paths))
+
+
+def _adapter_paths(lora_paths: Any) -> list[str]:
+    """Adapter paths from the raw --lora-paths forms check_lora_server_args accepts."""
+    if isinstance(lora_paths, dict):
+        return list(lora_paths.values())
+    paths = []
+    for entry in lora_paths or ():
+        if isinstance(entry, str):
+            paths.append(entry.split("=", 1)[1] if "=" in entry else entry)
+        elif isinstance(entry, dict):
+            paths.append(entry.get("lora_path"))
+        else:
+            paths.append(getattr(entry, "lora_path", None))
+    return [path for path in paths if path]
+
+
+def _targets_routed_experts(cfg: Any) -> bool:
+    """Whether the LoRA memory pool will carry expert weights.
+
+    The manager attaches the MoE wrapper when the normalized targets hold
+    gate_up_proj and down_proj, and "all" resolves to every module the model
+    has. --lora-target-modules fixes the set; otherwise the adapters' union does.
+    """
+    if cfg.lora_target_modules:
+        names = get_normalized_target_modules(cfg.lora_target_modules)
+    else:
+        names = set()
+        for path in _adapter_paths(cfg.lora_paths):
+            names |= get_normalized_target_modules(LoRAConfig(path).target_modules)
+    return "all" in names or {"gate_up_proj", "down_proj"} <= names
+
+
+def _compressed_tensors_family(model_config: Any) -> str | None:
+    """The family of a compressed-tensors checkpoint from its config groups.
+
+    Each group quantizes the Linear layers it targets; FusedMoE experts
+    load as those projections. Groups that disagree, or that are not 8-bit
+    float, stay auto: layer attachment checks the exact scheme.
+    """
+    families = set()
+    for group in (model_config.hf_quant_config.get("config_groups") or {}).values():
+        weights = group.get("weights") or {}
+        if weights.get("type") != "float" or weights.get("num_bits") != 8:
+            return None
+        activations = group.get("input_activations") or {}
+        families.add(
+            _COMPRESSED_TENSORS_FP8_FAMILIES.get(
+                (weights.get("strategy"), bool(activations.get("dynamic")))
+            )
+        )
+    return families.pop() if len(families) == 1 else None
+
+
+def _routed_expert_count(model_config: Any) -> int:
+    for config in (model_config.hf_text_config, model_config.hf_config):
+        for field in _EXPERT_COUNT_FIELDS:
+            value = getattr(config, field, None)
+            if isinstance(value, int) and value > 0:
+                return value
+    return 0
+
+
+def _sm_major() -> int | None:
+    """The CUDA device's SM major, or None without a CUDA device."""
+    if not torch.cuda.is_available():
+        return None
+    return torch.cuda.get_device_capability()[0]
+
+
+@register_post_process
+def resolve_lora_moe_runner_backend(view: Any) -> dict:
+    """Pick the family's default lora_* runner for expert-targeted v2 LoRA."""
+    if (
+        view.moe_runner_backend != "auto"
+        or view.lora_backend != "triton_v2"
+        or not _lora_enabled(view)
+    ):
+        return {}
+    model_config = model_config_of(view)
+    if not _routed_expert_count(model_config) or not _targets_routed_experts(view):
+        return {}
+    if model_config.is_fp4_experts:
+        family = "mxfp4"
+    elif model_config.quantization in ("compressed-tensors", "compressed_tensors"):
+        family = _compressed_tensors_family(model_config)
+    else:
+        family = _LORA_MOE_FAMILIES.get(model_config.quantization)
+    if family is None:
+        logger.info(
+            "--moe-runner-backend stays auto: MoE LoRA has no base-GEMM provider "
+            "for quantization %r",
+            model_config.quantization,
+        )
+        return {}
+    backend = f"lora_{default_vendor(family, _sm_major())}"
+    logger.info(
+        "--moe-runner-backend auto -> %s: --lora-backend triton_v2 serves the %s "
+        "MoE experts through the LoRA runner",
+        backend,
+        family,
+    )
+    return {"moe_runner_backend": backend}
+
+
 def check_lora_moe_runner_args(server_args: Any):
     """Reject unsupported LoRA MoE configurations before layer attachment."""
     cfg = resolving_view(server_args)
@@ -208,15 +340,28 @@ def check_lora_moe_runner_args(server_args: Any):
         )
     _check_v2_lora_modes(cfg, f"--moe-runner-backend {backend}")
     # Layer attachment checks the specific weight layout within each scheme.
-    if cfg.quantization not in (None, "fp8", "modelopt_fp4"):
+    if cfg.quantization not in (
+        None,
+        "fp8",
+        "mxfp8",
+        "modelopt_fp4",
+        "compressed-tensors",
+        "compressed_tensors",
+        "w8a8_fp8",
+    ):
         raise ValueError(
-            f"--moe-runner-backend {backend} supports unquantized BF16, 128-block "
-            f"FP8 and ModelOpt NVFP4 MoE, got --quantization {cfg.quantization}"
+            f"--moe-runner-backend {backend} supports unquantized BF16, 128-block, "
+            "per-channel or per-tensor FP8 (sglang or compressed-tensors, with BF16 "
+            f"or MXFP4 experts), MXFP8 and ModelOpt NVFP4 MoE, got --quantization "
+            f"{cfg.quantization}"
         )
-    if cfg.quantization == "modelopt_fp4" and backend != "lora_marlin":
+    if cfg.quantization == "modelopt_fp4" and backend not in (
+        "lora_marlin",
+        "lora_cutedsl",
+    ):
         raise ValueError(
             f"--moe-runner-backend {backend} cannot run ModelOpt NVFP4 MoE; "
-            "use --moe-runner-backend lora_marlin"
+            "use --moe-runner-backend lora_marlin or lora_cutedsl"
         )
     if cfg.moe_a2a_backend != "none":
         raise ValueError(

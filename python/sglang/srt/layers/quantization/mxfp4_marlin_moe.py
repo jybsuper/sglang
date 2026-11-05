@@ -7,7 +7,7 @@ import torch
 from torch.nn import Module
 
 from sglang.srt.layers.moe.moe_runner.marlin import MarlinMoeQuantInfo
-from sglang.srt.layers.moe.utils import MoeRunnerBackend
+from sglang.srt.layers.moe.utils import MoeRunnerBackend, get_moe_runner_backend
 from sglang.srt.runtime_context import get_platform
 from sglang.srt.utils import log_info_on_rank0, round_up, set_weight_attrs
 
@@ -63,10 +63,16 @@ class Mxfp4MarlinMoEMethod:
     def create_moe_runner(self, layer, moe_runner_config):
         from sglang.srt.layers.moe.moe_runner import MoeRunner
 
-        self.runner = MoeRunner(MoeRunnerBackend.MARLIN, moe_runner_config)
+        self._moe_runner_backend = get_moe_runner_backend()
+        # The LoRA MoE runner owns the forward of these experts.
+        self.runner = (
+            None
+            if self._moe_runner_backend.is_lora()
+            else MoeRunner(MoeRunnerBackend.MARLIN, moe_runner_config)
+        )
 
     def get_moe_runner_backend(self, layer):
-        return self.runner.runner_backend
+        return self._moe_runner_backend
 
     def get_moe_routing_method_type(
         self, layer: Module, requested_method: RoutingMethodType | None
@@ -205,12 +211,9 @@ class Mxfp4MarlinMoEMethod:
         if getattr(layer, "_mega_moe_weights_built", False):
             return
 
-        if (
-            not get_platform().is_sm90
-            and not get_platform().is_sm100
-            and not get_platform().is_sm120
-        ):
-            raise RuntimeError("MXFP4 Marlin requires SM90+.")
+        platform = get_platform()
+        if not (platform.is_sm90 or platform.is_sm100 or platform.is_sm120):
+            raise RuntimeError("MXFP4 Marlin requires SM90, SM100 or SM120.")
 
         if not check_moe_marlin_supports_layer(layer, 32, allow_tile_padding=True):
             raise RuntimeError(
