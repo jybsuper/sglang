@@ -17,6 +17,7 @@ from sglang.kernels.ops.lora.moe.dispatch_checks import (
 from sglang.kernels.ops.lora.moe.fp8_quant import quantize_fp8_groups
 from sglang.kernels.ops.lora.moe.quant_blockscaled import (
     BlockScaledRows,
+    quant_column_chunk,
     quantize_tile,
     store_quantized_rows,
 )
@@ -282,10 +283,12 @@ def _fill_rows_contiguous_blockscaled_kernel(
     PACK_E2M1: tl.constexpr,
     NVFP4: tl.constexpr,
 ):
-    # Quantize each token once, then fan out to its routed destinations.
+    # Quantize one column chunk of a token once, then fan it out to the
+    # token's routed destinations. Chunks divide K, so every lane is live.
     token = tl.program_id(0)
-    offs = tl.arange(0, BLOCK_K)
-    x = tl.load(input_ptr + token.to(tl.int64) * K + offs, mask=offs < K, other=0.0)
+    col0 = tl.program_id(1) * BLOCK_K
+    offs = col0 + tl.arange(0, BLOCK_K)
+    x = tl.load(input_ptr + token.to(tl.int64) * K + offs)
     codes, sf_bytes = quantize_tile(
         x.to(tl.float32)[None, :],
         global_scale,
@@ -305,7 +308,7 @@ def _fill_rows_contiguous_blockscaled_kernel(
                 sf_bytes,
                 dst + tl.zeros((1,), tl.int64),
                 tl.arange(0, 1) == 0,
-                0,
+                col0,
                 K,
                 out_ptr,
                 stride_out_row,
@@ -332,7 +335,8 @@ def dispatch_fill_rows_contiguous_blockscaled(
         return
     check_source_rows(hidden_states, topk_ids, num_pairs // num_tokens)
     assert k == rows_out.k and k % 128 == 0
-    _fill_rows_contiguous_blockscaled_kernel[(num_tokens,)](
+    block_k = quant_column_chunk(k)
+    _fill_rows_contiguous_blockscaled_kernel[(num_tokens, k // block_k)](
         hidden_states,
         rows_out.data,
         rows_out.scales,
@@ -340,7 +344,7 @@ def dispatch_fill_rows_contiguous_blockscaled(
         pair_to_row,
         TOPK=num_pairs // num_tokens,
         K=k,
-        BLOCK_K=triton.next_power_of_2(k),
-        num_warps=4 if k <= 4096 else 8,
+        BLOCK_K=block_k,
+        num_warps=4,
         **rows_out.kernel_args(),
     )

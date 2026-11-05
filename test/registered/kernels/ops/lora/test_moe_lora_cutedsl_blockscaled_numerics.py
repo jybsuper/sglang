@@ -147,6 +147,116 @@ def test_triton_row_quantizer_matches_reference(fmt):
 
 
 @pytest.mark.parametrize("fmt", sorted(FORMATS))
+@pytest.mark.parametrize("k", [640, 5120])
+def test_blockscaled_row_movers_match_row_quantizer(fmt, k):
+    """Both dispatch fills (expert slabs and contiguous segments) write the row
+    quantizer's codes and scale atoms bitwise over whole column chunks (K=5120
+    is five chunks of 1024, K=640 five of 128); other rows stay untouched."""
+    if FORMATS[fmt]["elem"] == "e2m1":
+        _skip_unless_sm100()  # the E2M1 conversion needs the sm_100 cvt
+    from sglang.kernels.ops.lora.moe.cutedsl.api import scale_atom_bytes
+    from sglang.kernels.ops.lora.moe.dispatch_contiguous import (
+        contiguous_m_pad_ceiling,
+        dispatch_fill_rows_contiguous_blockscaled,
+        dispatch_layout_contiguous,
+    )
+    from sglang.kernels.ops.lora.moe.dispatch_masked import (
+        dispatch_fill_masked_blockscaled,
+    )
+    from sglang.kernels.ops.lora.moe.quant_blockscaled import (
+        BlockScaledRows,
+        quantize_rows,
+    )
+
+    vec, elem = FORMATS[fmt]["vec"], FORMATS[fmt]["elem"]
+    device = torch.device("cuda")
+    num_tokens, top_k, num_experts = 24, 4, 8
+    generator = torch.Generator().manual_seed(0x5B1F)
+    scores = torch.rand((num_tokens, num_experts), generator=generator)
+    topk_ids = torch.topk(scores, top_k, dim=1).indices.to(torch.int32)
+    topk_ids[0] = -1  # a token without experts
+    topk_ids[1, 2] = -1  # one dropped pair
+    topk_ids = topk_ids.to(device)
+    x = (torch.randn((num_tokens, k), generator=generator) * 0.3).to(torch.bfloat16)
+    x[2].zero_()
+    x[3, ::128] = 32
+    x = x.to(device)
+    global_scale = 0.3 if fmt == "nvfp4" else None
+    pair_to_row = torch.empty(num_tokens * top_k, dtype=torch.int32, device=device)
+    valid = topk_ids.view(-1) >= 0
+    tokens = torch.arange(num_tokens, device=device).repeat_interleave(top_k)[valid]
+
+    def rows(num_rows, rows_per_slab):
+        data = torch.full(
+            (num_rows, k // 2 if elem == "e2m1" else k), 0x55, dtype=torch.uint8
+        ).to(device)
+        if elem != "e2m1":
+            data = data.view(torch.float8_e4m3fn)
+        scales = torch.full(
+            (scale_atom_bytes(rows_per_slab, k, vec, num_rows // rows_per_slab),),
+            0x55,
+            dtype=torch.uint8,
+        ).to(device)
+        return BlockScaledRows(
+            data=data,
+            scales=scales,
+            sf_vec_size=vec,
+            rows_per_slab=rows_per_slab,
+            global_scale=global_scale,
+        )
+
+    for domain in ("masked", "contiguous"):
+        if domain == "masked":
+            m_max = 32
+            masked_m = torch.empty(num_experts, dtype=torch.int32, device=device)
+            target = rows(num_experts * m_max, m_max)
+            dispatch_fill_masked_blockscaled(
+                x,
+                topk_ids,
+                top_k,
+                masked_m_out=masked_m,
+                pair_to_row_out=pair_to_row,
+                rows_out=target,
+            )
+            assert torch.equal(
+                masked_m,
+                torch.bincount(
+                    topk_ids.view(-1)[valid].long(), minlength=num_experts
+                ).to(torch.int32),
+            )
+        else:
+            counts = torch.empty(num_experts, dtype=torch.int32, device=device)
+            offsets = torch.empty(num_experts + 1, dtype=torch.int32, device=device)
+            m_pad = contiguous_m_pad_ceiling(pair_to_row.numel(), num_experts, 128)
+            dispatch_layout_contiguous(
+                x,
+                topk_ids,
+                num_experts,
+                top_k,
+                128,
+                seg_counts_out=counts,
+                seg_offsets_out=offsets,
+                pair_to_row_out=pair_to_row,
+            )
+            target = rows(m_pad, m_pad)
+            dispatch_fill_rows_contiguous_blockscaled(
+                x, topk_ids, pair_to_row, rows_out=target
+            )
+        assert bool(torch.all(pair_to_row[~valid] == -1))
+        # The row quantizer over each token's row at its destination.
+        reference = rows(target.data.shape[0], target.rows_per_slab)
+        source = torch.zeros(
+            (target.data.shape[0], k), dtype=torch.bfloat16, device=device
+        )
+        source[pair_to_row[valid].long()] = x[tokens]
+        quantize_rows(source, reference, pair_to_row)
+        assert torch.equal(
+            target.data.view(torch.uint8), reference.data.view(torch.uint8)
+        ), domain
+        assert torch.equal(target.scales, reference.scales), domain
+
+
+@pytest.mark.parametrize("fmt", sorted(FORMATS))
 @pytest.mark.parametrize("rows_mode", ["masked", "contiguous"])
 def test_blockscaled_grouped_gemm_matches_dequantized_reference(fmt, rows_mode):
     _skip_unless_sm100()

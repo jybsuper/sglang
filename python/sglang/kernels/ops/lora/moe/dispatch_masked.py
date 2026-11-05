@@ -16,6 +16,7 @@ from sglang.kernels.ops.lora.moe.dispatch_checks import (
 from sglang.kernels.ops.lora.moe.fp8_quant import quantize_fp8_groups
 from sglang.kernels.ops.lora.moe.quant_blockscaled import (
     BlockScaledRows,
+    quant_column_chunk,
     quantize_tile,
     store_quantized_rows,
 )
@@ -188,33 +189,35 @@ def _dispatch_fill_masked_blockscaled_kernel(
     dst = expert.to(tl.int64) * rows_per_slab + slot
     tl.store(pair_to_row_ptr + pair, dst.to(tl.int32))
 
+    # Whole column chunks: no lane is masked, and the loop pipelines the loads.
     offs = tl.arange(0, BLOCK_K)
-    x = tl.load(input_ptr + t.to(tl.int64) * K + offs, mask=offs < K, other=0.0)
-    codes, sf_bytes = quantize_tile(
-        x.to(tl.float32)[None, :],
-        global_scale,
-        VEC,
-        ELEM_MAX,
-        ELEM_MAX_LOG2,
-        PACK_E2M1,
-        NVFP4,
-    )
-    store_quantized_rows(
-        codes,
-        sf_bytes,
-        dst + tl.zeros((1,), tl.int64),
-        tl.arange(0, 1) == 0,
-        0,
-        K,
-        out_ptr,
-        stride_out_row,
-        sf_ptr,
-        rows_per_slab,
-        row_atoms,
-        k_atoms,
-        VEC,
-        PACK_E2M1,
-    )
+    for col0 in range(0, K, BLOCK_K):
+        x = tl.load(input_ptr + t.to(tl.int64) * K + col0 + offs)
+        codes, sf_bytes = quantize_tile(
+            x.to(tl.float32)[None, :],
+            global_scale,
+            VEC,
+            ELEM_MAX,
+            ELEM_MAX_LOG2,
+            PACK_E2M1,
+            NVFP4,
+        )
+        store_quantized_rows(
+            codes,
+            sf_bytes,
+            dst + tl.zeros((1,), tl.int64),
+            tl.arange(0, 1) == 0,
+            col0,
+            K,
+            out_ptr,
+            stride_out_row,
+            sf_ptr,
+            rows_per_slab,
+            row_atoms,
+            k_atoms,
+            VEC,
+            PACK_E2M1,
+        )
 
 
 def dispatch_fill_masked_blockscaled(
@@ -241,7 +244,7 @@ def dispatch_fill_masked_blockscaled(
             masked_m_out,
             TOPK=top_k,
             K=k,
-            BLOCK_K=triton.next_power_of_2(k),
-            num_warps=4 if k <= 4096 else 8,
+            BLOCK_K=quant_column_chunk(k),
+            num_warps=4,
             **rows_out.kernel_args(),
         )

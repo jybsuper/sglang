@@ -39,6 +39,17 @@ mov.b32 $0, {b0, b1, b2, b3};
 _ROWS_PER_PROGRAM = 16
 
 
+def quant_column_chunk(k: int) -> int:
+    """The widest power-of-two column chunk up to 1024 that divides ``k``.
+
+    The dispatch kernels quantize a row in whole chunks, so no lane is masked
+    (a power-of-two tile over K=5120 would idle 37% of its lanes)."""
+    for block_k in (1024, 512, 256, 128):
+        if k % block_k == 0:
+            return block_k
+    raise ValueError(f"block-scaled rows need K to be a multiple of 128, got {k}")
+
+
 class BlockScaledRows(msgspec.Struct, frozen=True, kw_only=True):
     """A quantized row buffer plus its scale atoms, as the GEMM reads them."""
 
