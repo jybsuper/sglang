@@ -127,6 +127,7 @@ class MoeBaseProvider:
         activation_lora_input: torch.Tensor | None,
         *,
         activation: str = "silu",
+        swiglu_limit: float | None = None,
     ) -> None:
         from sglang.kernels.ops.lora.moe.activation_delta import act_delta
 
@@ -142,6 +143,7 @@ class MoeBaseProvider:
             gate_first=True,
             interleaved=False,
             activation=activation,
+            swiglu_limit=swiglu_limit,
             act_quant=act_quant,
         )
         self._set_act_quant_ready(row_state, act_quant is not None)
@@ -159,6 +161,7 @@ class MoeBaseProvider:
         bridge_gateup: torch.Tensor | None = None,
         b_gate_up: torch.Tensor | None = None,
         bridge_top_k: int = 1,
+        swiglu_limit: float | None = None,
     ) -> None:
         from sglang.kernels.ops.lora.moe.fused_act import fused_b_act
 
@@ -180,6 +183,7 @@ class MoeBaseProvider:
             bridge_gateup=bridge_gateup,
             b_gate_up=b_gate_up,
             bridge_top_k=bridge_top_k,
+            swiglu_limit=swiglu_limit,
             act_quant=act_quant,
         )
         self._set_act_quant_ready(row_state, act_quant is not None)

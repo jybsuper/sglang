@@ -128,6 +128,7 @@ class MoeLoraRunner:
         routed_scaling_factor: float | None,
         activation: ActivationFn = ActivationFn.SILU,
         is_gated: bool = True,
+        swiglu_limit: float | None = None,
         workspace: LoraWorkspace | None = None,
     ) -> None:
         if not providers:
@@ -155,6 +156,8 @@ class MoeLoraRunner:
         self.routed_scaling_factor = routed_scaling_factor
         self.activation = activation
         self.is_gated = is_gated
+        # Clamped SwiGLU (GLM-5.3-Flash): applied after the adapter's delta.
+        self.swiglu_limit = swiglu_limit
         self.workspace = workspace if workspace is not None else LoraWorkspace()
         self.plans: dict[Phase, SelectedPlan] = {}
 
@@ -249,6 +252,8 @@ class MoeLoraRunner:
             routed_scaling_factor=config.routed_scaling_factor,
             activation=activation,
             is_gated=bool(config.is_gated),
+            # Test stand-ins may omit the field; MoeRunnerConfig always has it.
+            swiglu_limit=getattr(config, "swiglu_limit", None),
             workspace=workspace,
         )
         for sel in plans.values():
@@ -290,18 +295,24 @@ class MoeLoraRunner:
         config = base_layer.moe_runner_config
         # Membership by value: `str in Enum` raises TypeError before Python 3.12.
         supported_activation = config.activation in {fn.value for fn in ActivationFn}
+        # swiglu_limit clamps a gated SiLU's branches, which the activation
+        # kernels apply; gemm1_alpha / gemm1_clamp_limit are another activation.
+        clamps_supported_swiglu = config.swiglu_limit is None or (
+            config.activation == ActivationFn.SILU.value and config.is_gated
+        )
         if (
             not supported_activation
+            or not clamps_supported_swiglu
             or config.gemm1_alpha is not None
             or config.gemm1_clamp_limit is not None
-            or config.swiglu_limit is not None
             or config.apply_router_weight_on_input
             or config.no_combine
             or config.num_fused_shared_experts
         ):
             raise NotImplementedError(
-                "MoE LoRA supports SiLU or ReLU2 (gated or not) without "
-                "fused shared experts, with route weighting owned by finalize"
+                "MoE LoRA supports SiLU or ReLU2 (gated or not; a gated SiLU "
+                "may clamp its branches with swiglu_limit) without fused shared "
+                "experts, with route weighting owned by finalize"
             )
         return family
 
@@ -478,6 +489,7 @@ class MoeLoraRunner:
             act_out,
             None,
             activation=self.activation.value,
+            swiglu_limit=self.swiglu_limit,
         )
         down_out = provider.down_output(row_state, self.workspace)
         provider.down(row_state, act_out, down_out)
@@ -756,6 +768,7 @@ class MoeLoraRunner:
                 act_out,
                 act_pairs,
                 activation=self.activation.value,
+                swiglu_limit=self.swiglu_limit,
             )
             # Pair-major input needs no gather.
             return act_out, act_pairs, None
@@ -763,6 +776,7 @@ class MoeLoraRunner:
         provider.fused_act(
             base_gemm_state,
             activation=self.activation.value,
+            swiglu_limit=self.swiglu_limit,
             base_gateup=gateup_out,
             act_rows=act_out,
             act_pairs=act_pairs,

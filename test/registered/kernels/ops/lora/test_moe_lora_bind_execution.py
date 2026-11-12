@@ -45,6 +45,7 @@ def _from_layer(monkeypatch, provider_cls):
                         top_k=8,
                         routed_scaling_factor=1.0,
                         is_gated=True,
+                        swiglu_limit=None,
                     ),
                 ),
                 workspace=object(),

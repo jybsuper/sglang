@@ -178,11 +178,13 @@ def _reference(
     token_lora_mapping: torch.Tensor,
     *,
     plan: MoePlan | None = None,
+    swiglu_limit: float | None = None,
 ) -> torch.Tensor:
     """FP32 matvecs, optionally rounded at the selected plan's BF16 buffers.
 
     No production routing or kernels, nor a backend-dependent BF16 matmul.
     The default retains the full-FP32 oracle for the original small fixtures.
+    ``swiglu_limit`` clamps the adapted gate (max) and up (both sides).
     """
 
     if plan is not None:
@@ -228,6 +230,9 @@ def _reference(
                 gate = gate + gate_delta
                 up = up + up_delta
 
+            if swiglu_limit is not None:
+                gate = gate.clamp(max=swiglu_limit)
+                up = up.clamp(min=-swiglu_limit, max=swiglu_limit)
             activation = boundary(F.silu(gate) * up)
             pair_output = boundary(torch.mv(w2_weight[expert], activation))
             if slot_is_active:
@@ -416,6 +421,81 @@ def test_selected_pipeline_matches_reference_in_eager_and_cuda_graph(
         rtol=0.06,
         msg=f"{choice.name}: mutated-routing replay",
     )
+
+
+# GLM-5.3-Flash clamps its SwiGLU at 10; these fixtures' pre-activations are ~0.3.
+_SWIGLU_LIMIT = 0.1
+
+
+@pytest.mark.parametrize(
+    ("mode", "num_tokens"),
+    ((Phase.DECODE, 8), (Phase.PREFILL, 64)),
+    ids=("decode", "prefill"),
+)
+def test_clamped_swiglu_clamps_the_adapted_pre_activation(
+    monkeypatch: pytest.MonkeyPatch, mode: Phase, num_tokens: int
+) -> None:
+    """The clamp applies to base + LoRA delta in the activation family the plan selects."""
+    device = torch.device("cuda")
+    capability = torch.cuda.get_device_capability(device)
+    if capability[0] not in (9, 10):
+        pytest.skip(f"MoE LoRA does not support SM{capability[0]}{capability[1]}")
+    monkeypatch.setattr(
+        MoeLoraRunner, "_allocate_output", _standalone_output_allocation
+    )
+    cpu = _make_cpu_tensors(num_tokens)
+    gpu = {name: tensor.to(device) for name, tensor in cpu.items()}
+    choice, launch_config = _resolve_execution(
+        architecture_for_capability(capability[0]), mode, num_tokens
+    )
+    provider = select_provider_cls(choice.base_gemm_rows, "bf16", "cutedsl")(
+        MoeLoraBf16QuantInfo(
+            w13_weight=gpu["w13_weight"],
+            w2_weight=gpu["w2_weight"],
+            num_local_experts=_EXPERTS,
+            intermediate_size=_INTERMEDIATE,
+            hidden_size=_HIDDEN,
+        )
+    )
+    runner = MoeLoraRunner(
+        providers={"test": provider},
+        top_k=_TOP_K,
+        routed_scaling_factor=_ROUTED_SCALING,
+        activation=ActivationFn.SILU,
+        swiglu_limit=_SWIGLU_LIMIT,
+    )
+    runner.validate_plan(choice.plan, base_gemm_rows="test")
+    _bind_test_menu(runner, choice.plan, launch_config)
+    dispatch = StandardDispatchOutput(
+        hidden_states=gpu["hidden_states"],
+        hidden_states_scale=None,
+        topk_output=StandardTopKOutput(
+            topk_weights=gpu["topk_weights"],
+            topk_ids=gpu["topk_ids"],
+            router_logits=gpu["router_logits"],
+        ),
+    )
+    for traffic in ("active", "mixed"):
+        cpu_slots = _token_lora_mapping(traffic, num_tokens)
+        expected = _reference(cpu, cpu_slots, swiglu_limit=_SWIGLU_LIMIT)
+        # The limit must bind, or an unclamped kernel would pass too.
+        assert (expected - _reference(cpu, cpu_slots)).abs().max().item() > 0.02
+        batch = MoeLoraBatch(
+            gate_up_lora_a=gpu["gate_up_lora_a"],
+            gate_up_lora_b=gpu["gate_up_lora_b"],
+            down_lora_a=gpu["down_lora_a"],
+            down_lora_b=gpu["down_lora_b"],
+            token_lora_mapping=cpu_slots.to(device),
+            use_cuda_graph=False,
+            is_prefill=mode is Phase.PREFILL,
+        )
+        torch.testing.assert_close(
+            runner.run(dispatch, batch).hidden_states.detach().float().cpu(),
+            expected,
+            atol=0.018,
+            rtol=0.06,
+            msg=f"{choice.name} ({choice.plan.act.family.value}): {traffic} traffic",
+        )
 
 
 if __name__ == "__main__":

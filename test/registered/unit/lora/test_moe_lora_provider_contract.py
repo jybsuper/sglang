@@ -186,6 +186,32 @@ class TestRunnerAdmission(CustomTestCase):
             ):
                 MoeLoraRunner._admit(self._base_layer(**overrides))
 
+    def test_admits_a_gated_silu_with_clamped_branches(self):
+        """GLM-5.3-Flash's experts clamp their SwiGLU; the activation kernels apply it."""
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        layer = self._base_layer()
+        layer.moe_runner_config.swiglu_limit = 10.0
+        self.assertEqual(MoeLoraRunner._admit(layer), "bf16")
+
+    def test_rejects_clamps_the_kernels_do_not_apply(self):
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+
+        cases = {
+            "ungated_swiglu_limit": dict(is_gated=False, swiglu_limit=10.0),
+            "relu2_swiglu_limit": dict(activation="relu2", swiglu_limit=10.0),
+            "gemm1_clamp_limit": dict(gemm1_clamp_limit=7.0),
+        }
+        for name, fields in cases.items():
+            layer = self._base_layer()
+            for field, value in fields.items():
+                setattr(layer.moe_runner_config, field, value)
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(NotImplementedError, "swiglu_limit"),
+            ):
+                MoeLoraRunner._admit(layer)
+
     def test_binding_surfaces_plan_validation(self):
         """A provider exposing one gate/up slice cannot serve a gated layer."""
         from sglang.srt.layers.moe.utils import MoeRunnerBackend

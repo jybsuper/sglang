@@ -17,7 +17,10 @@ from sglang.kernels.ops.lora.common.routing import grouped_tile_coords
 from sglang.kernels.ops.lora.moe.activation import ActivationFn
 from sglang.kernels.ops.lora.moe.activation_delta import (
     apply_activation,
+    clamp_swiglu_gate,
+    clamp_swiglu_up,
     gate_up_columns,
+    swiglu_limit_arg,
 )
 from sglang.kernels.ops.lora.moe.quant_blockscaled import (
     BlockScaledRows,
@@ -106,6 +109,7 @@ def _b_act_kernel(
     rank: tl.constexpr,
     num_slices: tl.constexpr,
     activation_type: tl.constexpr,
+    swiglu_limit: tl.constexpr,  # 0 disables the clamped-SwiGLU branches
     gate_first: tl.constexpr,
     interleaved: tl.constexpr,
     bridge_token_major: tl.constexpr,
@@ -190,14 +194,16 @@ def _b_act_kernel(
         mask=base_valid[:, None] & w_mask[None, :],
         other=0.0,
     ).to(tl.float32)
-    act = apply_activation(base_gate + delta_gate, activation_type)
+    act = apply_activation(
+        clamp_swiglu_gate(base_gate + delta_gate, swiglu_limit), activation_type
+    )
     if num_slices == 2:
         base_up = tl.load(
             base_ptr + dst_rows[:, None] * stride_pm + up_cols[None, :] * stride_pn,
             mask=base_valid[:, None] & w_mask[None, :],
             other=0.0,
         ).to(tl.float32)
-        act = act * (base_up + delta_up)
+        act = act * clamp_swiglu_up(base_up + delta_up, swiglu_limit)
     value = act.to(act_rows_ptr.dtype.element_ty)
     tl.store(
         act_rows_ptr + dst_rows[:, None] * stride_am + w_offsets[None, :] * stride_an,
@@ -258,9 +264,12 @@ def fused_b_act(
     bridge_gateup: torch.Tensor,
     b_gate_up: torch.Tensor,
     bridge_top_k: int = 1,
+    swiglu_limit: float | None = None,
     act_quant: BlockScaledRows | None = None,
 ) -> None:
     """Fuse gate/up LoRA-B and activation.
+    ``swiglu_limit`` clamps a gated SiLU's gate (max) and up (both sides)
+    after the delta is added.
     Optional MX or static NVFP4 quantization requires whole scale groups per tile.
     """
     ActivationFn.parse(activation)
@@ -313,6 +322,9 @@ def fused_b_act(
         rank=rank,
         num_slices=slices,
         activation_type=activation,
+        swiglu_limit=swiglu_limit_arg(
+            swiglu_limit, activation=activation, num_slices=slices
+        ),
         gate_first=gate_first,
         interleaved=interleaved,
         bridge_token_major=bridge_top_k != 1,

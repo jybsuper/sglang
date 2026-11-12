@@ -53,6 +53,36 @@ def gate_up_columns(
 
 
 @triton.jit
+def clamp_swiglu_gate(gate, SWIGLU_LIMIT: tl.constexpr):
+    """Clamped SwiGLU's gate branch (max only); 0 disables the clamp."""
+    if SWIGLU_LIMIT > 0:
+        gate = tl.minimum(gate, SWIGLU_LIMIT)
+    return gate
+
+
+@triton.jit
+def clamp_swiglu_up(up, SWIGLU_LIMIT: tl.constexpr):
+    """Clamped SwiGLU's up branch (both sides); 0 disables the clamp."""
+    if SWIGLU_LIMIT > 0:
+        up = tl.minimum(tl.maximum(up, -SWIGLU_LIMIT), SWIGLU_LIMIT)
+    return up
+
+
+def swiglu_limit_arg(
+    swiglu_limit: float | None, *, activation: str, num_slices: int
+) -> float:
+    """The kernels' SWIGLU_LIMIT constexpr: clamps apply to gated SiLU only."""
+    if swiglu_limit is None:
+        return 0.0
+    if swiglu_limit <= 0 or activation != "silu" or num_slices != 2:
+        raise ValueError(
+            f"swiglu_limit={swiglu_limit} clamps a gated SiLU's branches; got "
+            f"activation={activation!r} with {num_slices} gate/up slice(s)"
+        )
+    return float(swiglu_limit)
+
+
+@triton.jit
 def _act_delta_kernel(
     gateup_ptr,  # [rows, slices * inter] bf16, flat base rows
     delta_ptr,  # [num_tokens, top_k, slices * inter] [gate | up]
@@ -76,6 +106,7 @@ def _act_delta_kernel(
     ACTIVATION_TYPE: tl.constexpr,
     GATE_FIRST: tl.constexpr,
     INTERLEAVED: tl.constexpr,
+    SWIGLU_LIMIT: tl.constexpr,  # 0 disables the clamped-SwiGLU branches.
     QUANT_GROUP: tl.constexpr,  # 0 disables the additional FP8 output.
     WHOLE_ROW: tl.constexpr,  # Match upstream's whole-row rounding.
     QUANT_BLOCKSCALED: tl.constexpr,  # Block-scaled codes + scale atoms instead.
@@ -116,7 +147,8 @@ def _act_delta_kernel(
             # The delta is always contiguous [gate | up].
             dg = tl.load(delta_row + offs, mask=mask & valid, other=0.0).to(tl.float32)
             g += dg
-        act = apply_activation(g, ACTIVATION_TYPE)
+        # The clamp sees the adapted pre-activation, as the base layer's does.
+        act = apply_activation(clamp_swiglu_gate(g, SWIGLU_LIMIT), ACTIVATION_TYPE)
         if NUM_SLICES == 2:
             u = tl.load(gateup_row + up_offs, mask=mask & valid, other=0.0).to(
                 tl.float32
@@ -128,7 +160,7 @@ def _act_delta_kernel(
                     other=0.0,
                 ).to(tl.float32)
                 u += du
-            act = act * u
+            act = act * clamp_swiglu_up(u, SWIGLU_LIMIT)
         act_bf16 = act.to(act_out_ptr.dtype.element_ty)
 
         tl.store(act_out_row + offs, act_bf16, mask=mask & valid)
@@ -254,11 +286,14 @@ def act_delta(
     gate_first: bool = True,
     interleaved: bool = False,
     activation: str = "silu",
+    swiglu_limit: float | None = None,
     act_quant: tuple[torch.Tensor, torch.Tensor, int] | BlockScaledRows | None = None,
 ) -> None:
     """Add LoRA deltas, apply activation, and optionally quantize the down input.
 
-    FP8 uses (codes, scales, group width); block-scaled formats use BlockScaledRows.
+    ``swiglu_limit`` clamps a gated SiLU's gate (max) and up (both sides)
+    after the delta is added. FP8 uses (codes, scales, group width);
+    block-scaled formats use BlockScaledRows.
     """
     ActivationFn.parse(activation)
     num_pairs = topk_ids.numel()
@@ -301,6 +336,9 @@ def act_delta(
         ACTIVATION_TYPE=activation,
         GATE_FIRST=gate_first,
         INTERLEAVED=interleaved,
+        SWIGLU_LIMIT=swiglu_limit_arg(
+            swiglu_limit, activation=activation, num_slices=num_slices
+        ),
         QUANT_GROUP=group,
         WHOLE_ROW=whole_row,
         BLOCK_SIZE=block_size,
