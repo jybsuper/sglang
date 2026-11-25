@@ -2548,6 +2548,8 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
         if (
             self.enable_flashinfer_trtllm_moe
             or get_moe_runner_backend().is_flashinfer_megamoe()
+            # lora_* runners read the checkpoint-form scales.
+            or get_moe_runner_backend().is_lora()
         ):
             layer.w13_blockscale_swizzled = None
         else:
@@ -2571,6 +2573,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
         if (
             self.enable_flashinfer_trtllm_moe
             or get_moe_runner_backend().is_flashinfer_megamoe()
+            or get_moe_runner_backend().is_lora()
         ):
             layer.w2_blockscale_swizzled = None
         else:
