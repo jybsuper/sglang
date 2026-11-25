@@ -520,7 +520,9 @@ class TestMxfp4MoEMethodContract(CustomTestCase):
 
 
 class TestMxfp4MarlinPlatformGate(CustomTestCase):
-    def test_sm100_is_admitted_under_lora_marlin_only(self):
+    def test_sm100_is_admitted_under_marlin_runners(self):
+        # sglang-miles admits SM100 for MXFP4 Marlin under every Marlin runner, so
+        # both reach the layer-constraint check (main admits it under lora_marlin only).
         from sglang.srt.layers.quantization import mxfp4_marlin_moe
 
         method = Mxfp4MarlinMoEMethod(
@@ -543,7 +545,7 @@ class TestMxfp4MarlinPlatformGate(CustomTestCase):
             ),
         ):
             for backend, error in (
-                (MoeRunnerBackend.MARLIN, "requires SM90 or SM120"),
+                (MoeRunnerBackend.MARLIN, "does not satisfy Marlin"),
                 (MoeRunnerBackend.LORA_MARLIN, "does not satisfy Marlin"),
             ):
                 with (

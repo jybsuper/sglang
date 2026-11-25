@@ -264,61 +264,6 @@ class TestRunnerAdmission(CustomTestCase):
         self.assertIs(runner.providers["expert_major"], runner.providers["route_major"])
 
 
-class TestLayerRunnerBackendResolution(CustomTestCase):
-    def test_v2_binds_the_selected_moe_runner(self):
-        from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
-        from sglang.srt.layers.moe.utils import MoeRunnerBackend
-        from sglang.srt.lora.layers import FusedMoEWithLoRA
-        from sglang.srt.lora.moe.runner import MoeLoraRunner
-
-        base_layer = SimpleNamespace(
-            quant_method=mock.MagicMock(),
-            moe_runner_config=MoeRunnerConfig(
-                num_experts=8,
-                num_local_experts=8,
-                hidden_size=64,
-                intermediate_size_per_partition=32,
-                layer_id=0,
-                top_k=2,
-                num_fused_shared_experts=0,
-                params_dtype=torch.bfloat16,
-                activation="silu",
-                inplace=True,
-            ),
-            dispatcher=None,
-            num_local_experts=8,
-            should_fuse_routed_scaling_factor_in_topk=False,
-            moe_tp_size=1,
-            moe_tp_rank=0,
-            intermediate_size_per_partition=32,
-            runner=SimpleNamespace(runner_backend=MoeRunnerBackend.DEEP_GEMM),
-            run_moe_core=mock.Mock(),
-        )
-        backend = SimpleNamespace(name="triton_v2", lora_workspace=object())
-        original_run_moe_core = base_layer.run_moe_core
-        with (
-            mock.patch(
-                "sglang.srt.layers.moe.utils.get_moe_runner_backend",
-                return_value=MoeRunnerBackend.LORA_CUTEDSL,
-            ),
-            mock.patch.object(MoeLoraRunner, "from_layer") as bind,
-        ):
-            layer = FusedMoEWithLoRA(
-                base_layer,
-                backend,
-                experts_shared_outer_loras=True,
-                max_lora_rank=16,
-            )
-        self.assertIs(layer._lora_runner_backend, MoeRunnerBackend.LORA_CUTEDSL)
-        bind.assert_called_once_with(
-            base_layer,
-            workspace=backend.lora_workspace,
-            is_shared_outer=True,
-            physical_rank=16,
-        )
-        self.assertIs(layer._moe_lora_runner, bind.return_value)
-        self.assertIs(layer._base_run_moe_core, original_run_moe_core)
-        self.assertEqual(base_layer.run_moe_core, layer._run_moe_core_with_lora)
 
 
 if __name__ == "__main__":

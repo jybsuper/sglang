@@ -212,6 +212,7 @@ class TestShouldApplyLoRAGate(CustomTestCase):
         moe.quant_method = moe.dispatcher = None
         moe.num_local_experts = moe.intermediate_size_per_partition = 8
         moe.moe_tp_size, moe.moe_tp_rank = 1, 0
+        moe.moe_ep_size, moe.moe_ep_rank = 1, 0
         moe.should_fuse_routed_scaling_factor_in_topk = False
 
         manager = self._manager([], {"qkv_proj"})
