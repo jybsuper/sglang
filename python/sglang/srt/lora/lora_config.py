@@ -22,6 +22,13 @@ from huggingface_hub import snapshot_download
 logger = logging.getLogger(__name__)
 
 
+def load_adapter_config(path: str) -> dict:
+    if not os.path.isdir(path):
+        path = snapshot_download(path, allow_patterns=["adapter_config.json"])
+    with open(os.path.join(path, "adapter_config.json"), "r") as f:
+        return json.load(f)
+
+
 class LoRAConfig:
     def __init__(
         self,
@@ -75,14 +82,7 @@ class LoRAConfig:
     def get_lora_config(self, dummy=False):
         if dummy:
             raise NotImplementedError()
-        else:
-            if not os.path.isdir(self.path):
-                weights_dir = snapshot_download(self.path, allow_patterns=["*.json"])
-            else:
-                weights_dir = self.path
-            config_name = "adapter_config.json"
-            with open(os.path.join(weights_dir, config_name), "r") as f:
-                return json.load(f)
+        return load_adapter_config(self.path)
 
     def get_added_tokens_config(self):
         """Load added tokens from the LoRA adapter if the file exists."""

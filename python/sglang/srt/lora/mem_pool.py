@@ -1148,6 +1148,8 @@ class LoRAMemoryPool:
 
             fused_moe = self._get_fused_shared_moe(self.base_model, layer_id)
             for name, weights in layer_weights.items():
+                if name in skipped_weight_names:
+                    continue
                 cache_name = name
                 if fused_moe is not None and re.search(r"\.shared_experts?\.", name):
                     assert fused_moe.num_fused_shared_experts == 1
@@ -1683,6 +1685,8 @@ class LoRAMemoryPool:
 
             # load vocab_emb and lm_head
             for name, weights in lora_adapter.embedding_layers.items():
+                if name in skipped_weight_names:
+                    continue
                 target_module = get_target_module_name(name, self.target_modules)
                 if (
                     target_module == "embed_tokens"

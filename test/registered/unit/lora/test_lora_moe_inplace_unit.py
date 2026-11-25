@@ -128,6 +128,51 @@ class FusedMoEWithLoRAOwnerPartitionTest(unittest.TestCase):
         for name in ("moe_tp_rank", "moe_tp_size", "moe_ep_rank", "moe_ep_size"):
             self.assertEqual(getattr(layer, name), getattr(base_layer, name), name)
 
+    def test_online_weight_updates_follow_the_provider_cache(self):
+        from sglang.srt.layers.moe.utils import MoeRunnerBackend
+        from sglang.srt.lora.layers import FusedMoEWithLoRA
+        from sglang.srt.lora.moe.base_gemm_provider import select_provider_cls
+        from sglang.srt.lora.moe.runner import MoeLoraRunner
+        from sglang.srt.model_executor.model_runner_components.weight_updater import (
+            _unsupported_derived_weight_cache_error,
+        )
+
+        for family, vendor, backend, has_cache in (
+            ("nvfp4", "cutedsl", MoeRunnerBackend.LORA_CUTEDSL, True),
+            ("fp8", "marlin", MoeRunnerBackend.LORA_MARLIN, True),
+            ("fp8", "cutedsl", MoeRunnerBackend.LORA_CUTEDSL, False),
+            ("bf16", "triton", MoeRunnerBackend.LORA_TRITON, False),
+        ):
+            with self.subTest(family=family, vendor=vendor):
+                runner = object.__new__(MoeLoraRunner)
+                provider_cls = select_provider_cls("expert_major", family, vendor)
+                runner.providers = {"expert_major": object.__new__(provider_cls)}
+                base = _make_base_layer()
+                base.run_moe_core = mock.Mock()
+                with (
+                    mock.patch(
+                        "sglang.srt.layers.moe.utils.get_moe_runner_backend",
+                        return_value=backend,
+                    ),
+                    mock.patch.object(MoeLoraRunner, "from_layer", return_value=runner),
+                    mock.patch(
+                        "sglang.kernels.ops.gemm.bf16_fp32.hpc_bf16xfp32_gemm_enabled",
+                        return_value=False,
+                    ),
+                ):
+                    layer = FusedMoEWithLoRA(
+                        base,
+                        types.SimpleNamespace(
+                            name="triton_v2", lora_workspace=object()
+                        ),
+                        max_lora_rank=16,
+                    )
+                    error = _unsupported_derived_weight_cache_error(layer)
+                if has_cache:
+                    self.assertIn("Online weight updates are not supported", error)
+                else:
+                    self.assertIsNone(error)
+
 
 if __name__ == "__main__":
     unittest.main()

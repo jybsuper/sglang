@@ -148,6 +148,11 @@ def run_resolution_pipeline(server_args: Any) -> None:
 
     run_hook(handle_pd_disaggregation, server_args)
 
+    # LoRA v2 picks its MoE runner before any handler consumes "auto".
+    from sglang.srt.arg_groups.lora_hook import resolve_lora_moe_runner_backend
+
+    run_post_process_pass(server_args, resolve_lora_moe_runner_backend)
+
     from sglang.srt.arg_groups.kv_cache_hook import (
         handle_cache_compatibility,
         handle_kv4_compatibility,

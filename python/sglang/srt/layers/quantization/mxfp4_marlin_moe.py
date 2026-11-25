@@ -7,7 +7,7 @@ import torch
 from torch.nn import Module
 
 from sglang.srt.layers.moe.moe_runner.marlin import MarlinMoeQuantInfo
-from sglang.srt.layers.moe.utils import MoeRunnerBackend
+from sglang.srt.layers.moe.utils import MoeRunnerBackend, get_moe_runner_backend
 from sglang.srt.runtime_context import get_platform
 from sglang.srt.utils import log_info_on_rank0, round_up, set_weight_attrs
 
@@ -63,9 +63,17 @@ class Mxfp4MarlinMoEMethod:
     def create_moe_runner(self, layer, moe_runner_config):
         from sglang.srt.layers.moe.moe_runner import MoeRunner
 
+        moe_runner_backend = get_moe_runner_backend()
+        if moe_runner_backend.is_lora():
+            # lora_marlin: the LoRA MoE runner owns the forward of these tiles.
+            self._moe_runner_backend = moe_runner_backend
+            self.runner = None
+            return
         self.runner = MoeRunner(MoeRunnerBackend.MARLIN, moe_runner_config)
 
     def get_moe_runner_backend(self, layer):
+        if self.runner is None:
+            return self._moe_runner_backend
         return self.runner.runner_backend
 
     def get_moe_routing_method_type(
@@ -235,7 +243,7 @@ class Mxfp4MarlinMoEMethod:
             logger,
             f"Preparing MXFP4 experts for Marlin backend (layer: {self.prefix})...",
         )
-        if self.runner.config.gemm1_alpha is not None:
+        if layer.moe_runner_config.gemm1_alpha is not None:
             deinterleave_moe_mxfp4_w13_for_marlin(
                 layer, reuse_parameter_storage=reuse_parameter_storage
             )

@@ -269,9 +269,10 @@ class BeamMoE(nn.Module):
         self.tp_size = get_parallel().moe_tp_size
         self.ep_size = get_parallel().moe_ep_size
         backend = get_moe_runner_backend()
+        a2a_backend = get_moe_a2a_backend()
         quant_scheme = get_beam_quantization(quant_config)
         supported_runners = get_beam_supported_moe_runners(quant_scheme)
-        if get_moe_a2a_backend().is_flashinfer_megamoe():
+        if a2a_backend.is_flashinfer_megamoe():
             # MegaMOE dispatches each DP rank's own tokens and combines them back
             # complete, so the post-experts all-reduces below are skipped.
             # Only the ModelOpt NVFP4 MoE method has MegaMOE weight hooks.
@@ -284,14 +285,11 @@ class BeamMoE(nn.Module):
                     "Beam supports the flashinfer_megamoe all-to-all only for "
                     "ModelOpt NVFP4 with the flashinfer_megamoe runner"
                 )
-        elif (
-            backend.value not in supported_runners
-            or not get_moe_a2a_backend().is_none()
-        ):
+        elif backend.value not in supported_runners or not a2a_backend.is_none():
             raise ValueError(
-                "Beam supports the auto or triton MoE runner for BF16/FP8 "
-                "and flashinfer_trtllm for NVFP4, with no MoE all-to-all; "
-                "NVFP4 also supports the flashinfer_megamoe all-to-all"
+                f"Beam {quant_scheme} MoE got runner {backend.value!r} "
+                f"with all-to-all {a2a_backend.value!r}. "
+                f"Standard dispatch accepts {supported_runners}."
             )
         self.gate = ReplicatedLinear(
             config.hidden_size,
@@ -1274,9 +1272,9 @@ def get_beam_quantization(quant_config: Optional[QuantizationConfig]) -> Optiona
 
 def get_beam_supported_moe_runners(quant_scheme: Optional[str]) -> Tuple[str, ...]:
     return {
-        "bf16": ("auto", "triton"),
-        "fp8": ("auto", "triton"),
-        "nvfp4": ("flashinfer_trtllm",),
+        "bf16": ("auto", "triton", "lora_cutedsl", "lora_triton"),
+        "fp8": ("auto", "triton", "lora_marlin", "lora_cutedsl", "lora_triton"),
+        "nvfp4": ("flashinfer_trtllm", "lora_marlin", "lora_cutedsl"),
     }.get(quant_scheme, ())
 
 

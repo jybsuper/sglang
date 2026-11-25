@@ -2369,11 +2369,6 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
     def __init__(self, quant_config: ModelOptFp4Config):
         self.quant_config = quant_config
         moe_runner_backend = get_moe_runner_backend()
-        self._lora_marlin = moe_runner_backend.is_lora_marlin()
-        if moe_runner_backend.is_lora() and not self._lora_marlin:
-            raise ValueError(
-                "NVFP4 MoE LoRA requires --moe-runner-backend lora_marlin."
-            )
         if (moe_runner_backend.is_auto() or moe_runner_backend.is_lora()) and is_cuda():
             capability = get_device_capability()
             use_marlin_fallback = (8, 0) <= capability < (10, 0)
@@ -2737,6 +2732,9 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
         )
         if moe_runner_backend.is_lora_marlin():
             moe_runner_backend = MoeRunnerBackend.MARLIN
+        elif moe_runner_backend.is_lora():
+            # lora_cutedsl reads the canonical weights and all scales as loaded.
+            return
         use_nvfp4_dispatch = _use_nvfp4_dispatch()
         if moe_runner_backend.is_marlin():
             # Marlin supports only a single shared w1/w3 weight scale, so collapse
